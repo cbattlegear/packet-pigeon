@@ -47,7 +47,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const [selection, setSelection] = useState<{ key: RadioKey; id: string } | null>(null)
   const radioKey = live ?? (offlineChoice === null ? last : offlineChoice || null)
   const data = status.key === radioKey ? status.data : null
-  const canSync = snapshot.phase === 'ready' && snapshot.transport === 'usb'
+  const canSync = snapshot.phase === 'ready'
   const items = useMemo(() => data ? conversations(data) : [], [data])
   const read = useMemo(() => new Set(data?.readMessages), [data?.readMessages])
   const formatTime = useMemo(() => clockFormatter(locale, preferences.clock).format, [locale, preferences.clock])
@@ -104,8 +104,12 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
               ? canSync ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
           </button>
-          <p>{snapshot.transport === 'bluetooth' ? 'Connect over USB to sync queued messages.'
-            : 'Receipts are saved before requesting the next. Interruptions can still lose a message.'}</p>
+          <p>Receipts are saved before requesting the next. Interruptions can still lose a message.</p>
+          {snapshot.transport === 'bluetooth' && (
+            <p>Bluetooth may truncate or drop messages; incomplete text can look complete. The radio removes each
+              message from its queue before replying, so missing content cannot be recovered from the radio. Use USB
+              for safer sync.</p>
+          )}
         </div>
         {radioKey && data && (
           <ConversationList items={items} selectedId={selected?.id} status={status} read={read}

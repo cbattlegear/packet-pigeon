@@ -3,11 +3,15 @@ import { setTimeout } from 'node:timers/promises'
 import test from 'node:test'
 import { IDBFactory } from 'fake-indexeddb'
 import { CompanionSession } from './index.ts'
+import { MessageSync } from '../integration/message-sync.ts'
 import { SessionCache } from '../integration/session-cache.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import { chooseBluetoothDevice, getWebBluetoothSupport, meshCoreBluetooth } from './web-bluetooth.ts'
 
 const encode = (value) => new TextEncoder().encode(value)
+const directReceipt = (text) => Uint8Array.of(
+  16, 8, 0, 0, 1, 2, 3, 4, 5, 6, 0xff, 0, 42, 0, 0, 0, ...encode(text),
+)
 
 function ownership() {
   let held = false
@@ -23,10 +27,14 @@ function ownership() {
   }
 }
 
-function fixture({ writeWithoutResponse = false, fragmentedReceipt = false, directMessaging = false } = {}) {
+function fixture({
+  writeWithoutResponse = false, queuedMessages = [], directMessaging = false,
+  notificationLimit = Infinity, queueWrite,
+} = {}) {
   const device = new EventTarget()
   const notifications = new EventTarget()
   const writes = []
+  const queue = [...queuedMessages]
   const state = {
     chooses: 0, connects: 0, closes: 0, subscriptions: 0, connected: false,
     identity: 0xab, missingService: false, rejectSubscription: false, rejectClose: false, rejectConnects: 0,
@@ -64,17 +72,28 @@ function fixture({ writeWithoutResponse = false, fragmentedReceipt = false, dire
       notify(Uint8Array.of(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0))
     } else if (command[0] === 13 && directMessaging) {
       notify(Uint8Array.of(0))
-    } else if (command[0] === 10 && fragmentedReceipt) {
-      const receipt = Uint8Array.of(7, 1, 2, 3, 4, 5, 6, 0xff, 0, 1, 0, 0, 0, ...encode('x'.repeat(100)))
-      state.dequeued++
-      notify(receipt.slice(0, 80))
-      notify(receipt.slice(80))
+    } else if (command[0] === 10) {
+      const fragments = queue.shift()
+      if (fragments) {
+        state.dequeued++
+        for (const fragment of fragments) {
+          if (fragment.length <= notificationLimit) notify(fragment)
+        }
+      } else {
+        notify(Uint8Array.of(10))
+      }
     } else assert.fail(`Unexpected raw command ${command[0]}`)
   }
   const rx = Object.assign(new EventTarget(), {
     properties: { write: !writeWithoutResponse, writeWithoutResponse: true },
-    async writeValueWithResponse(bytes) { responses(bytes, 'with') },
-    async writeValueWithoutResponse(bytes) { responses(bytes, 'without') },
+    async writeValueWithResponse(bytes) {
+      responses(bytes, 'with')
+      if (bytes[0] === 10) await queueWrite?.()
+    },
+    async writeValueWithoutResponse(bytes) {
+      responses(bytes, 'without')
+      if (bytes[0] === 10) await queueWrite?.()
+    },
   })
   const drop = () => {
     state.connected = false
@@ -204,23 +223,177 @@ test('checks the radio identity before syncing after Bluetooth recovery', async 
   assert.equal(radio.state.connected, false)
 })
 
-test('leaves a receipt that would span notifications queued across Bluetooth connection and recovery', async () => {
-  const radio = fixture({ fragmentedReceipt: true })
-  const session = new CompanionSession({
-    bluetoothEnvironment: radio.environment, locks: ownership(), retryDelays: [1],
-  })
-  await session.connectBluetooth()
-  for (let attempt = 0; attempt < 2; attempt++) {
-    assert.equal(session.getSnapshot().transport, 'bluetooth')
-    assert.throws(() => session.reserveQueuedMessage('ab'.repeat(32)), /Connect over USB/)
-    assert.equal(radio.state.dequeued, 0)
-    assert(!radio.writes.some(({ bytes }) => bytes[0] === 10))
-    if (attempt === 0) {
-      radio.drop()
-      await until(session, ({ phase }) => phase === 'ready')
+test('manually syncs Bluetooth receipts, retaining the save barrier and ownership across disconnect', async () => {
+  const receipt = directReceipt('Hello over Bluetooth')
+  const radio = fixture({ queuedMessages: [[receipt], [receipt]] })
+  const locks = ownership()
+  const factory = new IDBFactory()
+  const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks })
+  const other = new CompanionSession({ bluetoothEnvironment: radio.environment, locks })
+  const attempts = []
+  let fail = true
+  let saving = false
+  let releaseSave
+  const saveBarrier = new Promise((resolve) => { releaseSave = resolve })
+  const openStorage = async () => {
+    const storage = await openRadioStorage(factory)
+    return {
+      ...storage,
+      update: async (key, update) => {
+        attempts.push(update.messages[0].id)
+        if (fail) {
+          saving = true
+          await saveBarrier
+          fail = false
+          throw new Error('Disk unavailable')
+        }
+        await storage.update(key, update)
+      },
     }
   }
-  await session.disconnect()
+  const sync = new MessageSync(session, openStorage)
+  let disconnecting
+  let syncing
+  try {
+    await session.connectBluetooth()
+    radio.notify(Uint8Array.of(0x83))
+    await setTimeout(0)
+    assert(!radio.writes.some(({ bytes }) => bytes[0] === 10))
+    syncing = sync.sync()
+    for (let step = 0; !saving && step < 100; step++) await setTimeout(2)
+    assert(saving)
+    await setTimeout(5)
+    assert.equal(radio.state.dequeued, 1)
+    assert.equal(radio.writes.filter(({ bytes }) => bytes[0] === 10).length, 1)
+    releaseSave()
+    await syncing
+    assert.equal(radio.state.dequeued, 1)
+    assert.equal(sync.getSnapshot().pending, true)
+    assert.match(sync.getSnapshot().error, /Disk unavailable/)
+    assert.throws(() => session.reserveQueuedMessage('ab'.repeat(32)), /Save the previous/)
+
+    disconnecting = session.disconnect()
+    await other.connectBluetooth()
+    assert.equal(other.getSnapshot().error.code, 'ownership')
+    assert.equal(radio.state.dequeued, 1)
+
+    await sync.sync()
+    await disconnecting
+    assert.equal(sync.getSnapshot().pending, false)
+    assert.equal(attempts[0], attempts[1])
+    await other.connectBluetooth()
+    assert.equal(other.getSnapshot().phase, 'ready')
+    assert.equal(radio.state.dequeued, 1)
+
+    const resumed = new MessageSync(other, openStorage)
+    await resumed.sync()
+    assert.equal(resumed.getSnapshot().error, null)
+    assert.equal(radio.state.dequeued, 2)
+    assert.equal(radio.writes.filter(({ bytes }) => bytes[0] === 10).length, 3)
+    const messages = resumed.getSnapshot().data.messages
+    assert.deepEqual(messages.map(({ text }) => text), ['Hello over Bluetooth', 'Hello over Bluetooth'])
+    assert.notEqual(messages[0].id, messages[1].id)
+    assert.equal(messages[0].rawHex, Buffer.from(receipt).toString('hex'))
+  } finally {
+    releaseSave()
+    if (syncing) await syncing
+    if (sync.getSnapshot().pending) await sync.sync()
+    if (disconnecting) await disconnecting
+    await session.disconnect()
+    await other.disconnect()
+  }
+})
+
+test('saves a Bluetooth receipt received before its GATT write fails', async () => {
+  const receipt = directReceipt('Received before write error')
+  const write = Promise.withResolvers()
+  const radio = fixture({ queuedMessages: [[receipt], [directReceipt('Next')]], queueWrite: () => write.promise })
+  const session = new CompanionSession({
+    bluetoothEnvironment: radio.environment, locks: ownership(), retryDelays: [], timeoutMs: 1000,
+  })
+  const factory = new IDBFactory()
+  const sync = new MessageSync(session, () => openRadioStorage(factory))
+  let syncing
+  try {
+    await session.connectBluetooth()
+    syncing = sync.sync()
+    for (let step = 0; !sync.getSnapshot().pending && step < 100; step++) await setTimeout(2)
+    assert.equal(sync.getSnapshot().pending, true)
+    write.reject(new DOMException('Write failed', 'NetworkError'))
+    await syncing
+    assert.match(sync.getSnapshot().error, /write/)
+    assert.equal(sync.getSnapshot().pending, false)
+    assert.equal(sync.getSnapshot().data.messages[0].text, 'Received before write error')
+    assert.equal(radio.state.dequeued, 1)
+    assert.equal(radio.writes.filter(({ bytes }) => bytes[0] === 10).length, 1)
+  } finally {
+    write.resolve()
+    if (syncing) await syncing
+    await session.disconnect()
+  }
+})
+
+test('saves a malformed Bluetooth fragment as raw bytes and stops queue sync', async () => {
+  const receipt = directReceipt('A fragmented message')
+  const first = receipt.slice(0, 8)
+  const radio = fixture({ queuedMessages: [[first, receipt.slice(8)], [directReceipt('Next')]] })
+  const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks: ownership() })
+  const factory = new IDBFactory()
+  const sync = new MessageSync(session, () => openRadioStorage(factory))
+  try {
+    await session.connectBluetooth()
+    await sync.sync()
+    assert.match(sync.getSnapshot().error, /unrecognized/)
+    assert.equal(radio.state.dequeued, 1)
+    assert.equal(radio.writes.filter(({ bytes }) => bytes[0] === 10).length, 1)
+    assert.equal(sync.getSnapshot().data.messages[0].rawHex, Buffer.from(first).toString('hex'))
+    assert.equal(sync.getSnapshot().data.messages[0].conversationId, 'unsupported')
+  } finally {
+    await session.disconnect()
+  }
+})
+
+test('a valid-looking Bluetooth fragment can be saved as incomplete text', async () => {
+  const receipt = directReceipt('Partial message')
+  const first = receipt.slice(0, 16 + 'Partial'.length)
+  const radio = fixture({ queuedMessages: [[first, receipt.slice(first.length)]] })
+  const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks: ownership() })
+  const factory = new IDBFactory()
+  const sync = new MessageSync(session, () => openRadioStorage(factory))
+  try {
+    await session.connectBluetooth()
+    await sync.sync()
+    assert.equal(radio.state.dequeued, 1)
+    assert.equal(sync.getSnapshot().data.messages[0].text, 'Partial')
+    assert.equal(sync.getSnapshot().data.messages[0].rawHex, Buffer.from(first).toString('hex'))
+  } finally {
+    await session.disconnect()
+  }
+})
+
+test('reports a dropped oversized Bluetooth response without draining another receipt', async () => {
+  const oversized = directReceipt('x'.repeat(150))
+  const notificationLimit = 165
+  assert(oversized.length > notificationLimit)
+  const radio = fixture({ notificationLimit, queuedMessages: [[oversized], [directReceipt('Next')]] })
+  const session = new CompanionSession({
+    bluetoothEnvironment: radio.environment, locks: ownership(), timeoutMs: 25,
+  })
+  const factory = new IDBFactory()
+  const sync = new MessageSync(session, () => openRadioStorage(factory))
+  try {
+    await session.connectBluetooth()
+    await sync.sync()
+    assert.match(sync.getSnapshot().error, /timed out/)
+    assert.equal(sync.getSnapshot().pending, false)
+    assert.equal(sync.getSnapshot().data, null)
+    assert.equal(radio.state.dequeued, 1)
+    assert.equal(radio.writes.filter(({ bytes }) => bytes[0] === 10).length, 1)
+    await until(session, ({ phase }) => phase === 'error')
+    assert.equal(session.getSnapshot().error.code, 'timeout')
+  } finally {
+    await session.disconnect()
+  }
 })
 
 test('ignores split Bluetooth adverts even when a continuation looks like a complete advert', async () => {
@@ -249,8 +422,8 @@ test('ignores split Bluetooth adverts even when a continuation looks like a comp
   }
 })
 
-test('sends direct commands over Bluetooth while keeping queued receipts inaccessible', async () => {
-  const radio = fixture({ directMessaging: true, fragmentedReceipt: true })
+test('sends direct commands over Bluetooth without automatically draining queued receipts', async () => {
+  const radio = fixture({ directMessaging: true, queuedMessages: [[directReceipt('Waiting')]] })
   const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks: ownership() })
   const pushes = []
   session.subscribeToPushes((push) => pushes.push(push))
@@ -259,7 +432,6 @@ test('sends direct commands over Bluetooth while keeping queued receipts inacces
   assert.deepEqual(receipt, { route: 'direct', expectedAck: '01020304', timeoutMs: 1000 })
   assert.deepEqual([...pushes[0].payload], [1, 2, 3, 4, 42, 0, 0, 0])
   await session.resetDirectPath('ab'.repeat(32), 'bc'.repeat(32))
-  assert.throws(() => session.reserveQueuedMessage('ab'.repeat(32)), /Connect over USB/)
   assert.equal(radio.state.dequeued, 0)
   assert(!radio.writes.some(({ bytes }) => bytes[0] === 10))
   await session.disconnect()

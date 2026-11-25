@@ -179,7 +179,7 @@ function App() {
             )}
           </div>
           <p className="connection-warning" id="connection-warning">
-            Message sync is manual and requires USB.
+            Message sync is manual.
           </p>
           <OfflineStatus />
         </div>

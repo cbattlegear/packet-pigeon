@@ -304,11 +304,6 @@ export class CompanionSession {
     if (this.snapshot.phase !== 'ready' || !link || this.snapshot.device?.publicKey !== publicKey) {
       throw new CompanionError('disconnected', 'Connect the selected radio before syncing messages.')
     }
-    // BLE can split a dequeued message across notifications without exposing
-    // its total length. Only the framed USB transport can safely drain it.
-    if (this.connection?.kind !== 'usb') {
-      throw new CompanionError('unsupported-transport', 'Connect over USB to sync queued messages.')
-    }
     if (this.receiptHolds.size) {
       throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
     }
