@@ -1,4 +1,5 @@
 import './App.css'
+import { OfflineStatus } from './offline/OfflineStatus.tsx'
 
 function App() {
   return (
@@ -13,7 +14,10 @@ function App() {
             <p className="brand-description">Open source MeshCore web UI</p>
           </div>
         </div>
-        <p className="connection-status">Radio integration not yet available</p>
+        <div>
+          <p className="connection-status">Radio integration not yet available</p>
+          <OfflineStatus />
+        </div>
       </header>
 
       <nav className="sidebar" aria-label="Main navigation">

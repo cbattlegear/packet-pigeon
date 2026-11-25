@@ -26,8 +26,34 @@ npm run preview
 
 `lint` runs the standard scaffold's Oxlint configuration. `build` runs the
 TypeScript project build and produces the static site in `dist`. `preview`
-serves that build locally; it is not a production server. There is no automated
-test suite yet; add focused tests alongside the first real behavior.
+serves that build locally; use a static web host for production.
+
+## Static hosting and offline browsing
+
+Run `npm ci` and `npm run build`, then upload the complete contents of `dist`
+to an HTTPS static host. The same build works at the origin root or under a
+folder such as `/packet-pigeon/`. Serve `index.html` for that directory, redirect
+directory URLs to the trailing slash form, and serve files with their usual
+content types. Share the directory URL or direct links such as
+`/packet-pigeon/#about`. Fragment links work on reload without server rewrites.
+For future USB radio connections, use desktop Chrome or Edge over HTTPS or
+localhost.
+
+Open the production build online and wait for **App available offline** in the
+header. The service worker caches the built HTML and assets for its deployment
+directory.
+Keep `sw.js` revalidatable (for example, `Cache-Control: no-cache`). An update
+waits until all tabs using the previous version are closed. If a new cache fails
+to install, the previous version stays active. Cache cleanup is limited to old
+shell builds in the same directory. This leaves local history and other
+browser storage available to the app. Use the same origin and subfolder when
+opening the app offline. Deployments on different origins each have their own
+browser storage.
+
+To smoke-test the production cache locally, open the URL from `npm run preview`,
+wait for **App available offline**, switch the browser offline, and open
+the same URL in another tab. After building, run
+`node --test tests/offline-worker.test.mjs` to check cache scope and fallback.
 
 ## Workstream boundaries
 
@@ -50,5 +76,4 @@ Keep work small and split by behavior, rather than creating empty layers up fron
 The radio directory and integration layer are intentionally not scaffolded.
 Add a router or other dependencies only when a concrete feature needs them.
 Agree on ownership before parallel changes to shared shell files, global styles,
-or package manifests. CI, deployment, and license selection are outside this
-starter's scope.
+or package manifests. CI and license selection are outside this starter's scope.
