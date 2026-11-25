@@ -1,4 +1,5 @@
-import type { CompanionMessage, CompanionSnapshot } from '../radio/index.ts'
+import type { CompanionMessage, CompanionPush, CompanionSnapshot } from '../radio/index.ts'
+import { decodeAdvert } from '../radio/discovery-commands.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioKey, RadioUpdate, StoredMessage } from '../storage/index.ts'
 import { storedContact } from './contact-record.ts'
@@ -6,6 +7,7 @@ import { storedContact } from './contact-record.ts'
 type SessionSource = {
   getSnapshot(): CompanionSnapshot
   subscribe(listener: () => void): () => void
+  subscribeToPushes?(listener: (push: CompanionPush) => void): () => void
 }
 
 type CacheStatus = {
@@ -43,6 +45,20 @@ export class SessionCache {
   constructor(session: SessionSource, openStorage = openRadioStorage) {
     this.openStorage = openStorage
     session.subscribe(() => this.capture(session.getSnapshot()))
+    session.subscribeToPushes?.((push) => {
+      const { device, phase, contacts } = session.getSnapshot()
+      if (!device || (phase !== 'ready' && phase !== 'syncing')) return
+      const advert = decodeAdvert(push.code, push.payload)
+      if (!advert) return
+      const { publicKey, added } = advert
+      const contact = advert.contact ?? contacts.find((record) => record.publicKey === publicKey)
+      this.enqueue(radioKeyFromPublicKey(device.publicKey), { discovery: { upsert: [{
+        publicKey, heardAt: Date.now(), addedWhenHeard: added,
+        ...(contact ? {
+          name: contact.name, type: contact.type, latitude: contact.latitude, longitude: contact.longitude,
+        } : {}),
+      }] } })
+    })
     this.capture(session.getSnapshot())
   }
 
@@ -79,7 +95,7 @@ export class SessionCache {
     if (this.savedContacts !== snapshot.contacts
       && (stage === 'channels' || stage === 'messages' || snapshot.phase === 'ready')) {
       this.savedContacts = snapshot.contacts
-      this.enqueue(key, { contacts: snapshot.contacts.map(storedContact) })
+      this.enqueue(key, { contacts: snapshot.contacts.map(storedContact), contactsCapturedAt: Date.now() })
     }
     if (!this.channelsSaved && (stage === 'messages' || snapshot.phase === 'ready')) {
       this.channelsSaved = true

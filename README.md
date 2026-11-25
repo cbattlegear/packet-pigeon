@@ -118,6 +118,24 @@ changes and how many removals succeeded if a batch stops early. Use **Export
 selected** for a JSON copy or **Copy public key** from a contact's details.
 Exports include public keys and any advertised positions.
 
+## Discovered adverts
+
+Open **Discovery** from Contacts or the sidebar. The app records adverts
+heard by the connected radio. Search and filter by role, path hash width, or
+whether a node is already a contact. Load advert paths from the radio's local
+cache before sorting by hops or filtering by hash width. The firmware looks up
+paths by a public-key prefix. Packet Pigeon skips lookups with known collisions.
+
+Select a cached radio to browse disconnected. Export selected adverts or import
+a Packet Pigeon discovery JSON file. Forgetting an advert clears it from local
+history. **Add selected to radio** adds eligible nodes to the connected radio.
+Use **Show discovered nodes on map** to view entries with positions.
+
+Read or save the connected radio's auto-add policy from Discovery. Selected-role
+mode applies the role checkboxes. The hop limit and overwrite setting are
+available when supported by firmware. Discovery browsing and path lookup use
+passive adverts and a local cache lookup, with no active mesh discovery request.
+
 ## Static hosting and offline browsing
 
 Run `npm ci` and `npm run build`, then upload the complete contents of `dist`

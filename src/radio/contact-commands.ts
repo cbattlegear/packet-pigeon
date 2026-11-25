@@ -3,7 +3,10 @@ import type { CompanionContact } from './protocol.ts'
 import { expectResponse } from './serial-link.ts'
 import type { SerialLink } from './serial-link.ts'
 
-export type NewContact = { publicKey: string; name: string; type: 1 | 2 | 3 | 4 }
+export type NewContact = {
+  publicKey: string; name: string; type: 1 | 2 | 3 | 4
+  position?: { latitude: number; longitude: number }
+}
 
 const addOrUpdateContact = 9
 const removeContact = 15
@@ -29,15 +32,22 @@ export function addContactCommand(input: NewContact) {
   if (input.type !== 1 && input.type !== 2 && input.type !== 3 && input.type !== 4) {
     throw new Error('Choose a supported contact role.')
   }
+  const { latitude, longitude } = input.position ?? { latitude: 0, longitude: 0 }
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+    throw new Error('The contact position is invalid.')
+  }
   const command = new Uint8Array(144)
   command[0] = addOrUpdateContact
   command.set(keyBytes(publicKey), 1)
   command[33] = input.type
   command[35] = 0xff
   command.set(bytes, 100)
+  const view = new DataView(command.buffer)
+  view.setInt32(136, Math.round(latitude * 1e6), true)
+  view.setInt32(140, Math.round(longitude * 1e6), true)
   const contact: CompanionContact = {
     publicKey, name, type: input.type, flags: 0, pathLength: 0xff, pathHex: '00'.repeat(64),
-    lastAdvertisedAt: 0, latitude: 0, longitude: 0, lastModifiedAt: 0,
+    lastAdvertisedAt: 0, latitude, longitude, lastModifiedAt: 0,
   }
   return { command, contact }
 }

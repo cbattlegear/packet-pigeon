@@ -1,3 +1,5 @@
+import type { AdvertPath } from '../radio/discovery-commands.ts'
+
 declare const radioKeyBrand: unique symbol
 export type RadioKey = string & { readonly [radioKeyBrand]: true }
 
@@ -23,6 +25,17 @@ export type StoredChannel = {
 
 export type ContactPreference = { publicKey: string; customName: string | null; favorite: boolean }
 export type ContactPreferenceEdit = { publicKey: string; customName?: string | null; favorite?: boolean }
+
+export type StoredDiscovery = {
+  publicKey: string
+  heardAt: number
+  addedWhenHeard?: boolean
+  name?: string
+  type?: number
+  latitude?: number
+  longitude?: number
+  path?: AdvertPath
+}
 
 export type StoredMessage = {
   /** Caller-generated receipt ID, reused when retrying the same write. */
@@ -62,6 +75,8 @@ export type RadioData = {
   drafts: StoredDraft[]
   preferences: LocalPreferences | null
   contactPreferences?: ContactPreference[]
+  contactsCapturedAt?: number
+  discoveries?: StoredDiscovery[]
 }
 
 export type RadioUpdate = {
@@ -71,6 +86,8 @@ export type RadioUpdate = {
   draft?: { conversationId: string; text: string | null }
   preferences?: LocalPreferences
   contactPreference?: ContactPreferenceEdit
+  contactsCapturedAt?: number
+  discovery?: { upsert?: readonly StoredDiscovery[]; remove?: readonly string[] }
 }
 
 type StorageErrorCode = 'identity' | 'update' | 'unavailable' | 'blocked' | 'open' | 'read' | 'write'
@@ -97,7 +114,7 @@ export function radioKeyFromPublicKey(publicKey: string): RadioKey {
 }
 
 function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
-  const { contacts, channels, messages, draft, preferences, contactPreference } = update
+  const { contacts, channels, messages, draft, preferences, contactPreference, discovery } = update
   const next = { ...current }
   if (contacts) {
     next.contacts = contacts.map(({ publicKey, name, details }) => ({
@@ -109,6 +126,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
         },
       } : {}),
     }))
+    if (update.contactsCapturedAt !== undefined) next.contactsCapturedAt = update.contactsCapturedAt
   }
   if (channels) {
     next.channels = channels.map(({ index, name }) => ({ index, name }))
@@ -147,6 +165,21 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
     const favorite = contactPreference.favorite ?? previous?.favorite ?? false
     next.contactPreferences = existing.filter((entry) => entry.publicKey !== publicKey)
     if (customName || favorite) next.contactPreferences.push({ publicKey, customName, favorite })
+  }
+  if (discovery) {
+    const records = new Map((current.discoveries ?? []).map((record) => [record.publicKey, record]))
+    for (const raw of discovery.upsert ?? []) {
+      const publicKey = radioKeyFromPublicKey(raw.publicKey)
+      if (!Number.isFinite(raw.heardAt) || raw.heardAt < 0) throw new RadioStorageError('update', 'Invalid advert timestamp.')
+      const previous = records.get(publicKey)
+      const newer = raw.heardAt >= (previous?.heardAt ?? 0)
+      const merged = newer ? { ...previous, ...raw, publicKey } : { ...raw, ...previous, publicKey }
+      if (previous?.path && (!raw.path || previous.path.receivedAt > raw.path.receivedAt)) merged.path = previous.path
+      else if (raw.path) merged.path = raw.path
+      records.set(publicKey, merged)
+    }
+    for (const key of discovery.remove ?? []) records.delete(radioKeyFromPublicKey(key))
+    next.discoveries = [...records.values()].sort((a, b) => b.heardAt - a.heardAt).slice(0, 1_000)
   }
   return next
 }
