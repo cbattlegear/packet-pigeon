@@ -205,6 +205,85 @@ test('applies the setup preset and hash width to the chosen radio, preserving re
   await session.disconnect()
 })
 
+test('edits saved routes and permissions with a fresh contact record, preserving other radio fields', async () => {
+  const contact = contactInfo()
+  contact[34] = 0xe1
+  const original = contact.slice()
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 1, 0, 0, 0); serial.emit(...contact); serial.emit(4, 0, 0, 0, 0); break
+      case 30: assert.deepEqual(command.slice(1), Array(32).fill(0xbc)); serial.emit(...contact); break
+      case 9: contact.set(command.slice(1), 1); serial.emit(0); break
+      case 13: contact[35] = 255; serial.emit(0); break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const session = sessionWith(port)
+  await session.connect()
+  await session.saveContactPath(key, target, 2, '0102 aabb')
+  assert.equal(contact[35], 0x42)
+  assert.deepEqual([...contact.slice(36, 42)], [1, 2, 0xaa, 0xbb, 0, 0])
+  assert.deepEqual(contact.slice(0, 35), original.slice(0, 35))
+  assert.deepEqual(contact.slice(100), original.slice(100))
+  await session.saveContactPermissions(key, target, { telemetry: true, location: false, remoteCli: true })
+  assert.equal(contact[34], 0xf3)
+  assert.equal(session.getSnapshot().contacts[0].flags, 0xf3)
+  assert.equal(session.getSnapshot().contacts[0].pathLength, 0x42)
+  await session.resetContactPath(key, target)
+  assert.equal(session.getSnapshot().contacts[0].pathLength, 0xff)
+  assert.equal(contact[34], 0xf3)
+  assert.deepEqual(port.commands.slice(3).map(([code]) => code), [30, 9, 30, 9, 30, 13])
+  await session.disconnect()
+})
+
+test('refuses ambiguous pings, correlates the trace response and cancels without a retry', async () => {
+  const first = contactInfo()
+  first[33] = 2
+  const second = first.slice()
+  second[2] = 0x09
+  let answerPing = true
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 2, 0, 0, 0); serial.emit(...first); serial.emit(...second); serial.emit(4, 0, 0, 0, 0); break
+      case 36: {
+        const prefix = command.slice(10)
+        assert.deepEqual(prefix, [0xbc, 0xbc])
+        const tag = command.slice(1, 5)
+        if (answerPing) {
+          serial.emit(0x89, 0, 2, 1, ...tag, 0, 0, 0, 0, prefix[0], 0x00, 99, 99)
+          serial.emit(0x89, 0, 2, 1, ...tag, 0, 0, 0, 0, ...prefix, 0xfa, 28)
+        }
+        serial.emit(6, 0, ...tag, 100, 0, 0, 0)
+        break
+      }
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  await session.connect()
+  await assert.rejects(session.pingContact(key, target, 1, new AbortController().signal), /more than one known radio/)
+  assert.equal(port.commands.filter(([code]) => code === 36).length, 0)
+  const reply = await session.pingContact(key, target, 2, new AbortController().signal)
+  assert.equal(reply.outboundSnrDb, -1.5)
+  assert.equal(reply.returnSnrDb, 7)
+  answerPing = false
+  const controller = new AbortController()
+  const waiting = session.pingContact(key, target, 2, controller.signal)
+  await waitFor(() => port.commands.filter(([code]) => code === 36).length === 2)
+  controller.abort(new Error('Stopped waiting for the ping.'))
+  await assert.rejects(waiting, /Stopped waiting/)
+  assert.equal(port.commands.filter(([code]) => code === 36).length, 2)
+  await session.disconnect()
+})
+
 test('a delayed channel rename cannot publish into a different radio session', async () => {
   function channelPort(key, name) {
     const slot = new Uint8Array(48)

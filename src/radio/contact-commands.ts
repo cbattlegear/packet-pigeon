@@ -1,7 +1,9 @@
-import { CompanionError, Response } from './protocol.ts'
+import { CompanionError, decodeContact, Response } from './protocol.ts'
 import type { CompanionContact } from './protocol.ts'
 import { expectResponse } from './serial-link.ts'
 import type { SerialLink } from './serial-link.ts'
+import { parseContactPath, pathUnknown } from './contact-path.ts'
+import type { ContactPathWidth } from './contact-path.ts'
 
 export type NewContact = {
   publicKey: string; name: string; type: 1 | 2 | 3 | 4
@@ -11,6 +13,15 @@ export type NewContact = {
 const addOrUpdateContact = 9
 const removeContact = 15
 const ok = 0
+const getContactByKey = 30
+
+export const contactPermissions = {
+  telemetry: 0x02,
+  location: 0x04,
+  environment: 0x08,
+  remoteCli: 0x10,
+} as const
+export type ContactPermissions = Partial<Record<keyof typeof contactPermissions, boolean>>
 
 export function contactPublicKey(input: string): string {
   const key = input.trim().toLowerCase()
@@ -54,6 +65,43 @@ export function addContactCommand(input: NewContact) {
 
 export function removeContactCommand(publicKey: string) {
   return Uint8Array.of(removeContact, ...keyBytes(contactPublicKey(publicKey)))
+}
+
+export async function readContactFrame(link: SerialLink, publicKey: string) {
+  const frame = await link.request(Uint8Array.of(getContactByKey, ...keyBytes(publicKey)), (response) => {
+    if (response[0] !== Response.error && response[0] !== Response.disabled) expectResponse(response, Response.contact)
+    return { value: response }
+  })
+  if (frame[0] === Response.error && frame[1] === 2) throw new Error('This contact is no longer saved on the radio.')
+  if (frame[0] !== Response.contact) throw new Error('The radio could not read this contact. Check firmware support and try again.')
+  if (decodeContact(frame).publicKey !== publicKey) throw new Error('The radio returned a different contact.')
+  return frame
+}
+
+export function contactPathUpdate(frame: Uint8Array, input: { width: ContactPathWidth; text: string }) {
+  const path = parseContactPath(input.text, input.width)
+  const command = frame.slice(0, 148)
+  command[0] = addOrUpdateContact
+  command[35] = path.encoded
+  command.fill(0, 36, 100)
+  if (path.hex) command.set(keyBytes(path.hex), 36)
+  return command
+}
+
+export function contactPermissionsUpdate(frame: Uint8Array, permissions: ContactPermissions) {
+  const command = frame.slice(0, 148)
+  command[0] = addOrUpdateContact
+  for (const name of Object.keys(contactPermissions) as (keyof ContactPermissions)[]) {
+    const enabled = permissions[name]
+    if (typeof enabled !== 'boolean') continue
+    const mask = contactPermissions[name]
+    command[34] = enabled ? command[34] | mask : command[34] & ~mask
+  }
+  return command
+}
+
+export function contactWithoutPath(frame: Uint8Array) {
+  return { ...decodeContact(frame), pathLength: pathUnknown }
 }
 
 export async function writeContactCommand(link: SerialLink, command: Uint8Array) {

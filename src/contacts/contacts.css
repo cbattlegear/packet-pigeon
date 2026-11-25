@@ -123,6 +123,43 @@
   margin-top: 12px;
 }
 
+.contact-radio-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.contact-radio-actions details {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.contact-radio-actions summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.contact-radio-actions details[open] summary {
+  margin-bottom: 8px;
+}
+
+.contact-radio-actions fieldset {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 8px 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.contact-radio-actions .contact-actions p {
+  flex-basis: 100%;
+}
+
+.contact-radio-actions [role='alert'] {
+  color: var(--error);
+}
+
 @media (max-width: 780px) {
   .contact-layout {
     grid-template-columns: minmax(0, 1fr);
