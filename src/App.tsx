@@ -1,5 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import { CompanionSession, getWebSerialSupport } from './radio/index.ts'
+import { SessionCache } from './integration/session-cache.ts'
 import './App.css'
+
+const session = new CompanionSession()
+const cache = new SessionCache(session)
 
 const sections = ['Chats', 'Contacts', 'Channels', 'Map', 'Tools', 'Settings'] as const
 type Section = (typeof sections)[number]
@@ -39,6 +44,25 @@ function StateMessage({ kind, title, description }: StateMessageProps) {
 
 function App() {
   const [activeSection, setActiveSection] = useState<Section>(sectionFromHash)
+  const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot)
+  const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
+  const support = getWebSerialSupport()
+  const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
+  const canDisconnect = ['opening', 'handshake', 'syncing', 'ready'].includes(snapshot.phase)
+  const connection = {
+    idle: 'Disconnected',
+    choosing: 'Choosing port',
+    opening: 'Opening port',
+    handshake: 'Identifying radio',
+    syncing: 'Connected',
+    ready: 'Connected',
+    closing: 'Disconnecting',
+    error: 'Error',
+  }[snapshot.phase]
+  const progress = snapshot.progress
+  const syncStatus = progress
+    ? `${progress.stage}: ${progress.completed}${progress.total === null ? '' : ` / ${progress.total}`}`
+    : snapshot.phase === 'syncing' ? 'Syncing' : snapshot.phase === 'ready' ? 'Idle' : 'Not syncing'
 
   useEffect(() => {
     const updateSection = () => setActiveSection(sectionFromHash())
@@ -67,9 +91,24 @@ function App() {
             <p className="brand-description">MeshCore workspace</p>
           </div>
         </div>
-        <div className="header-status">
-          <span className="status-dot" aria-hidden="true" />
-          <span>Radio integration unavailable</span>
+        <div className="connection-area">
+          <div className="connection-controls">
+            <div className="header-status" role="status">
+              <span className={`status-dot${snapshot.phase === 'ready' ? ' status-dot--connected' : ''}`} aria-hidden="true" />
+              <span>{connection}</span>
+            </div>
+            <button
+              type="button"
+              disabled={busy || (!canDisconnect && !support.supported)}
+              aria-describedby="connection-warning"
+              onClick={() => void (canDisconnect ? session.disconnect() : session.connect())}
+            >
+              {canDisconnect ? 'Disconnect' : 'Connect USB'}
+            </button>
+          </div>
+          <p className="connection-warning" id="connection-warning">
+            Connecting drains the radio queue; interrupted sync can lose messages.
+          </p>
         </div>
       </header>
 
@@ -93,6 +132,23 @@ function App() {
       </nav>
 
       <main className="main-content" id="main-content" tabIndex={-1}>
+        {(!support.supported || snapshot.error || cacheStatus.error) && (
+          <div className="notices">
+            {!support.supported && <p role="status">{support.error.message}</p>}
+            {snapshot.error && <p role="alert">{snapshot.error.message}</p>}
+            {cacheStatus.error && (
+              <div role="alert">
+                <p>Cache error: {cacheStatus.error}</p>
+                {cacheStatus.pending > 0 && (
+                  <>
+                    <p>{cacheStatus.pending} unsaved update(s) remain in memory. Keep this page open and retry.</p>
+                    <button type="button" onClick={cache.retry}>Retry saving</button>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
         {activeSection === 'Chats' ? (
           <div className="chats-layout">
             <section className="conversation-list" aria-labelledby="chats-heading">
@@ -102,20 +158,20 @@ function App() {
               </div>
               <StateMessage
                 kind="empty"
-                title="No conversations"
-                description="Conversations will appear here when chat data is available."
+                title="Conversation browsing unavailable"
+                description="Conversation browsing is not available yet. Synced receipts are saved locally."
               />
             </section>
 
             <section className="conversation-pane" aria-label="Active conversation">
               <div className="conversation-heading">
                 <p>Conversation</p>
-                <span>No chat selected</span>
+                <span>Not available yet</span>
               </div>
               <StateMessage
                 kind="empty"
-                title="Select a conversation"
-                description="Choose a conversation from the list to see it here."
+                title="Conversation view unavailable"
+                description="Conversation browsing will be added in a later increment."
               />
             </section>
           </div>
@@ -135,10 +191,12 @@ function App() {
       </main>
 
       <footer className="status-bar" aria-label="Workspace status">
-        <div><span>Device</span><strong>Unavailable</strong></div>
-        <div><span>Connection</span><strong>Unavailable</strong></div>
-        <div><span>Sync</span><strong>Unavailable</strong></div>
-        <p>No radio or storage integration yet</p>
+        <div><span>Device</span><strong>{snapshot.device
+          ? `${snapshot.phase === 'syncing' || snapshot.phase === 'ready' ? '' : 'Last: '}${snapshot.device.name || 'Unnamed radio'}`
+          : 'None'}</strong></div>
+        <div><span>Connection</span><strong>{connection}</strong></div>
+        <div><span>Sync</span><strong>{syncStatus}</strong></div>
+        <p>{cacheStatus.error ? 'Cache needs attention' : cacheStatus.pending ? `Saving ${cacheStatus.pending} update(s)` : 'Local cache idle'}</p>
       </footer>
     </div>
   )

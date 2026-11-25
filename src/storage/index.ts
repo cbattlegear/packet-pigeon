@@ -4,6 +4,16 @@ export type RadioKey = string & { readonly [radioKeyBrand]: true }
 export type StoredContact = {
   publicKey: string
   name: string
+  details?: {
+    type: number
+    flags: number
+    pathLength: number
+    pathHex: string
+    lastAdvertisedAt: number
+    latitude: number
+    longitude: number
+    lastModifiedAt: number
+  }
 }
 
 export type StoredChannel = {
@@ -16,9 +26,20 @@ export type StoredMessage = {
   id: string
   conversationId: string
   sender: string
-  timestamp: number
+  timestamp: number | null
   text: string
+  receipt?: StoredReceipt
 }
+
+export type StoredReceipt = {
+  receiptId: string
+  pathLength: number
+  snrDb: number | null
+} & (
+  | { kind: 'direct-text'; senderKeyPrefix: string; signatureHex: string | null; textType: number; senderTimestamp: number; text: string }
+  | { kind: 'channel-text'; channelIndex: number; textType: number; senderTimestamp: number; text: string }
+  | { kind: 'channel-data'; channelIndex: number; dataType: number; dataHex: string }
+)
 
 export type StoredDraft = {
   conversationId: string
@@ -72,7 +93,15 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   const { contacts, channels, messages, draft, preferences } = update
   const next = { ...current }
   if (contacts) {
-    next.contacts = contacts.map(({ publicKey, name }) => ({ publicKey, name }))
+    next.contacts = contacts.map(({ publicKey, name, details }) => ({
+      publicKey, name, ...(details ? {
+        details: {
+          type: details.type, flags: details.flags, pathLength: details.pathLength, pathHex: details.pathHex,
+          lastAdvertisedAt: details.lastAdvertisedAt, latitude: details.latitude,
+          longitude: details.longitude, lastModifiedAt: details.lastModifiedAt,
+        },
+      } : {}),
+    }))
   }
   if (channels) {
     next.channels = channels.map(({ index, name }) => ({ index, name }))
@@ -80,13 +109,16 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   if (messages?.length) {
     const seen = new Set(current.messages.map(({ id }) => id))
     next.messages = [...current.messages]
-    for (const { id, conversationId, sender, timestamp, text } of messages) {
+    for (const { id, conversationId, sender, timestamp, text, receipt } of messages) {
       if (!id.trim()) {
         throw new RadioStorageError('update', 'A stable message identifier is required.')
       }
       if (seen.has(id)) continue
       seen.add(id)
-      next.messages.push({ id, conversationId, sender, timestamp, text })
+      next.messages.push({
+        id, conversationId, sender, timestamp, text,
+        ...(receipt ? { receipt: copyReceipt(receipt) } : {}),
+      })
     }
   }
   if (draft) {
@@ -98,6 +130,28 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
     next.preferences = { selectedConversationId: preferences.selectedConversationId }
   }
   return next
+}
+
+function copyReceipt(receipt: StoredReceipt): StoredReceipt {
+  const { receiptId, pathLength, snrDb } = receipt
+  const base = { receiptId, pathLength, snrDb }
+  switch (receipt.kind) {
+    case 'direct-text':
+      return {
+        ...base, kind: receipt.kind, senderKeyPrefix: receipt.senderKeyPrefix, signatureHex: receipt.signatureHex,
+        textType: receipt.textType, senderTimestamp: receipt.senderTimestamp, text: receipt.text,
+      }
+    case 'channel-text':
+      return {
+        ...base, kind: receipt.kind, channelIndex: receipt.channelIndex,
+        textType: receipt.textType, senderTimestamp: receipt.senderTimestamp, text: receipt.text,
+      }
+    case 'channel-data':
+      return {
+        ...base, kind: receipt.kind, channelIndex: receipt.channelIndex,
+        dataType: receipt.dataType, dataHex: receipt.dataHex,
+      }
+  }
 }
 
 function runTransaction<T>(

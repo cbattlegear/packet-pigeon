@@ -3,10 +3,10 @@
 Open source MeshCore web UI. This is an incremental, desktop-first starter built
 with React, TypeScript, Vite, and npm.
 
-The current app is a static, client-only shell with keyboard-accessible navigation,
-an empty conversation workspace, and unavailable device and sync status. It
-does not yet connect to radios from the shell. The USB companion session exists
-as a standalone module, and the app does not send mesh packets.
+The current app is a client-only shell with keyboard-accessible navigation and
+user-initiated USB companion connection. It syncs contacts, channels and queued
+receipts into a per-radio local cache; browsing that cache is not yet available.
+The app does not send mesh packets.
 
 ## Getting started
 
@@ -29,19 +29,26 @@ npm run preview
 TypeScript project build and produces the static site in `dist`. `preview`
 serves that build locally; it is not a production server. Run browser storage
 tests with `npm run test:storage` and USB companion fixtures with
-`node --test src/radio/companion-session.test.mjs`; neither needs a radio.
+`node --test src/radio/companion-session.test.mjs`. Run the session/cache
+integration fixture with `node --test src/integration/session-cache.test.js`.
+These checks use mocks and do not need a radio.
 
 ## USB companion session
 
-`src/radio` exports `CompanionSession` and `getWebSerialSupport()`. In a secure
-context with Web Serial available, call `connect()` directly from a user action
-to open the browser's port chooser. Use `subscribe()` and `getSnapshot()` for
-connection state and sync progress, and call `disconnect()` to release the port.
+In a secure context with Web Serial available, use **Connect USB** to choose a
+port and **Disconnect** to release it. The shell reports connection, sync and
+cache errors. `src/radio` exports `CompanionSession` and `getWebSerialSupport()`;
+`connect()` must be called directly from a user action for the port chooser.
 The session reads contact and channel records and drains the companion's message
 queue. Draining removes messages from the radio; the protocol does not provide
 stable message IDs or replay for an interrupted read. Each received message has
 a local `receiptId` UUID that can be reused on storage retries. Identical
 content from separate receipts is not suppressed.
+
+This is not exactly-once sync: the firmware dequeues a message before replying,
+so interruption can lose a receipt. Cache writes that fail remain queued in
+memory with their original IDs for **Retry saving**; closing or reloading the
+page loses unsaved updates. The cache is browser-local and can be evicted.
 
 The implementation targets MeshCore USB companion firmware with protocol v3 or
 newer. It uses the firmware's framed serial protocol directly: MeshCore.js was
@@ -60,14 +67,14 @@ Keep work small and split by behavior, rather than creating empty layers up fron
   usable narrow-window behavior. Navigation uses native fragment links, including
   their standard right-click and keyboard alternatives. Do not present placeholders
   as working controls.
-- **Radio and sessions:** add plain TypeScript modules under `src/radio` when
-  implementing the first real radio behavior. Keep protocol, transport, and
+- **Radio and sessions:** keep `src/radio` protocol, transport, and
   session logic independent of React: no React imports or UI state in those
   modules. Introduce only the contracts needed by that behavior and test it
   independently.
 - **Storage:** `src/storage` keeps a separate IndexedDB cache for each radio.
-  Use the full public key verified by the radio session, never its display
-  name or port, and capture that key when starting a sync. While offline,
+  Use the full public key returned by the radio session's handshake, never its
+  display name or port, and capture that key when starting a sync. The handshake
+  does not cryptographically authenticate the device. While offline,
   explicitly select a cached key using `listRadioKeys`, then `read` it. Map
   radio data into the storage records; do not include channel secrets or
   credentials. Assign each received message a per-radio ID and reuse it when
@@ -76,9 +83,10 @@ Keep work small and split by behavior, rather than creating empty layers up fron
   atomically replaces supplied contact/channel lists, appends unseen messages,
   and applies any supplied local edits. Failed writes reject without replacing
   the previous cache. Browser data clearing or eviction can remove the cache.
-- **Integration:** once radio behavior exists, connect it to the UI through a
-  small React adapter or hook with explicit loading and error states. Coordinate
-  that boundary between workstreams before both sides depend on it.
+- **Integration:** `src/integration/session-cache.ts` captures completed lists
+  and received messages synchronously from session snapshots and queues writes
+  under the session's full public key. The UI subscribes to session and cache
+  state; coordinate future changes to that boundary between workstreams.
 
 Add a router or other dependencies only when a concrete feature needs them.
 Agree on ownership before parallel changes to shared shell files, global styles,
