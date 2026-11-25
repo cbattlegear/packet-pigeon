@@ -108,7 +108,7 @@ function App() {
             </button>
           </div>
           <p className="connection-warning" id="connection-warning">
-            Connecting drains the radio queue; interrupted sync can lose messages.
+            Message sync is paused; queued messages remain on the radio.
           </p>
           <OfflineStatus />
         </div>
@@ -161,7 +161,7 @@ function App() {
               <StateMessage
                 kind="empty"
                 title="Conversation browsing unavailable"
-                description="Conversation browsing is not available yet. Synced receipts are saved locally."
+                description="Conversation browsing and message sync are not available yet."
               />
             </section>
 

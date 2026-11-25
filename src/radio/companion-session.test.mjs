@@ -4,6 +4,7 @@ import test from 'node:test'
 import { setImmediate } from 'node:timers/promises'
 import { CompanionSession, getWebSerialSupport } from './index.ts'
 import { SerialFrameDecoder } from './web-serial.ts'
+import { SessionCache } from '../integration/session-cache.ts'
 
 const encode = (text) => new TextEncoder().encode(text)
 const response = (...payload) => Uint8Array.of(0x3e, payload.length, 0, ...payload)
@@ -97,7 +98,7 @@ test('reports support, chooser cancellation and permission failure distinctly', 
   assert.equal(denied.getSnapshot().error.code, 'chooser-failed')
 })
 
-test('handshakes, syncs all advertised slots and receives pushes without stealing replies', async () => {
+test('handshakes and syncs advertised slots without dequeuing messages', async () => {
   const pendingMessages = [
     [16, 0xf6, 0, 0, 1, 2, 3, 4, 5, 6, 0xff, 2, 42, 0, 0, 0, 7, 8, 9, 10, ...encode('hello')],
     [8, 2, 1, 0, 43, 0, 0, 0, ...encode('group')],
@@ -111,6 +112,7 @@ test('handshakes, syncs all advertised slots and receives pushes without stealin
         serial.incoming.enqueue(Uint8Array.of(
           ...response(2, 1, 0, 0, 0),
           ...response(0x81, 9),
+          ...response(0x83),
           ...response(...contactInfo()),
           ...response(4, 200, 1, 0, 0),
         ))
@@ -123,7 +125,6 @@ test('handshakes, syncs all advertised slots and receives pushes without stealin
           serial.emit(18, arg, ...name, ...new Uint8Array(16).fill(0xff))
         }
         break
-      case 10: serial.emit(...(pendingMessages.shift() ?? [10])); break
       default: assert.fail(`Unexpected command ${code}`)
     }
   })
@@ -147,35 +148,21 @@ test('handshakes, syncs all advertised slots and receives pushes without stealin
   assert.equal(snapshot.contacts[0].lastModifiedAt, 456)
   assert.equal(snapshot.contacts[0].latitude, -123)
   assert.deepEqual(snapshot.channels, [{ index: 0, name: 'Public' }, { index: 2, name: 'Other' }])
-  const uuid = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/
-  assert.deepEqual(snapshot.messages.map(({ receiptId, ...message }) => {
-    assert.match(receiptId, uuid)
-    return message
-  }), [
-    { kind: 'direct-text', senderKeyPrefix: '010203040506', signatureHex: '0708090a',
-      text: 'hello', pathLength: 255, textType: 2, senderTimestamp: 42, snrDb: -2.5 },
-    { kind: 'channel-text', channelIndex: 2, text: 'group', pathLength: 1,
-      textType: 0, senderTimestamp: 43, snrDb: null },
-    { kind: 'channel-data', channelIndex: 2, dataType: 0x1234, dataHex: 'dead', pathLength: 1, snrDb: 2 },
-  ])
-  assert.deepEqual(pushes, [[0x81, 9]])
+  assert.deepEqual(snapshot.messages, [])
+  assert.deepEqual(pushes, [[0x81, 9], [0x83]])
   assert.ok(progress.some(({ stage, completed, total }) => stage === 'contacts' && completed === 1 && total === 1))
   assert.ok(progress.some(({ stage, completed, total }) => stage === 'channels' && completed === 3 && total === 3))
   assert.deepEqual(port.commands, [
     [22, 3], [1, ...new Uint8Array(7), ...encode('Packet Pigeon')], [4], [31, 0], [31, 1], [31, 2],
-    [10], [10], [10], [10],
   ])
 
-  pendingMessages.push([8, 2, 1, 0, 43, 0, 0, 0, ...encode('group')])
   port.incoming.enqueue(Uint8Array.of(...response(0x83), ...response(0x83)))
   await setImmediate()
-  const receipts = session.getSnapshot().messages
-  assert.equal(receipts.length, 4)
-  assert.equal(receipts[1].receiptId, snapshot.messages[1].receiptId)
-  assert.match(receipts[3].receiptId, uuid)
-  assert.notEqual(receipts[3].receiptId, receipts[1].receiptId)
+  assert.equal(pendingMessages.length, 3)
+  assert.deepEqual(session.getSnapshot().messages, [])
+  assert.equal(port.commands.some(([code]) => code === 10), false)
   assert.equal(session.getSnapshot().progress, null)
-  assert.deepEqual(pushes, [[0x81, 9], [0x83], [0x83]])
+  assert.deepEqual(pushes, [[0x81, 9], [0x83], [0x83], [0x83]])
   unpush()
   unsubscribe()
   await session.disconnect()
@@ -207,8 +194,7 @@ test('physical removal interrupts a pending command', async () => {
   assert.deepEqual(port.commands, [[22, 3]])
 })
 
-test('a malformed queue reply surfaces an error without losing earlier receipts', async () => {
-  const queued = [[8, 0, 0, 0, 42, 0, 0, 0, ...encode('valid')], [16]]
+test('storage failure and message-waiting pushes never dequeue a receipt', async () => {
   const port = new FixturePort(([code], serial) => {
     switch (code) {
       case 22: serial.emit(...deviceInfo()); break
@@ -217,18 +203,21 @@ test('a malformed queue reply surfaces an error without losing earlier receipts'
         serial.emit(2, 0, 0, 0, 0)
         serial.emit(4, 0, 0, 0, 0)
         break
-      case 10: serial.emit(...queued.shift()); break
       default: assert.fail(`Unexpected command ${code}`)
     }
   })
   const session = sessionWith(port)
+  const cache = new SessionCache(session, async () => { throw new Error('Storage unavailable') })
   await session.connect()
   await setImmediate()
-  assert.equal(session.getSnapshot().phase, 'error')
-  assert.equal(session.getSnapshot().error.code, 'protocol')
-  assert.deepEqual(session.getSnapshot().messages.map((message) => message.text), ['valid'])
-  assert.equal(port.closed, true)
-  assert.deepEqual(port.commands.map(([code]) => code), [22, 1, 4, 10, 10])
+  assert.equal(session.getSnapshot().phase, 'ready')
+  assert.match(cache.getSnapshot().error, /Storage unavailable/)
+  assert.ok(cache.getSnapshot().pending > 0)
+  port.emit(0x83)
+  await setImmediate()
+  assert.deepEqual(port.commands.map(([code]) => code), [22, 1, 4])
+  assert.deepEqual(session.getSnapshot().messages, [])
+  await session.disconnect()
 })
 
 test('disconnect waits for an in-flight port open and releases it before reconnecting', async () => {

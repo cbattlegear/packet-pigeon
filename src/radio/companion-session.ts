@@ -1,6 +1,6 @@
 import {
   Command, CompanionError, Response, contactCount, decodeCapabilities, decodeChannel, decodeContact,
-  decodeQueuedMessage, decodeSelf, messageWaiting,
+  decodeSelf,
 } from './protocol.ts'
 import type { CompanionChannel, CompanionContact, CompanionDevice, CompanionMessage } from './protocol.ts'
 import { expectResponse, SerialLink } from './serial-link.ts'
@@ -31,8 +31,6 @@ export interface CompanionPush {
 interface Attempt {
   link?: SerialLink
   opening?: Promise<SerialLink | null>
-  messagesWaiting: boolean
-  draining: boolean
 }
 
 const initial: CompanionSnapshot = {
@@ -85,7 +83,7 @@ export class CompanionSession {
 
   readonly connect = async () => {
     if (this.attempt || this.snapshot.phase === 'closing') return
-    const attempt: Attempt = { messagesWaiting: false, draining: false }
+    const attempt: Attempt = {}
     this.attempt = attempt
     this.update({ phase: 'choosing', error: null, progress: null })
 
@@ -199,54 +197,12 @@ export class CompanionSession {
     }
     if (this.attempt !== attempt) return
     this.update({ channels })
-    await this.drainMessages(attempt, link)
-    if (this.attempt === attempt) {
-      this.update({ phase: 'ready' })
-      if (attempt.messagesWaiting) this.startMessageSync(attempt)
-    }
+    this.update({ phase: 'ready', progress: null })
   }
 
   private onPush(attempt: Attempt, frame: Uint8Array) {
     if (this.attempt !== attempt) return
     const code = frame[0]
     this.events.dispatchEvent(new CustomEvent<CompanionPush>('push', { detail: { code, payload: frame.slice(1) } }))
-    if (code !== messageWaiting) return
-    attempt.messagesWaiting = true
-    if (this.snapshot.phase === 'ready') this.startMessageSync(attempt)
-  }
-
-  private startMessageSync(attempt: Attempt) {
-    if (this.attempt !== attempt || !attempt.link || attempt.draining) return
-    void this.drainMessages(attempt, attempt.link).catch((error) => {
-      this.fail(attempt, error instanceof CompanionError ? error :
-        new CompanionError('protocol', 'Could not sync queued companion messages.', { cause: error }))
-    })
-  }
-
-  private async drainMessages(attempt: Attempt, link: SerialLink) {
-    attempt.draining = true
-    let completed = 0
-    this.update({ progress: { stage: 'messages', completed, total: null } })
-    try {
-      do {
-        attempt.messagesWaiting = false
-        while (this.attempt === attempt) {
-          const receiptId = crypto.randomUUID()
-          const message = await link.request(Uint8Array.of(Command.nextMessage), (frame) => {
-            expectResponse(frame, Response.noMoreMessages, Response.directText, Response.directTextV3,
-              Response.channelText, Response.channelTextV3, Response.channelData)
-            return { value: frame[0] === Response.noMoreMessages ? null : decodeQueuedMessage(frame) }
-          })
-          if (this.attempt !== attempt || !message) break
-          this.update({
-            messages: [...this.snapshot.messages, { ...message, receiptId }],
-            progress: { stage: 'messages', completed: ++completed, total: null },
-          })
-        }
-      } while (this.attempt === attempt && attempt.messagesWaiting)
-    } finally {
-      attempt.draining = false
-      if (this.attempt === attempt) this.update({ progress: null })
-    }
   }
 }

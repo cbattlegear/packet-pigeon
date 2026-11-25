@@ -4,8 +4,9 @@ Open source MeshCore web UI. This is an incremental, desktop-first starter built
 with React, TypeScript, Vite, and npm.
 
 The current app is a client-only shell with keyboard-accessible navigation and
-user-initiated USB companion connection. It syncs contacts, channels and queued
-receipts into a per-radio local cache; browsing that cache is not yet available.
+user-initiated USB companion connection. It syncs contacts and channels into a
+per-radio local cache; browsing that cache is not yet available. Message sync
+is paused so queued messages remain on the radio.
 The app does not send mesh packets.
 
 ## Getting started
@@ -39,16 +40,18 @@ In a secure context with Web Serial available, use **Connect USB** to choose a
 port and **Disconnect** to release it. The shell reports connection, sync and
 cache errors. `src/radio` exports `CompanionSession` and `getWebSerialSupport()`;
 `connect()` must be called directly from a user action for the port chooser.
-The session reads contact and channel records and drains the companion's message
-queue. Draining removes messages from the radio; the protocol does not provide
-stable message IDs or replay for an interrupted read. Each received message has
-a local `receiptId` UUID that can be reused on storage retries. Identical
-content from separate receipts is not suppressed.
+The session reads contact and channel records but does not request queued
+messages, including when the radio reports messages waiting. Draining is disabled
+until received messages are readable and each receipt is durably saved before
+requesting the next. Failed contact or channel writes remain queued in memory
+for **Retry saving**; closing or reloading the page loses unsaved updates.
 
-This is not exactly-once sync: the firmware dequeues a message before replying,
-so interruption can lose a receipt. Cache writes that fail remain queued in
-memory with their original IDs for **Retry saving**; closing or reloading the
-page loses unsaved updates. The cache is browser-local and can be evicted.
+Earlier development builds may already have dequeued messages: those saved in
+the local cache are retained but are not yet browsable, while unsaved receipts
+lost on page close cannot be recovered from the radio. The firmware dequeues
+before replying, so any future message sync cannot guarantee exactly-once
+delivery, including during interruption. Separate receipts must not be deduped
+by their text or timestamp. The browser-local cache can be evicted.
 
 The implementation targets MeshCore USB companion firmware with protocol v3 or
 newer. It uses the firmware's framed serial protocol directly: MeshCore.js was
@@ -111,7 +114,7 @@ Keep work small and split by behavior, rather than creating empty layers up fron
   and applies any supplied local edits. Failed writes reject without replacing
   the previous cache. Browser data clearing or eviction can remove the cache.
 - **Integration:** `src/integration/session-cache.ts` captures completed lists
-  and received messages synchronously from session snapshots and queues writes
+  and any received messages from session snapshots and queues writes
   under the session's full public key. The UI subscribes to session and cache
   state; coordinate future changes to that boundary between workstreams.
 
