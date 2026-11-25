@@ -118,6 +118,18 @@
   margin-top: 8px;
 }
 
+.chat-message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.chat-workspace .chat-message-actions button {
+  padding: 4px 8px;
+  font-size: 0.875rem;
+}
+
 .chat-delivery p {
   flex-basis: 100%;
 }

@@ -352,3 +352,43 @@ test('a late send response retains an interrupted failure while enabling late AC
   assert.equal(acknowledged.message.outgoing.status, 'delivered')
   storage.close()
 })
+
+test('channel sends allocate per-radio timestamps and keep retention, drafts, and receipts isolated', async () => {
+    const factory = new IDBFactory()
+    const storage = await openRadioStorage(factory)
+    const other = await openRadioStorage(factory)
+    const channels = [{ index: 0, name: 'Public' }]
+    const old = { ...message, conversationId: 'channel:0' }
+    await storage.update(firstRadio, {
+      channels, messages: [old], markRead: [old.id],
+      draft: { conversationId: 'channel:0', text: 'Keep my newer draft' },
+      channelRetention: { index: 0, channelName: 'Public', days: 7 },
+      blockedChannelSender: { name: 'Alice', blocked: true },
+    })
+    await storage.update(secondRadio, { channels, messages: [old] })
+    const begin = (id) => ({
+      kind: 'begin', id, index: 0, channelName: 'Public', senderName: 'Pigeon',
+      text: 'Hello', now: 1_000_000, clearDraft: true,
+    })
+    const [first, second] = await Promise.all([
+      storage.changeChannelMessage(firstRadio, begin('first')),
+      other.changeChannelMessage(firstRadio, begin('second')),
+    ])
+    assert.deepEqual([first.message.channelOutgoing.wireTimestamp, second.message.channelOutgoing.wireTimestamp].sort(), [1000, 1001])
+    const separate = await storage.changeChannelMessage(secondRadio, begin('other'))
+    assert.equal(separate.message.channelOutgoing.wireTimestamp, 1000)
+    await assert.rejects(storage.changeChannelMessage(firstRadio, { kind: 'remove', id: 'first' }), /Wait for sending/)
+    await storage.changeChannelMessage(firstRadio, {
+      kind: 'accepted', id: 'first', wireTimestamp: first.message.channelOutgoing.wireTimestamp,
+    })
+    await storage.changeChannelMessage(firstRadio, { kind: 'remove', id: old.id })
+    const data = await storage.read(firstRadio)
+    assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Public', days: 7 }])
+    assert.deepEqual(data.blockedChannelSenders, ['Alice'])
+    assert.deepEqual(data.readMessages, [])
+    assert.deepEqual(data.drafts, [{ conversationId: 'channel:0', text: 'Keep my newer draft' }])
+    assert.deepEqual((await storage.read(secondRadio)).messages.map(({ id }) => id), [old.id, 'other'])
+    await assert.rejects(storage.changeChannelMessage(firstRadio, { ...begin('stale'), channelName: 'Changed' }), /channel changed/i)
+    storage.close()
+    other.close()
+})

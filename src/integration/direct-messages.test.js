@@ -11,13 +11,15 @@ const recipient = 'bc'.repeat(32)
 const options = { directAttempts: 2, floodAttempts: 1 }
 
 class FixtureSource {
-  snapshot = { phase: 'ready', device: { publicKey } }
+  snapshot = { phase: 'ready', device: { publicKey, name: 'Pigeon' } }
   listeners = new Set()
   pushes = new Set()
   sends = []
+  channelSends = []
   resets = 0
   route = 'direct'
   onSend = async (send) => ({ route: this.route, expectedAck: send.code, timeoutMs: 1 })
+  onChannelSend = async () => {}
 
   getSnapshot = () => this.snapshot
   subscribe = (listener) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
@@ -26,6 +28,11 @@ class FixtureSource {
     const send = { sender, target, timestamp, attempt, text, code: await expectedDirectAck(sender, timestamp, attempt, text) }
     this.sends.push(send)
     return this.onSend(send)
+  }
+  async sendChannel(sender, index, channel, senderName, timestamp, text) {
+    const send = { sender, index, channel, senderName, timestamp, text }
+    this.channelSends.push(send)
+    return this.onChannelSend(send)
   }
   async resetDirectPath() {
     this.resets++
@@ -247,4 +254,106 @@ test('interrupted messages require manual retry, but retain late ACK matching', 
   assert.equal(source.sends.length, 0)
   source.ack(code)
   await waitFor(() => direct.getSnapshot().data.messages[0].outgoing.status === 'delivered')
+})
+
+test('channel messages are saved before radio acceptance and resends preserve the current draft', async () => {
+  const { source, direct, openStorage } = await fixture()
+  const storage = await openStorage()
+  await storage.update(key, { channels: [{ index: 0, name: 'Public' }] })
+  await direct.load(publicKey)
+  source.onChannelSend = async () => {
+    const data = await storage.read(key)
+    assert.equal(data.messages.at(-1).channelOutgoing.status, 'sending')
+  }
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Hello'), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  let data = await storage.read(key)
+  assert.equal(data.messages[0].channelOutgoing.status, 'accepted')
+  assert.equal(data.messages[0].outgoing, undefined)
+  assert.deepEqual(source.channelSends.map(({ channel, senderName, text }) => ({ channel, senderName, text })),
+    [{ channel: 'Public', senderName: 'Pigeon', text: 'Hello' }])
+  await direct.saveDraft(key, 'channel:0', 'A different draft')
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Hello', true, true), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  data = await storage.read(key)
+  assert.equal(data.messages.length, 2)
+  assert.ok(data.messages[1].channelOutgoing.wireTimestamp > data.messages[0].channelOutgoing.wireTimestamp)
+  assert.deepEqual(data.drafts, [{ conversationId: 'channel:0', text: 'A different draft' }])
+  storage.close()
+})
+
+test('channel sending preserves drafts on disconnect or invalid bytes and marks ambiguous outcomes', async () => {
+  const { source, direct, openStorage } = await fixture()
+  const storage = await openStorage()
+  await storage.update(key, { channels: [{ index: 0, name: 'Public' }] })
+  await direct.load(publicKey)
+  source.phase('idle')
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Keep me'), false)
+  assert.equal(direct.draft(key, 'channel:0'), 'Keep me')
+  assert.equal(source.channelSends.length, 0)
+  source.phase('ready')
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'a'.repeat(153)), false)
+  assert.equal(source.channelSends.length, 0)
+  source.onChannelSend = async () => { throw new Error('Response timed out') }
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Maybe sent'), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  const message = (await storage.read(key)).messages[0]
+  assert.equal(message.channelOutgoing.status, 'uncertain')
+  assert.match(message.channelOutgoing.error, /may have been transmitted/)
+  storage.close()
+})
+
+test('failed channel outcome persistence retries without retransmission', async () => {
+  let failAccepted = true
+  const { source, direct, openStorage } = await fixture(async (factory) => {
+    const storage = await openRadioStorage(factory)
+    return {
+      ...storage,
+      changeChannelMessage: async (radio, change) => {
+        if (failAccepted && change.kind === 'accepted') {
+          failAccepted = false
+          throw new RadioStorageError('write', 'Disk unavailable')
+        }
+        return storage.changeChannelMessage(radio, change)
+      },
+    }
+  })
+  const storage = await openStorage()
+  await storage.update(key, { channels: [{ index: 0, name: 'Public' }] })
+  await direct.load(publicKey)
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Hello'), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  assert.equal(direct.getSnapshot().pending, 1)
+  assert.equal(source.channelSends.length, 1)
+  await direct.retrySaving()
+  assert.equal(direct.getSnapshot().pending, 0)
+  assert.equal((await storage.read(key)).messages[0].channelOutgoing.status, 'accepted')
+  assert.equal(source.channelSends.length, 1)
+  storage.close()
+})
+
+test('a late channel send outcome stays under its captured radio identity', async () => {
+  const { source, direct, openStorage } = await fixture()
+  const storage = await openStorage()
+  const otherKey = radioKeyFromPublicKey('cd'.repeat(32))
+  await storage.update(key, { channels: [{ index: 0, name: 'Public' }] })
+  await storage.update(otherKey, { channels: [{ index: 0, name: 'Other' }] })
+  await direct.load(key)
+  let release
+  let entered
+  const blocked = new Promise((resolve) => { release = resolve })
+  const started = new Promise((resolve) => { entered = resolve })
+  source.onChannelSend = async () => { entered(); await blocked }
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Hello'), true)
+  await started
+  source.phase('idle')
+  source.snapshot = { phase: 'ready', device: { publicKey: otherKey, name: 'Other' } }
+  source.phase('ready')
+  await direct.load(otherKey)
+  release()
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  assert.equal((await storage.read(key)).messages[0].channelOutgoing.status, 'accepted')
+  assert.deepEqual((await storage.read(otherKey)).messages, [])
+  assert.equal(direct.getSnapshot().key, otherKey)
+  storage.close()
 })

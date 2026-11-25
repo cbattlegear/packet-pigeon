@@ -231,6 +231,36 @@ test('a delayed channel rename cannot publish into a different radio session', a
   storage.close()
 })
 
+test('channel sending rechecks the radio slot and treats OK as acceptance, not delivery', async () => {
+  const slot = new Uint8Array(48)
+  slot.set(encode('Public'))
+  slot.fill(1, 32)
+  let reject = false
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo(1)); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 31: serial.emit(18, command[1], ...slot); break
+      case 3: serial.emit(...(reject ? [1, 2] : [0])); break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  const key = 'ab'.repeat(32)
+  await session.connect()
+  await session.sendChannel(key, 0, 'Public', 'Pigeon', 0x12345678, 'Hello')
+  assert.deepEqual(port.commands.at(-1), [3, 0, 0, 0x78, 0x56, 0x34, 0x12, ...encode('Hello')])
+  await assert.rejects(session.sendChannel(key, 0, 'Wrong', 'Pigeon', 1, 'Hello'), /channel changed/)
+  assert.equal(port.commands.at(-1)[0], 31)
+  await assert.rejects(session.sendChannel(key, 0, 'Public', 'Wrong', 1, 'Hello'), /sender name changed/)
+  assert.equal(port.commands.at(-1)[0], 31)
+  reject = true
+  await assert.rejects(session.sendChannel(key, 0, 'Public', 'Pigeon', 1, 'Hello'), /radio rejected.*device error 2/)
+  assert.equal(session.getSnapshot().phase, 'ready')
+  await session.disconnect()
+})
+
 test('USB framing tolerates split headers, noise and multiple packets per read', () => {
   const decoder = new SerialFrameDecoder()
   assert.deepEqual([...decoder.read(Uint8Array.of(0, 0x3e, 0, 0, 0x3e, 177, 0, 0x3e))], [])

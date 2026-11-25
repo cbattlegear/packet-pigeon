@@ -1,6 +1,7 @@
 export const Command = {
   appStart: 1,
   sendDirect: 2,
+  sendChannel: 3,
   contacts: 4,
   nextMessage: 10,
   resetPath: 13,
