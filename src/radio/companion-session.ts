@@ -433,6 +433,7 @@ export class CompanionSession {
     radioKey: string,
     recipient: string,
     command: (link: SerialLink) => Promise<T>,
+    signal?: AbortSignal,
   ) {
     const key = contactPublicKey(recipient)
     const attempt = this.attempt
@@ -442,6 +443,7 @@ export class CompanionSession {
     }
     if (this.receiptHolds.size) throw new Error('Finish message sync or save the pending receipt before sending.')
     if (this.contactWritePending || this.directCommandPending) throw new Error('Another radio command is in progress.')
+    if (signal?.aborted) throw new Error('The direct-message command was cancelled before transmission.')
     this.directCommandPending = true
     try {
       const contacts = await this.readContacts(link)
@@ -456,13 +458,16 @@ export class CompanionSession {
       if (matches[0].type !== 1 && matches[0].type !== 3) {
         throw new Error('Direct messages require a companion or room contact.')
       }
+      if (signal?.aborted) throw new Error('The direct-message command was cancelled before transmission.')
       return await command(link)
     } finally {
       this.directCommandPending = false
     }
   }
 
-  readonly sendDirect = async (radioKey: string, recipient: string, timestamp: number, attempt: number, text: string) => {
+  readonly sendDirect = async (
+    radioKey: string, recipient: string, timestamp: number, attempt: number, text: string, signal?: AbortSignal,
+  ) => {
     const command = directMessageCommand(recipient, timestamp, attempt, text)
     return this.withDirectContact(radioKey, recipient, async (link) => {
       const result = await link.request<{ error: Uint8Array } | { receipt: DirectSendReceipt }>(command, (frame) => {
@@ -474,10 +479,10 @@ export class CompanionSession {
         throw new CompanionError('device-error', `The radio rejected the message${detail}.`)
       }
       return result.receipt
-    })
+    }, signal)
   }
 
-  readonly resetDirectPath = async (radioKey: string, recipient: string) => {
+  readonly resetDirectPath = async (radioKey: string, recipient: string, signal?: AbortSignal) => {
     const command = resetPathCommand(recipient)
     return this.withDirectContact(radioKey, recipient, async (link) => {
       const frame = await link.request(command, (response) => {
@@ -491,7 +496,7 @@ export class CompanionSession {
         contacts: this.snapshot.contacts.map((contact) => contact.publicKey === recipient
           ? { ...contact, pathLength: 0xff } : contact),
       })
-    })
+    }, signal)
   }
 
   private async initialize(attempt: Attempt, link: SerialLink) {

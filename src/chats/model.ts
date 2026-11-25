@@ -62,7 +62,9 @@ export function conversations(data: RadioData): Conversation[] {
     add(id).messages.push(message)
   }
   return [...byId.values()].sort((first, second) => {
-    const latest = (conversation: Conversation) => Math.max(0, ...conversation.messages.map((message) => message.timestamp ?? 0))
+    const latest = (conversation: Conversation) => conversation.messages.reduce(
+      (latest, message) => Number.isFinite(message.timestamp) ? Math.max(latest, message.timestamp ?? 0) : latest, 0,
+    )
     return latest(second) - latest(first) || first.title.localeCompare(second.title) || first.id.localeCompare(second.id)
   })
 }

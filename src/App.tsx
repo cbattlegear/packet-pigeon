@@ -2,6 +2,8 @@ import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } fr
 import { CompanionSession, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import { MessageSync } from './integration/message-sync.ts'
+import { DirectMessages } from './integration/direct-messages.ts'
+import { ChatPanel } from './chats/ChatPanel.tsx'
 import { ContactsPanel } from './contacts/ContactsPanel.tsx'
 import { mapRadioContacts } from './map/nodes.ts'
 import type { Coordinates } from './map/nodes.ts'
@@ -14,6 +16,7 @@ const messageSync = new MessageSync(session, undefined, () => {
   const status = cache.getSnapshot()
   return !status.error && status.pending === 0 && !status.saving
 })
+const directMessages = new DirectMessages(session)
 const MapWorkspace = lazy(() => import('./map/MapWorkspace.tsx'))
 
 const sections = ['Chats', 'Contacts', 'Channels', 'Map', 'Tools', 'Settings'] as const
@@ -63,14 +66,13 @@ function App() {
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
   const messageStatus = useSyncExternalStore(messageSync.subscribe, messageSync.getSnapshot)
+  const directStatus = useSyncExternalStore(directMessages.subscribe, directMessages.getSnapshot)
   const radioNodes = useMemo(() => mapRadioContacts(snapshot.contacts), [snapshot.contacts])
   const usbSupport = getWebSerialSupport()
   const bluetoothSupport = getWebBluetoothSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
   const canDisconnect = ['opening', 'handshake', 'syncing', 'ready', 'reconnecting'].includes(snapshot.phase)
   const controlsDisabled = busy || snapshot.error?.code === 'cleanup-failed'
-  const bluetoothConnected = snapshot.transport === 'bluetooth'
-  const canSyncMessages = snapshot.phase === 'ready' && snapshot.transport === 'usb'
   const connection = {
     idle: 'Disconnected',
     choosing: 'Choosing device',
@@ -105,16 +107,16 @@ function App() {
   }, [snapshot.device?.publicKey])
 
   useEffect(() => {
-    if (!messageStatus.syncing && !messageStatus.pending) return
+    if (!messageStatus.syncing && !messageStatus.pending && !directStatus.activeId && !directStatus.pending) return
     const warn = (event: BeforeUnloadEvent) => {
       event.preventDefault()
     }
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
-  }, [messageStatus.syncing, messageStatus.pending])
+  }, [messageStatus.syncing, messageStatus.pending, directStatus.activeId, directStatus.pending])
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${activeSection === 'Chats' ? ' app-shell--chats' : ''}`}>
       <a
         className="skip-link"
         href="#main-content"
@@ -156,7 +158,7 @@ function App() {
             )}
           </div>
           <p className="connection-warning" id="connection-warning">
-            Message sync is manual. Sending is not available yet.
+            Message sync is manual and requires USB.
           </p>
           <OfflineStatus />
         </div>
@@ -183,12 +185,20 @@ function App() {
 
       <main className="main-content" id="main-content" tabIndex={-1}>
         {(!usbSupport.supported || !bluetoothSupport.supported || snapshot.error
-          || cacheStatus.error || messageStatus.error || messageStatus.pending) && (
+          || cacheStatus.error || messageStatus.error || messageStatus.pending || directStatus.error) && (
           <div className="notices">
             {!usbSupport.supported && <p role="status">{usbSupport.error.message}</p>}
             {!bluetoothSupport.supported && <p role="status">{bluetoothSupport.error.message}</p>}
             {snapshot.error && <p role="alert">{snapshot.error.message}</p>}
             {messageStatus.error && <p role="alert">Message sync: {messageStatus.error}</p>}
+            {directStatus.error && (
+              <div role="alert">
+                <p>Messages: {directStatus.error}</p>
+                {directStatus.pending > 0 && (
+                  <button type="button" onClick={() => void directMessages.retrySaving()}>Retry saving message changes</button>
+                )}
+              </div>
+            )}
             {messageStatus.pending && (
               <div role="alert">
                 <p>A received message is not saved. Keep this page open and retry saving. Radio ownership stays reserved until the receipt is saved.</p>
@@ -208,49 +218,11 @@ function App() {
             )}
           </div>
         )}
-        {activeSection === 'Chats' ? (
-          <div className="chats-layout">
-            <section className="conversation-list" aria-labelledby="chats-heading">
-              <div className="pane-heading">
-                <h1 id="chats-heading">Chats</h1>
-                <p>Received messages</p>
-              </div>
-              <div className="message-controls">
-                <button type="button" onClick={() => void messageSync.sync()}
-                  disabled={messageStatus.syncing || (!canSyncMessages && !messageStatus.pending)}>
-                  {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
-                    ? canSyncMessages ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
-                </button>
-                <p>{bluetoothConnected ? 'Connect over USB to sync queued messages.'
-                  : 'Each receipt is saved before requesting the next. Interruptions can still lose a message.'}</p>
-              </div>
-            </section>
-
-            <section className="conversation-pane" aria-label="Received messages">
-              <div className="conversation-heading">
-                <p>Received messages</p>
-                <span>{messageStatus.key ? `Radio ${messageStatus.key.slice(0, 12)}…` : 'Connect a radio to view its messages'}</span>
-              </div>
-              {messageStatus.data?.messages.length ? (
-                <ol className="received-messages">
-                  {messageStatus.data.messages.map((message) => (
-                    <li key={message.id}>
-                      <strong>{message.conversationId}</strong>
-                      {message.timestamp !== null && <time dateTime={new Date(message.timestamp).toISOString()}> {new Date(message.timestamp).toLocaleString()}</time>}
-                      {message.text && <p>{message.text}</p>}
-                      {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
-                      {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
-                      {!message.receipt && !message.rawHex && <p>{message.text || 'Empty message'}</p>}
-                      {message.rawHex && <details><summary>Raw receipt</summary><code>{message.rawHex}</code></details>}
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <StateMessage kind="empty" title="No cached messages" description="Connect a radio and sync to read its queued messages." />
-              )}
-            </section>
-          </div>
-        ) : !mapVisible && activeSection !== 'Contacts' && (
+        <div className="chat-slot" hidden={activeSection !== 'Chats'}>
+          <ChatPanel snapshot={snapshot} messageSync={messageSync} messageStatus={messageStatus}
+            direct={directMessages} status={directStatus} cacheSaving={cacheStatus.saving} />
+        </div>
+        {activeSection !== 'Chats' && !mapVisible && activeSection !== 'Contacts' && (
           <section className="section-pane" aria-labelledby="section-heading">
             <div className="pane-heading">
               <h1 id="section-heading">{activeSection}</h1>
@@ -268,7 +240,7 @@ function App() {
             <div className="section-pane">
               <div className="pane-heading"><h1>Contacts</h1></div>
               <ContactsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving}
-                messageSyncing={messageStatus.syncing}
+                messageSyncing={messageStatus.syncing} messageSending={directStatus.activeId !== null}
                 onMap={(position, terrain) => {
                   setContactFocus({ position, terrain })
                   window.location.hash = terrain ? 'tools' : 'map'

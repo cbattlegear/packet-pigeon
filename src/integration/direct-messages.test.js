@@ -73,6 +73,18 @@ test('a disconnected send reports an error and preserves the draft without creat
   storage.close()
 })
 
+test('invalid message text is reported without sending or clearing the draft', async () => {
+  const { source, direct } = await fixture()
+  for (const text of ['NUL\0inside', '\ud800']) {
+    await direct.saveDraft(key, `direct:${recipient}`, text)
+    assert.equal(await direct.send(key, recipient, text, options), false)
+    assert.match(direct.getSnapshot().error, /valid UTF-8 bytes without NUL/)
+    assert.equal(direct.draft(key, `direct:${recipient}`), text)
+  }
+  assert.equal(direct.getSnapshot().data.messages.length, 0)
+  assert.equal(source.sends.length, 0)
+})
+
 test('retries through direct and flood attempts, then retries the same message with an early ACK', async () => {
   const { source, direct } = await fixture()
   const states = new Set()

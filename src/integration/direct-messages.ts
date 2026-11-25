@@ -17,7 +17,9 @@ type ActiveSend = {
   cancelled: boolean
   delivered: boolean
   currentCode: string | null
+  codes: Set<string>
   earlyAcks: Map<string, number>
+  controller: AbortController
   wake?: () => void
 }
 
@@ -97,6 +99,7 @@ export class DirectMessages {
     const active = this.active
     if (active?.key === key && result.message?.id === active.id && result.message.outgoing?.status === 'delivered') {
       active.delivered = true
+      active.controller.abort()
       active.wake?.()
     }
   }
@@ -121,6 +124,7 @@ export class DirectMessages {
             pending: this.pendingCount(),
             error: `Could not save a message update: ${messageOf(error)} Keep this page open and retry saving.`,
           })
+          this.active?.controller.abort()
           this.active?.wake?.()
         }
         throw error
@@ -167,9 +171,11 @@ export class DirectMessages {
         await storage.update(key, { draft: { conversationId, text: text || null } })
         const data = await storage.read(key)
         if (this.pendingDrafts.get(name)?.version === draft.version) this.pendingDrafts.delete(name)
+        const pending = this.pendingCount()
         this.update({
           ...(this.status.key === key ? { data } : {}),
-          pending: this.pendingCount(),
+          pending,
+          ...(pending === 0 && this.status.error?.startsWith('Could not save the draft:') ? { error: null } : {}),
         })
       } catch (error) {
         this.update({
@@ -243,6 +249,7 @@ export class DirectMessages {
       })
     } else if (!ready) {
       this.readyKey = null
+      this.active?.controller.abort()
       this.active?.wake?.()
     }
   }
@@ -254,8 +261,11 @@ export class DirectMessages {
     try {
       const key = radioKeyFromPublicKey(publicKey)
       const ack = decodeDirectAck(push.payload)
-      if (this.active?.key === key && this.active.currentCode === ack.code) {
-        this.active.earlyAcks.set(ack.code, ack.roundTripMs)
+      const active = this.active
+      if (active?.key === key && active.codes.has(ack.code)) {
+        if (active.currentCode === ack.code) active.earlyAcks.set(ack.code, ack.roundTripMs)
+        active.controller.abort()
+        active.wake?.()
       }
       void this.apply(key, { kind: 'ack', ...ack }, true).catch((error: unknown) => {
         this.update({ error: `Could not record an acknowledgement: ${messageOf(error)} Keep this page open and retry saving.` })
@@ -268,7 +278,8 @@ export class DirectMessages {
   private start(key: RadioKey, id: string) {
     if (this.active) throw new Error('Finish or cancel the current message before sending another.')
     const active: ActiveSend = {
-      key, id, cancelled: false, delivered: false, currentCode: null, earlyAcks: new Map(),
+      key, id, cancelled: false, delivered: false, currentCode: null, codes: new Set(),
+      earlyAcks: new Map(), controller: new AbortController(),
     }
     this.active = active
     this.update({ activeId: id, cancelling: false, error: null })
@@ -282,12 +293,13 @@ export class DirectMessages {
   }
 
   readonly send = async (key: RadioKey, recipient: string, text: string, options: DirectSendOptions) => {
-    directTextBytes(text)
-    const target = radioKeyFromPublicKey(recipient)
-    const valid = validateDirectOptions(options)
-    const id = crypto.randomUUID()
-    const active = this.start(key, id)
+    let active: ActiveSend | undefined
     try {
+      directTextBytes(text)
+      const target = radioKeyFromPublicKey(recipient)
+      const valid = validateDirectOptions(options)
+      const id = crypto.randomUUID()
+      active = this.start(key, id)
       await this.saveDraft(key, `direct:${target}`, text)
       if (!this.isConnected(key)) throw new Error('Connect the selected radio before sending. Your draft was kept.')
       if (this.pendingCount()) throw new Error('Retry saving the pending message changes before sending.')
@@ -299,16 +311,17 @@ export class DirectMessages {
       void this.run(active, result.message)
       return true
     } catch (error) {
-      this.finish(active)
+      if (active) this.finish(active)
       this.update({ error: messageOf(error) })
       return false
     }
   }
 
   readonly retry = async (key: RadioKey, id: string, options: DirectSendOptions) => {
-    const valid = validateDirectOptions(options)
-    const active = this.start(key, id)
+    let active: ActiveSend | undefined
     try {
+      const valid = validateDirectOptions(options)
+      active = this.start(key, id)
       if (!this.isConnected(key)) throw new Error('Connect the selected radio before retrying.')
       if (this.pendingCount()) throw new Error('Retry saving the pending message changes before retrying.')
       if (active.cancelled) throw new Error('Retry was cancelled.')
@@ -317,7 +330,7 @@ export class DirectMessages {
       void this.run(active, result.message)
       return true
     } catch (error) {
-      this.finish(active)
+      if (active) this.finish(active)
       this.update({ error: messageOf(error) })
       return false
     }
@@ -326,6 +339,7 @@ export class DirectMessages {
   readonly cancel = () => {
     if (!this.active) return
     this.active.cancelled = true
+    this.active.controller.abort()
     this.active.wake?.()
     this.update({ cancelling: true })
   }
@@ -348,16 +362,19 @@ export class DirectMessages {
       const outgoing = message.outgoing
       if (!outgoing) return
       const { wireTimestamp, recipient, options } = outgoing
+      for (const ack of outgoing.acknowledgements) active.codes.add(ack.code)
       const total = options.directAttempts + options.floodAttempts
       let failure = `No acknowledgement after ${total} attempts. A late acknowledgement can still update this message.`
       try {
         for (let attempt = 0; attempt < total; attempt++) {
+          await this.tail
           if (active.delivered) return
           if (active.cancelled) throw new Error('Cancelled. Already transmitted packets cannot be recalled.')
           if (!this.isConnected(active.key)) throw new Error('The radio disconnected. A packet may already have been transmitted.')
           if (this.pendingChanges.length) throw new Error('Sending stopped because a message update could not be saved.')
+          if (active.controller.signal.aborted) throw new Error('Sending stopped because an acknowledgement could not be verified.')
           if (attempt === options.directAttempts && options.floodAttempts > 0) {
-            await this.source.resetDirectPath(active.key, recipient)
+            await this.source.resetDirectPath(active.key, recipient, active.controller.signal)
             if (active.delivered) return
             if (active.cancelled) throw new Error('Cancelled. Already transmitted packets cannot be recalled.')
           }
@@ -368,7 +385,8 @@ export class DirectMessages {
           if (prepared.message?.outgoing?.status === 'delivered' || active.delivered) return
           if (active.cancelled) throw new Error('Cancelled. Already transmitted packets cannot be recalled.')
           active.currentCode = code
-          const receipt = await this.source.sendDirect(active.key, recipient, wireTimestamp, attempt, message.text)
+          active.codes.add(code)
+          const receipt = await this.source.sendDirect(active.key, recipient, wireTimestamp, attempt, message.text, active.controller.signal)
           if (receipt.expectedAck !== code) {
             throw new Error('The radio returned an unexpected acknowledgement code. Delivery cannot be verified.')
           }
@@ -393,7 +411,9 @@ export class DirectMessages {
         if (active.cancelled) failure = 'Cancelled. Already transmitted packets cannot be recalled.'
         else if (!this.isConnected(active.key)) failure = 'The radio disconnected. A packet may already have been transmitted.'
       } catch (error) {
-        failure = messageOf(error)
+        await this.tail
+        if (active.delivered) return
+        failure = active.cancelled ? 'Cancelled. Already transmitted packets cannot be recalled.' : messageOf(error)
       }
       try {
         await this.apply(active.key, { kind: 'failed', id: active.id, wireTimestamp, error: failure }, true)
