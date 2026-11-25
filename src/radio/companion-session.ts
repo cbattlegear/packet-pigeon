@@ -4,10 +4,13 @@ import {
 } from './protocol.ts'
 import type { CompanionChannel, CompanionContact, CompanionDevice, CompanionMessage } from './protocol.ts'
 import { expectResponse, SerialLink } from './serial-link.ts'
+import type { CompanionLinkPort } from './serial-link.ts'
 import { browserSerialEnvironment, choosePort } from './web-serial.ts'
 import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
 import { addContactCommand, contactPublicKey, removeContactCommand, writeContactCommand } from './contact-commands.ts'
 import type { NewContact } from './contact-commands.ts'
+import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort } from './web-bluetooth.ts'
+import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bluetooth.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -17,6 +20,7 @@ export interface SyncProgress {
 
 export interface CompanionSnapshot {
   readonly phase: 'idle' | 'choosing' | 'opening' | 'handshake' | 'syncing' | 'ready' | 'reconnecting' | 'closing' | 'error'
+  readonly transport: 'usb' | 'bluetooth' | null
   readonly error: CompanionError | null
   readonly device: CompanionDevice | null
   readonly contacts: readonly CompanionContact[]
@@ -43,21 +47,26 @@ interface Attempt {
   recovering?: boolean
 }
 
+type SelectedTransport =
+  | { kind: 'usb'; device: CompanionSerialPort }
+  | { kind: 'bluetooth'; device: CompanionBluetoothDevice }
+
 interface LockProvider {
   request(name: string, options: { ifAvailable: true }, callback: (lock: unknown | null) => Promise<void>): Promise<void>
 }
 
 const initial: CompanionSnapshot = {
-  phase: 'idle', error: null, device: null, contacts: [], channels: [], messages: [], progress: null,
+  phase: 'idle', transport: null, error: null, device: null, contacts: [], channels: [], messages: [], progress: null,
 }
 
 function cleanupError(cause: unknown) {
-  return new CompanionError('cleanup-failed', 'Could not release the USB serial port. Reload this tab before reconnecting.', { cause })
+  return new CompanionError('cleanup-failed', 'Could not release the radio connection. Reload this tab before reconnecting.', { cause })
 }
 
 export class CompanionSession {
   private readonly events = new EventTarget()
   private readonly environment?: WebSerialEnvironment
+  private readonly bluetoothEnvironment?: WebBluetoothEnvironment
   private readonly timeoutMs: number
   private readonly locks?: LockProvider
   private readonly retryDelays: readonly number[]
@@ -73,12 +82,19 @@ export class CompanionSession {
   private generation = 0
   private retryTimer?: ReturnType<typeof setTimeout>
   private cancelDelay?: () => void
-  private port?: CompanionSerialPort
+  private connection?: SelectedTransport
   private expectedKey?: string
   private contactWritePending = false
 
-  constructor(options: { environment?: WebSerialEnvironment; timeoutMs?: number; locks?: LockProvider; retryDelays?: readonly number[] } = {}) {
+  constructor(options: {
+    environment?: WebSerialEnvironment
+    bluetoothEnvironment?: WebBluetoothEnvironment
+    timeoutMs?: number
+    locks?: LockProvider
+    retryDelays?: readonly number[]
+  } = {}) {
     this.environment = options.environment
+    this.bluetoothEnvironment = options.bluetoothEnvironment
     this.timeoutMs = options.timeoutMs ?? 5000
     this.locks = options.locks ?? globalThis.navigator?.locks
     this.retryDelays = options.retryDelays ?? [1000, 2000, 4000, 8000, 16000]
@@ -135,9 +151,10 @@ export class CompanionSession {
   }
 
   private async acquireLock() {
-    if (!this.locks) throw new CompanionError('ownership', 'This browser cannot safely coordinate USB access between tabs.')
+    if (!this.locks) throw new CompanionError('ownership', 'This browser cannot safely coordinate radio access between tabs.')
     let resolveAcquired: (acquired: boolean) => void = () => {}
     const acquired = new Promise<boolean>((resolve) => { resolveAcquired = resolve })
+    // Use the same ownership lock as existing USB-only tabs.
     this.ownership = this.locks.request('packet-pigeon-usb-session', { ifAvailable: true }, async (lock) => {
       resolveAcquired(lock !== null)
       if (lock !== null) await new Promise<void>((resolve) => { this.releaseOwnership = resolve })
@@ -148,10 +165,10 @@ export class CompanionSession {
         await this.ownership
       } catch (cause) {
         this.ownership = undefined
-        throw new CompanionError('ownership', 'Could not coordinate USB access between tabs.', { cause })
+        throw new CompanionError('ownership', 'Could not coordinate radio access between tabs.', { cause })
       }
       this.ownership = undefined
-      throw new CompanionError('ownership', 'Another tab owns the USB session, or USB ownership is unavailable.')
+      throw new CompanionError('ownership', 'Another tab owns the radio session, or radio ownership is unavailable.')
     }
   }
 
@@ -165,49 +182,69 @@ export class CompanionSession {
     this.ownership = undefined
   }
 
-  readonly connect = async () => {
+  readonly connect = () => this.connectUsing(async () => {
+    const device = await choosePort(this.environment ?? browserSerialEnvironment())
+    return device ? { kind: 'usb', device } : null
+  })
+
+  readonly connectBluetooth = () => this.connectUsing(async () => {
+    const device = await chooseBluetoothDevice(this.bluetoothEnvironment ?? browserBluetoothEnvironment())
+    return device ? { kind: 'bluetooth', device } : null
+  })
+
+  private async connectUsing(choose: () => Promise<SelectedTransport | null>) {
     if (this.attempt || this.ownership || this.snapshot.phase === 'closing' || this.snapshot.phase === 'reconnecting') return
     const generation = ++this.generation
     const attempt: Attempt = {}
     this.attempt = attempt
-    this.update({ phase: 'choosing', error: null, progress: null })
+    this.update({ phase: 'choosing', transport: null, error: null, progress: null })
 
     try {
-      const port = await choosePort(this.environment ?? browserSerialEnvironment())
+      const connection = await choose()
       if (this.attempt !== attempt) return
-      if (!port) {
+      if (!connection) {
         this.attempt = undefined
         this.update({ phase: 'idle' })
         return
       }
 
-      this.update({ phase: 'opening' })
+      this.update({ phase: 'opening', transport: connection.kind })
       await this.cleanup
       if (this.attempt !== attempt) return
       attempt.locking = this.acquireLock()
       await attempt.locking
       if (this.attempt !== attempt) return
-      this.port = port
+      this.connection = connection
       this.expectedKey = undefined
-      attempt.opening = this.openPort(attempt, port)
+      attempt.opening = this.openConnection(attempt, connection)
       const link = await attempt.opening
       if (!link || this.attempt !== attempt) return
-      this.update({ ...initial, phase: 'handshake' })
+      this.update({ ...initial, phase: 'handshake', transport: connection.kind })
       await this.initialize(attempt, link)
       if (this.attempt !== attempt) await this.failure
     } catch (error) {
       if (generation !== this.generation) return
       this.fail(attempt, error instanceof CompanionError ? error : new CompanionError(
-        'open-failed', 'Could not open the USB serial port. Check that it is not in use.', { cause: error },
+        'open-failed', 'Could not open the radio connection. Check that it is not in use.', { cause: error },
       ))
       await this.failure
     }
   }
 
-  private async openPort(attempt: Attempt, port: CompanionSerialPort) {
+  private async openConnection(attempt: Attempt, connection: SelectedTransport) {
+    let port: CompanionLinkPort
     try {
-      await port.open({ baudRate: 115200 })
+      if (connection.kind === 'usb') {
+        await connection.device.open({ baudRate: 115200 })
+        port = connection.device
+      } else {
+        port = await openBluetoothPort(connection.device)
+      }
     } catch (error) {
+      if (error instanceof CompanionError && error.code === 'cleanup-failed') {
+        this.cleanup = Promise.reject(error)
+        void this.cleanup.catch(() => {})
+      }
       if (this.attempt !== attempt) return null
       throw error
     }
@@ -217,7 +254,7 @@ export class CompanionSession {
     }
     try {
       attempt.link = new SerialLink(port, this.timeoutMs,
-        (frame) => this.onPush(attempt, frame), (error) => this.fail(attempt, error))
+        (frame) => this.onPush(attempt, frame), (error) => this.fail(attempt, error), connection.kind)
       return attempt.link
     } catch (error) {
       await this.closePort(port)
@@ -226,7 +263,7 @@ export class CompanionSession {
     }
   }
 
-  private closePort(port: CompanionSerialPort) {
+  private closePort(port: CompanionLinkPort) {
     this.cleanup = Promise.resolve().then(() => port.close())
     return this.cleanup
   }
@@ -240,7 +277,7 @@ export class CompanionSession {
     const attempt = this.attempt
     this.attempt = undefined
     this.expectedKey = undefined
-    this.port = undefined
+    this.connection = undefined
     this.update({ phase: 'closing', progress: null, error: null })
     try {
       if (attempt?.locking) await attempt.locking.catch(() => {})
@@ -248,7 +285,7 @@ export class CompanionSession {
       else if (attempt?.opening) await attempt.opening
       await this.cleanup
       await this.releaseLock()
-      this.update({ phase: 'idle' })
+      this.update({ phase: 'idle', transport: null })
     } catch (error) {
       this.update({
         phase: 'error',
@@ -261,6 +298,11 @@ export class CompanionSession {
     const link = this.attempt?.link
     if (this.snapshot.phase !== 'ready' || !link || this.snapshot.device?.publicKey !== publicKey) {
       throw new CompanionError('disconnected', 'Connect the selected radio before syncing messages.')
+    }
+    // BLE can split a dequeued message across notifications without exposing
+    // its total length. Only the framed USB transport can safely drain it.
+    if (this.connection?.kind !== 'usb') {
+      throw new CompanionError('unsupported-transport', 'Connect over USB to sync queued messages.')
     }
     if (this.receiptHolds.size) {
       throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
@@ -395,7 +437,7 @@ export class CompanionSession {
     })
     if (this.attempt !== attempt) return
     if (this.expectedKey && device.publicKey !== this.expectedKey) {
-      throw new CompanionError('identity', 'The reconnected port belongs to a different radio. Use Connect USB to choose the correct device.')
+      throw new CompanionError('identity', 'The reconnected device belongs to a different radio. Use a connection button to choose the correct device.')
     }
     this.expectedKey = device.publicKey
     this.update({ device, phase: 'syncing', progress: { stage: 'contacts', completed: 0, total: null } })
@@ -420,8 +462,35 @@ export class CompanionSession {
     this.update({ phase: 'ready', progress: null })
   }
 
+  private async reconnectConnection(): Promise<SelectedTransport | undefined> {
+    const current = this.connection
+    if (current?.kind === 'bluetooth') return current
+    const serial = (this.environment ?? browserSerialEnvironment()).serial
+    if (!serial?.getPorts || !current?.device.getInfo) {
+      throw new CompanionError('reconnect-failed', 'Automatic reconnection is unavailable. Use Connect USB to reconnect.')
+    }
+    let ports: CompanionSerialPort[]
+    try {
+      ports = await serial.getPorts()
+    } catch (cause) {
+      throw new CompanionError('reconnect-failed', 'Could not list authorized USB ports. Check browser permissions and use Connect USB.', { cause })
+    }
+    if (ports.includes(current.device)) return current
+    const info = current.device.getInfo()
+    const matches = ports.filter((candidate) => {
+      const other = candidate.getInfo?.()
+      return info.usbVendorId !== undefined && info.usbProductId !== undefined
+        && other?.usbVendorId === info.usbVendorId && other.usbProductId === info.usbProductId
+    })
+    if (matches.length > 1) {
+      throw new CompanionError('identity', 'Multiple matching USB ports are available. Use Connect USB to choose the correct radio.')
+    }
+    return matches[0] ? { kind: 'usb', device: matches[0] } : undefined
+  }
+
   private async reconnect(generation: number) {
     let lastError = this.snapshot.error
+    const action = this.connection?.kind === 'bluetooth' ? 'Connect Bluetooth' : 'Connect USB'
     try {
       await this.cleanup
       for (const delay of this.retryDelays) {
@@ -433,40 +502,21 @@ export class CompanionSession {
         this.cancelDelay = undefined
         this.retryTimer = undefined
         if (generation !== this.generation) return
-        const serial = (this.environment ?? browserSerialEnvironment()).serial
-        if (!serial?.getPorts || !this.port?.getInfo) {
-          throw new CompanionError('reconnect-failed', 'Automatic reconnection is unavailable. Use Connect USB to reconnect.')
-        }
-        let ports: CompanionSerialPort[]
-        try {
-          ports = await serial.getPorts()
-        } catch (cause) {
-          throw new CompanionError('reconnect-failed', 'Could not list authorized USB ports. Check browser permissions and use Connect USB.', { cause })
-        }
+        const connection = await this.reconnectConnection()
         if (generation !== this.generation) return
-        const info = this.port.getInfo()
-        const matches = ports.filter((candidate) => {
-          const other = candidate.getInfo?.()
-          return info.usbVendorId !== undefined && info.usbProductId !== undefined &&
-            other?.usbVendorId === info.usbVendorId && other.usbProductId === info.usbProductId
-        })
-        const port = ports.includes(this.port) ? this.port : matches.length === 1 ? matches[0] : undefined
-        if (!port) {
-          if (matches.length > 1) throw new CompanionError('identity', 'Multiple matching USB ports are available. Use Connect USB to choose the correct radio.')
-          continue
-        }
+        if (!connection) continue
         const attempt: Attempt = { recovering: true }
         this.attempt = attempt
         try {
-          attempt.opening = this.openPort(attempt, port)
+          attempt.opening = this.openConnection(attempt, connection)
           const link = await attempt.opening
           if (!link || generation !== this.generation) return
-          this.update({ ...initial, phase: 'handshake' })
+          this.update({ ...initial, phase: 'handshake', transport: connection.kind })
           await this.initialize(attempt, link)
           if (generation !== this.generation) return
           if (this.attempt === attempt && this.snapshot.phase === 'ready') {
             attempt.recovering = false
-            this.port = port
+            this.connection = connection
             return
           }
         } catch (error) {
@@ -476,15 +526,15 @@ export class CompanionSession {
           if (attempt.link) this.cleanup = attempt.link.close()
           await this.cleanup
           if (error instanceof CompanionError && error.code === 'identity') throw error
-          lastError = error instanceof CompanionError ? error : new CompanionError('open-failed', 'Could not reopen the USB serial port.', { cause: error })
+          lastError = error instanceof CompanionError ? error : new CompanionError('open-failed', 'Could not reopen the radio connection.', { cause: error })
           this.update({ phase: 'reconnecting', error: lastError, progress: null })
         }
       }
-      throw new CompanionError('reconnect-failed', 'Automatic reconnection stopped after several attempts. Use Connect USB to retry.', { cause: lastError })
+      throw new CompanionError('reconnect-failed', `Automatic reconnection stopped after several attempts. Use ${action} to retry.`, { cause: lastError })
     } catch (error) {
       if (generation !== this.generation) return
       await this.finishFailure(error instanceof CompanionError ? error : new CompanionError(
-        'serial-io', 'Could not release or reconnect the USB serial port. Reload this tab before reconnecting.', { cause: error },
+        'serial-io', 'Could not release or reconnect the radio. Reload this tab before reconnecting.', { cause: error },
       ), generation)
     }
   }
