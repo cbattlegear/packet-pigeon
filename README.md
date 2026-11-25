@@ -3,9 +3,10 @@
 Open source MeshCore web UI. This is an incremental, desktop-first starter built
 with React, TypeScript, Vite, and npm.
 
-The current app is a static, client-only shell with keyboard-accessible navigation
-and an explicit empty workspace. It does not connect to radios, manage sessions,
-or send packets. No backend, router, or radio library is included yet.
+The current app is a static, client-only shell with keyboard-accessible navigation,
+an empty conversation workspace, and unavailable device and sync status. It
+does not connect to radios, manage sessions, or send packets. No backend, router,
+or radio library is included yet.
 
 ## Getting started
 
@@ -37,7 +38,9 @@ Keep work small and split by behavior, rather than creating empty layers up fron
   layout; `src/index.css` owns global styles and shared color tokens.
   `src/main.tsx` is the React entry point. Extract components as the UI grows.
   Preserve desktop-first layouts, semantic HTML, visible keyboard focus, and
-  usable narrow-window behavior. Do not present placeholders as working controls.
+  usable narrow-window behavior. Navigation uses native fragment links, including
+  their standard right-click and keyboard alternatives. Do not present placeholders
+  as working controls.
 - **Radio and sessions:** add plain TypeScript modules under `src/radio` when
   implementing the first real radio behavior. Keep protocol, transport, and
   session logic independent of React: no React imports or UI state in those

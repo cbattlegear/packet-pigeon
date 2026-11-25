@@ -1,7 +1,7 @@
 .app-shell {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  grid-template-rows: auto 1fr;
+  grid-template-columns: 200px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-height: 100svh;
 }
 
@@ -25,7 +25,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 20px 28px;
+  padding: 16px 24px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
@@ -39,8 +39,8 @@
 .brand-mark {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   flex-shrink: 0;
   border-radius: 8px;
   color: var(--surface);
@@ -50,98 +50,274 @@
 
 .brand-name {
   font-weight: 700;
-  font-size: 1.1rem;
 }
 
 .brand-description,
-.connection-status {
+.header-status {
   color: var(--muted);
   font-size: 0.875rem;
 }
 
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #758992;
+}
+
 .sidebar {
-  padding: 24px 16px;
+  padding: 24px 12px;
   border-right: 1px solid var(--border);
   background: var(--surface);
 }
 
-.sidebar a {
-  display: block;
-  padding: 12px;
-  border-radius: 4px;
+.nav-label {
+  margin: 0 12px 10px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.nav-list {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav-list a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #344a54;
   font-weight: 600;
   text-decoration: none;
 }
 
-.sidebar a:hover {
-  background: #e9f2f3;
-  text-decoration: underline;
+.nav-list a:hover,
+.nav-list a[aria-current='page'] {
+  color: #124e56;
+  background: #e6f0f1;
+}
+
+.nav-list a[aria-current='page'] {
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.nav-marker {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid #afc4ca;
+  border-radius: 5px;
+  font-size: 0.75rem;
 }
 
 .main-content {
-  width: 100%;
-  max-width: 1080px;
-  padding: 40px;
-  scroll-margin-top: 16px;
+  min-width: 0;
 }
 
-.page-description {
-  margin-top: 8px;
-  color: var(--muted);
+.chats-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  min-height: 100%;
 }
 
-.empty-workspace {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 280px;
-  margin-top: 32px;
-  padding: 40px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
+.conversation-list {
+  border-right: 1px solid var(--border);
   background: var(--surface);
 }
 
-.empty-workspace p,
-.about-starter p {
-  max-width: 68ch;
-  margin-top: 12px;
+.pane-heading,
+.conversation-heading {
+  min-height: 104px;
+  padding: 25px 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.pane-heading h1 {
+  font-size: 1.5rem;
+}
+
+.pane-heading p,
+.conversation-heading span {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.conversation-heading p {
+  font-weight: 700;
+}
+
+.conversation-pane,
+.section-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.state-message {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 36px 28px;
+}
+
+.conversation-pane .state-message,
+.section-pane .state-message {
+  align-items: center;
+  min-height: 300px;
+  text-align: center;
+}
+
+.state-symbol {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--accent);
+  background: var(--surface);
+  font-size: 1.25rem;
+}
+
+.state-message h2 {
+  font-size: 1rem;
+}
+
+.state-message p {
+  max-width: 40ch;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.state-message--error .state-symbol {
+  color: #a02b2b;
+}
+
+.status-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  padding: 12px 24px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  font-size: 0.8rem;
+}
+
+.status-bar div {
+  display: flex;
+  gap: 8px;
+}
+
+.status-bar span,
+.status-bar p {
   color: var(--muted);
 }
 
-.about-starter {
-  margin-top: 40px;
-  scroll-margin-top: 24px;
+.status-bar strong {
+  font-weight: 600;
 }
 
-@media (max-width: 700px) {
+.status-bar p {
+  margin-left: auto;
+}
+
+@media (max-width: 800px) {
   .app-shell {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto 1fr;
-  }
-
-  .app-header {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
-    padding: 20px;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
   }
 
   .sidebar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
     padding: 12px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
 
-  .main-content {
+  .nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .nav-list {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .nav-list a {
+    padding: 8px 10px;
+  }
+
+  .nav-marker {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .app-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 20px;
+  }
+
+  .chats-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .conversation-list {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .pane-heading,
+  .conversation-heading {
+    min-height: auto;
+    padding: 20px;
+  }
+
+  .conversation-list .state-message {
+    padding: 24px 20px;
+  }
+
+  .conversation-pane .state-message,
+  .section-pane .state-message {
+    min-height: 220px;
     padding: 28px 20px;
   }
 
-  .empty-workspace {
-    min-height: 220px;
-    padding: 24px;
+  .status-bar {
+    padding: 12px 20px;
+  }
+
+  .status-bar p {
+    flex-basis: 100%;
+    margin-left: 0;
   }
 }
