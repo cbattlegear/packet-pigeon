@@ -37,7 +37,7 @@ export function MapCanvas({
     const limits = latLngBounds([-mercatorLatitude, -180], [mercatorLatitude, 180])
     const map = createMap(container.current, {
       center: [28, 0], zoom: 2, minZoom: 2, maxZoom: 19,
-      maxBounds: limits, maxBoundsViscosity: 1, scrollWheelZoom: false,
+      maxBounds: limits, maxBoundsViscosity: 1, scrollWheelZoom: false, trackResize: false,
     })
     mapRef.current = map
     map.createPane('offline-land').style.zIndex = '180'
@@ -48,7 +48,9 @@ export function MapCanvas({
       style: { color: '#a9bab0', fillColor: '#c8d4bc', fillOpacity: 0.72, weight: 1 },
     }).addTo(map)
     control.scale({ imperial: false }).addTo(map)
-    const observer = new ResizeObserver(() => map.invalidateSize({ pan: false }))
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width && entry.contentRect.height) map.invalidateSize({ pan: false })
+    })
     observer.observe(container.current)
     return () => {
       observer.disconnect()

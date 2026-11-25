@@ -17,6 +17,10 @@ function sectionFromHash(): Section {
   return sections.find((section) => section.toLowerCase() === hash) ?? 'Chats'
 }
 
+function isMapSection(section: Section): section is 'Map' | 'Tools' {
+  return section === 'Map' || section === 'Tools'
+}
+
 const sectionDescriptions: Record<Exclude<Section, 'Chats' | 'Map' | 'Tools'>, string> = {
   Contacts: 'Contacts will appear here when that feature is available.',
   Channels: 'Channels will appear here when that feature is available.',
@@ -44,7 +48,11 @@ function StateMessage({ kind, title, description }: StateMessageProps) {
 }
 
 function App() {
-  const [activeSection, setActiveSection] = useState<Section>(sectionFromHash)
+  const [{ activeSection, hasOpenedMap }, setNavigation] = useState(() => {
+    const activeSection = sectionFromHash()
+    return { activeSection, hasOpenedMap: isMapSection(activeSection) }
+  })
+  const mapVisible = isMapSection(activeSection)
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
   const radioNodes = useMemo(() => mapRadioContacts(snapshot.contacts), [snapshot.contacts])
@@ -67,7 +75,13 @@ function App() {
     : snapshot.phase === 'syncing' ? 'Syncing' : snapshot.phase === 'ready' ? 'Idle' : 'Not syncing'
 
   useEffect(() => {
-    const updateSection = () => setActiveSection(sectionFromHash())
+    const updateSection = () => {
+      const activeSection = sectionFromHash()
+      setNavigation((previous) => ({
+        activeSection,
+        hasOpenedMap: previous.hasOpenedMap || isMapSection(activeSection),
+      }))
+    }
     window.addEventListener('hashchange', updateSection)
     return () => window.removeEventListener('hashchange', updateSection)
   }, [])
@@ -178,16 +192,7 @@ function App() {
               />
             </section>
           </div>
-        ) : activeSection === 'Map' || activeSection === 'Tools' ? (
-          <div className="section-pane">
-            <div className="pane-heading">
-              <h1>{activeSection}</h1>
-            </div>
-            <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
-              <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'} />
-            </Suspense>
-          </div>
-        ) : (
+        ) : !mapVisible && (
           <section className="section-pane" aria-labelledby="section-heading">
             <div className="pane-heading">
               <h1 id="section-heading">{activeSection}</h1>
@@ -199,6 +204,18 @@ function App() {
               description={sectionDescriptions[activeSection]}
             />
           </section>
+        )}
+        {hasOpenedMap && (
+          <div hidden={!mapVisible}>
+            <div className="section-pane">
+              <div className="pane-heading">
+                <h1>{activeSection === 'Tools' ? 'Tools' : 'Map'}</h1>
+              </div>
+              <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
+                <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'} />
+              </Suspense>
+            </div>
+          </div>
         )}
       </main>
 
