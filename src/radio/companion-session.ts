@@ -392,7 +392,12 @@ export class CompanionSession {
   readonly refreshContacts = (radioKey: string) => this.changeContacts(radioKey, (link) => this.readContacts(link))
 
   readonly advertPath = (radioKey: string, contactKey: string) => (
-    this.runRadioCommand(radioKey, (link) => readAdvertPath(link, contactKey))
+    this.runRadioCommand(radioKey, (link) => {
+      if (this.connection?.kind !== 'usb') {
+        throw new CompanionError('unsupported-transport', 'Connect over USB to read an advert path from the radio.')
+      }
+      return readAdvertPath(link, contactKey)
+    })
   )
 
   readonly getAutoAdd = (radioKey: string) => (

@@ -166,11 +166,11 @@ Exports include public keys and any advertised positions.
 
 ## Discovered adverts
 
-Open **Discovery** from Contacts or the sidebar. The app records adverts
-heard by the connected radio. Search and filter by role, path hash width, or
-whether a node is already a contact. Load advert paths from the radio's local
-cache before sorting by hops or filtering by hash width. The firmware looks up
-paths by a public-key prefix. Packet Pigeon skips lookups with known collisions.
+Open **Discovery** from Contacts or the sidebar. Use USB to record live adverts
+and look up paths in the radio's local cache. Bluetooth notifications can split
+a firmware frame, so Bluetooth uses saved discovery history. Search and filter
+by role, path hash width, or whether a node is already a contact. The firmware
+looks up paths by a public-key prefix. Packet Pigeon skips known collisions.
 
 Select a cached radio to browse disconnected. Export selected adverts or import
 a Packet Pigeon discovery JSON file. Forgetting an advert clears it from local

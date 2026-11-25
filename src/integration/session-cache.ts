@@ -46,8 +46,9 @@ export class SessionCache {
     this.openStorage = openStorage
     session.subscribe(() => this.capture(session.getSnapshot()))
     session.subscribeToPushes?.((push) => {
-      const { device, phase, contacts } = session.getSnapshot()
-      if (!device || (phase !== 'ready' && phase !== 'syncing')) return
+      const { device, phase, contacts, transport } = session.getSnapshot()
+      // BLE notifications do not provide reliable advert frame boundaries.
+      if (transport !== 'usb' || !device || (phase !== 'ready' && phase !== 'syncing')) return
       const advert = decodeAdvert(push.code, push.payload)
       if (!advert) return
       const { publicKey, added } = advert

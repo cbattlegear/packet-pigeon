@@ -270,7 +270,8 @@ function App() {
             <div className="section-pane">
               <div className="pane-heading"><h1>Discovery</h1></div>
               <DiscoveryPanel view={discovery} entries={adverts} radioContacts={radioContacts}
-                connected={discoveryConnected} ready={snapshot.phase === 'ready'} pending={cacheStatus.pending}
+                connected={discoveryConnected} ready={snapshot.phase === 'ready'} usb={snapshot.transport === 'usb'}
+                pending={cacheStatus.pending}
                 session={session} openMap={() => {
                   setDiscoveryMapRequest((value) => value + 1)
                   window.location.hash = 'map'

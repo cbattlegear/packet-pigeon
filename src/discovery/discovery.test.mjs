@@ -71,7 +71,7 @@ test('stores passive adverts by verified radio and preserves newer metadata arou
   const factory = new IDBFactory()
   const store = await openRadioStorage(factory)
   let listener
-  let current = { phase: 'ready', device: { publicKey: radioA }, contacts: [], channels: [], messages: [] }
+  let current = { phase: 'ready', transport: 'usb', device: { publicKey: radioA }, contacts: [], channels: [], messages: [] }
   const cache = new SessionCache({
     subscribe() {}, getSnapshot: () => current, subscribeToPushes(fn) { listener = fn },
   }, async () => store)
