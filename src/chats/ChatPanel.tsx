@@ -13,7 +13,7 @@ import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredConta
 import type { Coordinates } from '../map/nodes.ts'
 import { ComposerTools } from '../sharing/ComposerTools.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
-import { conversations, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
+import { conversations, matchingChannelReceipts, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import './chats.css'
 
@@ -250,6 +250,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   const { repeats, visible } = useMemo(
     () => messageVisibility(conversation.messages, hideRepeats), [conversation.messages, hideRepeats],
   )
+  const channelMatches = useMemo(() => matchingChannelReceipts(conversation.messages), [conversation.messages])
   const unread = useMemo(() => unreadReceipts(visible, read), [visible, read])
   const bytes = new TextEncoder().encode(draft).length
   const isChannel = conversation.id.startsWith('channel:')
@@ -430,6 +431,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
           {visible.map((message) => {
             const sender = channelSender(message)
             const body = sender ? message.text.slice(sender.length + 2) : message.text
+            const matches = channelMatches.get(message.id)
             return (
             <li key={message.id} data-receipt-id={message.id}
               className={message.outgoing || message.channelOutgoing ? 'chat-message--outgoing' : undefined}>
@@ -442,6 +444,14 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
               {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
               {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
               {repeats.has(message.id) && <p className="chat-meta">Possible repeat; both receipts are kept.</p>}
+              {matches && <details className="chat-meta">
+                <summary>{matches.length} matching queued receipts (possible repeats)</summary>
+                <p>Matching text and timestamps can belong to separate messages. The radio may not queue every heard copy;
+                  this is not a delivery or complete repeat count.</p>
+                {preferences.pathMetadata && <ul>{matches.map((match) => <li key={match.id}>
+                  {match.receipt && <ReceiptPath receipt={match.receipt} />}
+                </li>)}</ul>}
+              </details>}
               {preferences.pathMetadata && message.receipt && <ReceiptPath receipt={message.receipt} />}
               {preferences.regionMetadata && message.region && <p className="chat-meta">Region {message.region}</p>}
               {message.outgoing && (
