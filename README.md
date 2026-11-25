@@ -230,6 +230,20 @@ also opens your editable quick messages. Location and channel key sharing
 require explicit confirmation. The composer keeps the original draft if the
 combined text exceeds the radio's message length limit.
 
+## Received packet diagnostics
+
+Open **Diagnostics** and start capture with a connected companion radio.
+Capture listens to the radio's RX-log pushes without issuing commands. It
+keeps the newest 500 entries for one radio in the current tab, including
+while you use other sections. Stop capture to pause it or clear the log.
+Bluetooth notifications can be incomplete, including when the header looks valid.
+
+Filter by type, route, or decode status. Select a packet to inspect the
+browser receipt time, MeshCore packet hash, path, signal data, and known header
+and payload fields. Raw bytes are available in the selected packet's details.
+Copy and export use the filtered list and omit raw bytes, payloads, node and
+channel identifiers, path hashes, transport codes, and packet hashes.
+
 Direct-message commands and acknowledgement handling have been tested with
 mocked USB and Bluetooth transports, not physical hardware. Some Bluetooth
 firmware may fragment notifications or reject larger writes. A rejected write
