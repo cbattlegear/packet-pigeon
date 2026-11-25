@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
+import { IDBDatabase, IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { openRadioStorage, radioKeyFromPublicKey, validChannelScopeSettings } from './index.ts'
 
 const firstRadio = radioKeyFromPublicKey('ab'.repeat(32))
@@ -449,5 +449,27 @@ test('an observed name change permanently pauses a slot scope until explicitly c
   assert.equal(validChannelScopeSettings([
     { index: 0, channelName: 'Public', scope: { mode: 'default' } }, { index: 0, channelName: 'Public', scope: { mode: 'unscoped' } },
   ]), false)
+  storage.close()
+})
+
+test('scope markers require strict durability before completing the write', async (t) => {
+  const storage = await openRadioStorage(new IDBFactory())
+  const transaction = IDBDatabase.prototype.transaction
+  const durability = []
+  const intercepted = t.mock.method(IDBDatabase.prototype, 'transaction', function (stores, mode, options) {
+    if (mode === 'readwrite') durability.push(options?.durability)
+    return transaction.call(this, stores, mode, options)
+  })
+  await storage.update(firstRadio, { scopeRecovery: true })
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Public' }] })
+  await storage.update(firstRadio, { scopeRecovery: false })
+  assert.deepEqual(durability, ['strict', undefined, 'strict'])
+  intercepted.mock.restore()
+  const unsupported = t.mock.method(IDBDatabase.prototype, 'transaction', function (stores, mode) {
+    return transaction.call(this, stores, mode, { durability: 'relaxed' })
+  })
+  await assert.rejects(storage.update(firstRadio, { scopeRecovery: true }), /cannot durably save/)
+  assert.equal((await storage.read(firstRadio)).scopeRecovery, false)
+  unsupported.mock.restore()
   storage.close()
 })

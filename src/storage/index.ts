@@ -636,6 +636,7 @@ function runTransaction<T>(
     finish: (value: T) => void,
     abort: (error: unknown) => void,
   ) => void,
+  strict = false,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const failure = mode === 'readonly'
@@ -643,7 +644,7 @@ function runTransaction<T>(
       : new RadioStorageError('write', 'Could not save radio data. The previous cache was not changed.')
     let transaction: IDBTransaction
     try {
-      transaction = db.transaction(storeName, mode)
+      transaction = db.transaction(storeName, mode, strict ? { durability: 'strict' } : undefined)
     } catch {
       reject(failure)
       return
@@ -655,6 +656,10 @@ function runTransaction<T>(
     }
     transaction.onabort = () => reject(abortError)
     transaction.oncomplete = () => reject(failure)
+    if (strict && transaction.durability !== 'strict') {
+      abort(new RadioStorageError('write', 'This browser cannot durably save scope recovery markers.'))
+      return
+    }
     try {
       action(transaction.objectStore(storeName), (value) => {
         transaction.oncomplete = () => resolve(value)
@@ -751,6 +756,7 @@ export async function openRadioStorage(factory?: IDBFactory) {
           }
         }
       },
+      update.scopeRecovery !== undefined,
     ),
     changeDirect: (key: RadioKey, change: DirectChange) => runTransaction<DirectChangeResult>(
       db,

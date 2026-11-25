@@ -308,7 +308,8 @@ channel's current setting, not necessarily the original message's scope.
 
 The temporary override is radio-session-global and also affects contact flood
 sends. On protocol v8+, Packet Pigeon durably writes a per-radio recovery marker
-before applying a channel's scope, then excludes other commands throughout
+before applying a channel's scope, using strict IndexedDB durability (required),
+then excludes other commands throughout
 apply/send/reset. It clears the marker only after the radio acknowledges reset
 to its configured default. This does not modify the radio's saved default
 region or restore another application's temporary override.
