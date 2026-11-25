@@ -394,6 +394,7 @@ export class DirectMessages {
       const result = await this.applyChannel(key, {
         kind: 'begin', id: active.id, index, channelName, senderName, text, now: Date.now(),
         clearDraft: !resend && persistDraft,
+        firmwareProtocolVersion: snapshot.device.capabilities.firmwareProtocolVersion,
       }, false)
       if (!result.message?.channelOutgoing) throw new Error('The outgoing channel message could not be saved.')
       const draftKey = `${key}:${conversationId}`
@@ -433,7 +434,7 @@ export class DirectMessages {
       try {
         if (!this.isConnected(active.key)) throw new Error('The radio disconnected before sending.')
         await this.source.sendChannel(
-          active.key, index, outgoing.channelName, outgoing.senderName, outgoing.wireTimestamp, message.text,
+          active.key, index, outgoing.channelName, outgoing.senderName, outgoing.wireTimestamp, message.text, outgoing.scope,
         )
         change = { kind: 'accepted', id: active.id, wireTimestamp: outgoing.wireTimestamp }
       } catch (error) {

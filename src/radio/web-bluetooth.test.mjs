@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import 'fake-indexeddb/auto'
 import { setTimeout } from 'node:timers/promises'
 import test from 'node:test'
 import { IDBFactory } from 'fake-indexeddb'

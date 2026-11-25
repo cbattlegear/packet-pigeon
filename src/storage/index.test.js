@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
-import { openRadioStorage, radioKeyFromPublicKey } from './index.ts'
+import { openRadioStorage, radioKeyFromPublicKey, validChannelScopeSettings } from './index.ts'
 
 const firstRadio = radioKeyFromPublicKey('ab'.repeat(32))
 const secondRadio = radioKeyFromPublicKey('cd'.repeat(32))
@@ -365,9 +365,11 @@ test('channel sends allocate per-radio timestamps and keep retention, drafts, an
       channelRetention: { index: 0, channelName: 'Public', days: 7 },
       blockedChannelSender: { name: 'Alice', blocked: true },
     })
+
     await storage.update(secondRadio, { channels, messages: [old] })
     const begin = (id) => ({
       kind: 'begin', id, index: 0, channelName: 'Public', senderName: 'Pigeon',
+      firmwareProtocolVersion: 14,
       text: 'Hello', now: 1_000_000, clearDraft: true,
     })
     const [first, second] = await Promise.all([
@@ -391,4 +393,61 @@ test('channel sends allocate per-radio timestamps and keep retention, drafts, an
     await assert.rejects(storage.changeChannelMessage(firstRadio, { ...begin('stale'), channelName: 'Changed' }), /channel changed/i)
     storage.close()
     other.close()
+})
+
+test('scope settings and recovery markers preserve concurrent cache writes and radio isolation', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const other = await openRadioStorage(factory)
+  const channels = [{ index: 0, name: 'Public' }]
+  await storage.update(firstRadio, { channels, messages: [message], draft: { conversationId: 'channel:0', text: 'Hello' } })
+  await storage.update(secondRadio, { channels })
+  await Promise.all([
+    storage.update(firstRadio, { scopeRecovery: true, channelScope: { index: 0, channelName: 'Public', scope: { mode: 'region', name: 'North' } } }),
+    other.update(firstRadio, { channels, channelRetention: { index: 0, channelName: 'Public', days: 30 } }),
+    other.update(firstRadio, { blockedChannelSender: { name: 'Alice', blocked: true } }),
+  ])
+  const begin = { kind: 'begin', id: 'scoped', index: 0, channelName: 'Public', senderName: 'Pigeon',
+    text: 'Hello', now: 100_000, clearDraft: true, firmwareProtocolVersion: 8 }
+  const result = await storage.changeChannelMessage(firstRadio, begin)
+  assert.deepEqual(result.message.channelOutgoing.scope, { mode: 'region', name: '#North' })
+  await other.update(firstRadio, { channelScope: { index: 0, channelName: 'Public', scope: { mode: 'unscoped' } } })
+  assert.deepEqual((await storage.read(firstRadio)).messages.at(-1).channelOutgoing.scope, { mode: 'region', name: '#North' })
+  await assert.rejects(storage.changeChannelMessage(firstRadio, { ...begin, id: 'unsupported', firmwareProtocolVersion: 11 }), /v12/)
+  const data = await storage.read(firstRadio)
+  assert.equal(data.scopeRecovery, true)
+  assert.deepEqual(data.blockedChannelSenders, ['Alice'])
+  assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Public', days: 30 }])
+  assert.equal(data.messages.length, 2)
+  const separate = await storage.changeChannelMessage(secondRadio, { ...begin, id: 'default' })
+  assert.deepEqual(separate.message.channelOutgoing.scope, { mode: 'default' })
+  assert.equal((await storage.read(secondRadio)).scopeRecovery, undefined)
+  storage.close()
+  other.close()
+})
+
+test('an observed name change permanently pauses a slot scope until explicitly chosen again', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  await storage.update(firstRadio, {
+    channels: [{ index: 0, name: 'Public' }],
+    channelScope: { index: 0, channelName: 'Public', scope: { mode: 'region', name: '#North' } },
+    draft: { conversationId: 'channel:0', text: 'Keep me' },
+  })
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Replacement' }] })
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Public' }] })
+  const begin = { kind: 'begin', id: 'paused', index: 0, channelName: 'Public', senderName: 'Pigeon',
+    text: 'Keep me', now: 100_000, clearDraft: true, firmwareProtocolVersion: 14 }
+  await assert.rejects(storage.changeChannelMessage(firstRadio, begin), /scope is paused/)
+  assert.deepEqual((await storage.read(firstRadio)).drafts, [{ conversationId: 'channel:0', text: 'Keep me' }])
+  await assert.rejects(storage.update(firstRadio, { channelScope: { index: 0, channelName: 'Stale', scope: { mode: 'default' } } }), /changed/)
+  await storage.update(firstRadio, { channelScope: { index: 0, channelName: 'Public', scope: { mode: 'default' } } })
+  assert.deepEqual((await storage.changeChannelMessage(firstRadio, begin)).message.channelOutgoing.scope, { mode: 'default' })
+  await storage.update(firstRadio, { channelScope: { index: 0, channelName: 'Public', scope: { mode: 'unscoped' } } })
+  await storage.update(firstRadio, { channels: [] })
+  assert.deepEqual((await storage.read(firstRadio)).channelScopes, [])
+  assert.equal(validChannelScopeSettings([{ index: 0, channelName: 'Public', scope: { mode: 'region', name: '\0' } }]), false)
+  assert.equal(validChannelScopeSettings([
+    { index: 0, channelName: 'Public', scope: { mode: 'default' } }, { index: 0, channelName: 'Public', scope: { mode: 'unscoped' } },
+  ]), false)
+  storage.close()
 })

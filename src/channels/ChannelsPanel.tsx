@@ -3,8 +3,10 @@ import type { FormEvent } from 'react'
 import type { CompanionSession, CompanionSnapshot } from '../radio/index.ts'
 import type { SessionCache } from '../integration/session-cache.ts'
 import { makeChannelSecret, secretHex } from '../radio/channel-commands.ts'
-import { openRadioStorage, radioKeyFromPublicKey, validChannelRetentionSettings } from '../storage/index.ts'
-import type { RadioData, RadioKey, StoredChannel } from '../storage/index.ts'
+import { openRadioStorage, radioKeyFromPublicKey, validChannelRetentionSettings, validChannelScopeSettings } from '../storage/index.ts'
+import type { ChannelScopeSetting, RadioData, RadioKey, StoredChannel } from '../storage/index.ts'
+import { validateChannelScope } from '../radio/channel-scope.ts'
+import type { ChannelScope } from '../radio/channel-scope.ts'
 import { observedChannelSenders } from './senders.ts'
 import { ShareCode } from '../sharing/ShareDialogs.tsx'
 import { formatMeshCoreShare } from '../sharing/meshcoreLinks.ts'
@@ -64,7 +66,7 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
     }
     void load()
     return () => { active = false }
-  }, [key, cacheSaving, messageSyncing])
+  }, [key, cacheSaving, messageSyncing, snapshot.channels])
 
   const cacheLoaded = Boolean(key) && cached?.key === key
   const cachedData = cacheLoaded ? cached.data : null
@@ -72,6 +74,8 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
   const validRetention = cachedData?.channelRetention === undefined
     || validChannelRetentionSettings(cachedData.channelRetention)
   const retentionSettings = validRetention ? cachedData?.channelRetention ?? [] : []
+  const validScopes = cachedData?.channelScopes === undefined || validChannelScopeSettings(cachedData.channelScopes)
+  const scopeSettings = validScopes ? cachedData?.channelScopes ?? [] : []
   const blocked = new Set(cachedData?.blockedChannelSenders ?? [])
   const visible = channels.filter((channel) =>
     channel.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
@@ -212,6 +216,26 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
     } finally { setBusy(false) }
   }
 
+  async function saveScope(channel: StoredChannel | null, scope: ChannelScope) {
+    if (!key || !cacheLoaded || busy) return
+    const radioKey = radioKeyFromPublicKey(key)
+    setBusy(true); setError(''); setStatus('')
+    try {
+      const storage = await openRadioStorage()
+      try {
+        await storage.update(radioKey, channel
+          ? { channelScope: { index: channel.index, channelName: channel.name, scope: validateChannelScope(scope) } }
+          : { resetChannelScopes: true })
+        const data = await storage.read(radioKey)
+        setCached((current) => current?.key === radioKey ? { key: radioKey, data } : current)
+        onBlockedSendersChanged(radioKey)
+      } finally { storage.close() }
+      setStatus('Sending scope saved for this browser and radio. No radio settings were changed.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not save the sending scope.')
+    } finally { setBusy(false) }
+  }
+
   return <div className="channel-workspace">
     {share && liveKey === share.key && <ShareCode link={share.link} privateChannel close={() => setShare(null)} />}
     {onImport && <div><button type="button" onClick={onImport}>Import link or QR code</button></div>}
@@ -245,6 +269,13 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
         <p>Saved retention settings for this radio are invalid. Reset them to Forever, then reload to retry cleanup.</p>
         <button type="button" disabled={busy} onClick={() => void resetRetention()}>Reset invalid retention settings</button>
       </div>}
+      <p>Sending scopes are browser-local, per channel and radio. Radio default uses the radio&apos;s configured default region.
+        Unscoped can travel beyond a region. Public hashtag region names are routing filters, not privacy or delivery guarantees.
+        An observed slot-name change pauses its saved scope until you choose again.</p>
+      {!validScopes && <div role="alert">
+        <p>Saved sending scopes are invalid. Reset them to Radio default before sending.</p>
+        <button type="button" disabled={busy} onClick={() => void saveScope(null, { mode: 'default' })}>Reset invalid sending scopes</button>
+      </div>}
       <ul className="channel-list">{visible.map((channel) => {
         const senders = observedChannelSenders(cachedData?.messages ?? [], channel.index)
         const retention = retentionSettings.find((entry) => entry.index === channel.index)
@@ -271,6 +302,11 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
             </select>
           </label>
           {paused && <p>Retention is paused because this slot changed names. Choose a setting for this channel.</p>}
+          <ScopeEditor key={`${key}:${channel.name}:${JSON.stringify(scopeSettings.find((entry) => entry.index === channel.index))}`}
+            channel={channel} setting={scopeSettings.find((entry) => entry.index === channel.index)}
+            disabled={!channelCached || !validScopes || busy}
+            version={live?.capabilities.firmwareProtocolVersion}
+            save={(scope) => void saveScope(channel, scope)} />
           <details>
             <summary>Observed sender names</summary>
             <p>Names come from recognizable &quot;name: message&quot; text in this slot, not a membership list. They are unverified and can be spoofed.</p>
@@ -320,6 +356,43 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
       <button type="submit" disabled={!live || busy}>Save channel</button>
     </form>
     <p>Renaming keeps the existing key; hashtag channels cannot be renamed. Reusing a slot can associate its old cached messages with the new channel.</p>
-    <p>Notification mode and per-channel region scope are not available yet. No region scope is changed here.</p>
+    <p>Notification modes are not available yet. Sending scopes do not change the radio&apos;s saved default region.</p>
   </div>
+}
+
+function ScopeEditor({ channel, setting, disabled, version, save }: {
+  channel: StoredChannel
+  setting?: ChannelScopeSetting
+  disabled: boolean
+  version?: number
+  save: (scope: ChannelScope) => void
+}) {
+  const [mode, setMode] = useState<ChannelScope['mode']>(setting?.scope.mode ?? 'default')
+  const [name, setName] = useState(setting?.scope.mode === 'region' ? setting.scope.name : '')
+  const paused = setting && (setting.paused || setting.channelName !== channel.name)
+  return <form onSubmit={(event) => {
+    event.preventDefault()
+    save(mode === 'region' ? { mode, name } : { mode })
+  }}>
+    <label>Sending scope
+      <select aria-label={`Sending scope for ${channel.name}`} value={mode} disabled={disabled}
+        onChange={(event) => {
+          const value = event.currentTarget.value
+          if (value === 'default' || value === 'region' || value === 'unscoped') setMode(value)
+        }}>
+        <option value="default">Radio default</option>
+        <option value="region">Named region (protocol v8+)</option>
+        <option value="unscoped">Explicitly unscoped (protocol v12+)</option>
+      </select>
+    </label>
+    {mode === 'region' && <label>Region name
+      <input aria-label={`Region name for ${channel.name}`} value={name} required disabled={disabled}
+        placeholder="#region" onChange={(event) => setName(event.currentTarget.value)} />
+    </label>}
+    <button type="submit" disabled={disabled}>Save sending scope</button>
+    {paused && <p role="alert">Sending scope is paused because this slot changed names. Save a scope before sending.</p>}
+    {version !== undefined && ((mode === 'region' && version < 8) || (mode === 'unscoped' && version < 12)) && (
+      <p role="alert">This radio&apos;s firmware cannot send using the selected scope. Choose Radio default or update the firmware.</p>
+    )}
+  </form>
 }

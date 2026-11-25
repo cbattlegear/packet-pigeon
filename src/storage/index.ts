@@ -1,6 +1,8 @@
 import type { AdvertPath } from '../radio/discovery-commands.ts'
 import { validSenderName } from '../channels/senders.ts'
 import { channelTextBytes } from '../radio/channel-message.ts'
+import { assertScopeSupported, validateChannelScope } from '../radio/channel-scope.ts'
+import type { ChannelScope } from '../radio/channel-scope.ts'
 
 declare const radioKeyBrand: unique symbol
 export type RadioKey = string & { readonly [radioKeyBrand]: true }
@@ -27,6 +29,7 @@ export type StoredChannel = {
 
 export type ChannelRetentionDays = 1 | 7 | 30 | 90
 export type ChannelRetention = { index: number; channelName: string; days: ChannelRetentionDays; paused?: boolean }
+export type ChannelScopeSetting = { index: number; channelName: string; scope: ChannelScope; paused?: boolean }
 
 export type ContactPreference = { publicKey: string; customName: string | null; favorite: boolean }
 export type ContactPreferenceEdit = { publicKey: string; customName?: string | null; favorite?: boolean }
@@ -63,10 +66,11 @@ export type StoredChannelOutgoing = {
   wireTimestamp: number
   status: 'sending' | 'accepted' | 'uncertain'
   error: string | null
+  scope?: ChannelScope
 }
 
 export type ChannelMessageChange =
-  | { kind: 'begin'; id: string; index: number; channelName: string; senderName: string; text: string; now: number; clearDraft: boolean }
+  | { kind: 'begin'; id: string; index: number; channelName: string; senderName: string; text: string; now: number; clearDraft: boolean; firmwareProtocolVersion: number }
   | { kind: 'accepted'; id: string; wireTimestamp: number }
   | { kind: 'uncertain'; id: string; wireTimestamp: number; error: string }
   | { kind: 'interrupt'; exceptId?: string }
@@ -116,6 +120,8 @@ export type LocalPreferences = {
 }
 
 export type RadioData = {
+  scopeRecovery?: boolean
+  channelScopes?: ChannelScopeSetting[]
   blockedChannelSenders?: string[]
   channelRetention?: ChannelRetention[]
   contacts: StoredContact[]
@@ -133,6 +139,9 @@ export type RadioData = {
 }
 
 export type RadioUpdate = {
+  scopeRecovery?: boolean
+  channelScope?: ChannelScopeSetting
+  resetChannelScopes?: true
   blockedChannelSender?: { name: string; blocked: boolean }
   channelRetention?: { index: number; channelName: string; days: ChannelRetentionDays | null }
   channelRetentionRename?: { index: number; from: string; to: string }
@@ -175,6 +184,11 @@ export function radioKeyFromPublicKey(publicKey: string): RadioKey {
 function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   const { contacts, channels, messages, draft, preferences, contactPreference, discovery, directSendOptions } = update
   const next = { ...current }
+  if (update.scopeRecovery !== undefined) {
+    if (typeof update.scopeRecovery !== 'boolean') throw new RadioStorageError('update', 'Invalid scope recovery marker.')
+    next.scopeRecovery = update.scopeRecovery
+  }
+  if (update.resetChannelScopes === true) next.channelScopes = []
   if (update.resetChannelRetention !== undefined) {
     if (update.resetChannelRetention !== true) throw new RadioStorageError('update', 'Invalid retention reset.')
     next.channelRetention = []
@@ -198,6 +212,22 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
       next.channelRetention = next.channelRetention.filter(({ index }) => slots.has(index)).map((entry) =>
         slots.get(entry.index) !== entry.channelName ? { ...entry, paused: true } : entry)
     }
+    if (next.channelScopes) {
+      if (!validChannelScopeSettings(next.channelScopes)) throw new RadioStorageError('update', 'Invalid saved channel scopes.')
+      const slots = new Map(next.channels.map(({ index, name }) => [index, name]))
+      next.channelScopes = next.channelScopes.filter(({ index }) => slots.has(index)).map((entry) =>
+        slots.get(entry.index) !== entry.channelName ? { ...entry, paused: true } : entry)
+    }
+  }
+  if (update.channelScope) {
+    const { index, channelName } = update.channelScope
+    if (!validChannelIndex(index) || !next.channels.some((entry) => entry.index === index && entry.name === channelName)
+      || (next.channelScopes !== undefined && !validChannelScopeSettings(next.channelScopes))) {
+      throw new RadioStorageError('update', 'The channel or scope setting changed. Refresh the channel list and retry.')
+    }
+    const scope = validateChannelScope(update.channelScope.scope)
+    next.channelScopes = (next.channelScopes ?? []).filter((entry) => entry.index !== index)
+    if (scope.mode !== 'default') next.channelScopes.push({ index, channelName, scope })
   }
   if (update.channelRetention) {
     const { index, channelName, days } = update.channelRetention
@@ -313,6 +343,18 @@ export function validChannelRetentionSettings(value: unknown): value is ChannelR
   return true
 }
 
+export function validChannelScopeSettings(value: unknown): value is ChannelScopeSetting[] {
+  if (!Array.isArray(value)) return false
+  const seen = new Set<number>()
+  for (const entry of value as ChannelScopeSetting[]) {
+    if (!entry || !validChannelIndex(entry.index) || typeof entry.channelName !== 'string' || !entry.channelName
+      || (entry.paused !== undefined && typeof entry.paused !== 'boolean') || seen.has(entry.index)) return false
+    try { validateChannelScope(entry.scope) } catch { return false }
+    seen.add(entry.index)
+  }
+  return true
+}
+
 function pruneChannelMessages(data: RadioData, now: number, radio: string) {
   if (data.channelRetention === undefined) return { data, removed: 0 }
   if (!validChannelRetentionSettings(data.channelRetention)) {
@@ -377,6 +419,16 @@ function channelMessageChange(current: RadioData, change: ChannelMessageChange):
     catch (error) {
       throw new RadioStorageError('update', error instanceof Error ? error.message : 'Invalid channel message.')
     }
+    if (current.channelScopes !== undefined && !validChannelScopeSettings(current.channelScopes)) {
+      throw new RadioStorageError('update', 'Invalid saved channel scopes. Reset them in Channels before sending.')
+    }
+    const setting = current.channelScopes?.find((entry) => entry.index === change.index)
+    if (setting && (setting.paused || setting.channelName !== change.channelName)) {
+      throw new RadioStorageError('update', 'Sending scope is paused because this slot changed names. Choose a scope in Channels.')
+    }
+    const scope = validateChannelScope(setting?.scope ?? { mode: 'default' })
+    try { assertScopeSupported(scope, change.firmwareProtocolVersion) }
+    catch (error) { throw new RadioStorageError('update', error instanceof Error ? error.message : 'Unsupported channel scope.') }
     if (!Number.isFinite(change.now) || change.now < 0) throw new RadioStorageError('update', 'Invalid message time.')
     const wireTimestamp = Math.max(Math.floor(change.now / 1000), (current.lastChannelTimestamp ?? 0) + 1)
     if (wireTimestamp > 0xffffffff) throw new RadioStorageError('update', 'The message timestamp is out of range.')
@@ -384,7 +436,7 @@ function channelMessageChange(current: RadioData, change: ChannelMessageChange):
     const message: StoredMessage = {
       id: change.id, conversationId, sender: 'You', timestamp: change.now, text: change.text,
       channelOutgoing: {
-        channelName: change.channelName, senderName: change.senderName, wireTimestamp, status: 'sending', error: null,
+        channelName: change.channelName, senderName: change.senderName, wireTimestamp, status: 'sending', error: null, scope,
       },
     }
     return {
