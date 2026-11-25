@@ -44,8 +44,11 @@ function formatPosition(position: Coordinates) {
 }
 
 export default function MapWorkspace({
-  radioNodes = emptyNodes, radioPosition = null, showTerrain = false,
-}: { radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null; showTerrain?: boolean }) {
+  radioNodes = emptyNodes, radioPosition = null, showTerrain = false, contactFocus = null,
+}: {
+  radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null; showTerrain?: boolean
+  contactFocus?: { position: Coordinates; terrain: boolean } | null
+}) {
   const [localNodes, setLocalNodes] = useState(savedNodes)
   const [publicNodes, setPublicNodes] = useState<MapNode[]>([])
   const [favorites, setFavorites] = useState(savedFavorites)
@@ -69,6 +72,7 @@ export default function MapWorkspace({
   const [end, setEnd] = useState(emptyCoordinate)
   const [profile, setProfile] = useState<ProfileResult | null>(null)
   const [coverage, setCoverage] = useState<CoverageLayer[]>([])
+  const [appliedContactFocus, setAppliedContactFocus] = useState<typeof contactFocus>(null)
   const mapPanel = useRef<HTMLDivElement>(null)
   const self = myLocation ?? (mapPosition(radioPosition) ? radioPosition : null)
 
@@ -105,6 +109,13 @@ export default function MapWorkspace({
     else setEnd(fields)
     setPicking(null)
   }, [])
+  if (contactFocus !== appliedContactFocus) {
+    setAppliedContactFocus(contactFocus)
+    if (contactFocus) {
+      setFocus(contactFocus.position)
+      if (contactFocus.terrain) putCoordinate('start', contactFocus.position)
+    }
+  }
   const pickFromMap = useCallback((position: Coordinates) => {
     if (picking) putCoordinate(picking, position)
   }, [picking, putCoordinate])

@@ -1,6 +1,7 @@
 import type { CompanionMessage, CompanionSnapshot } from '../radio/index.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioKey, RadioUpdate, StoredMessage } from '../storage/index.ts'
+import { storedContact } from './contact-record.ts'
 
 type SessionSource = {
   getSnapshot(): CompanionSnapshot
@@ -35,7 +36,7 @@ export class SessionCache {
   private readonly openStorage: typeof openRadioStorage
   private storage?: Awaited<ReturnType<typeof openRadioStorage>>
   private status: CacheStatus = { pending: 0, saving: false, error: null }
-  private contactsSaved = false
+  private savedContacts?: CompanionSnapshot['contacts']
   private channelsSaved = false
   private phase: CompanionSnapshot['phase'] = 'idle'
 
@@ -59,7 +60,7 @@ export class SessionCache {
 
   private capture(snapshot: CompanionSnapshot) {
     if (snapshot.phase === 'handshake' && this.phase !== 'handshake') {
-      this.contactsSaved = false
+      this.savedContacts = undefined
       this.channelsSaved = false
       this.seenReceipts.clear()
     }
@@ -75,19 +76,10 @@ export class SessionCache {
     }
 
     const stage = snapshot.progress?.stage
-    if (!this.contactsSaved && (stage === 'channels' || stage === 'messages' || snapshot.phase === 'ready')) {
-      this.contactsSaved = true
-      this.enqueue(key, {
-        contacts: snapshot.contacts.map((contact) => ({
-          publicKey: contact.publicKey,
-          name: contact.name,
-          details: {
-            type: contact.type, flags: contact.flags, pathLength: contact.pathLength, pathHex: contact.pathHex,
-            lastAdvertisedAt: contact.lastAdvertisedAt, latitude: contact.latitude,
-            longitude: contact.longitude, lastModifiedAt: contact.lastModifiedAt,
-          },
-        })),
-      })
+    if (this.savedContacts !== snapshot.contacts
+      && (stage === 'channels' || stage === 'messages' || snapshot.phase === 'ready')) {
+      this.savedContacts = snapshot.contacts
+      this.enqueue(key, { contacts: snapshot.contacts.map(storedContact) })
     }
     if (!this.channelsSaved && (stage === 'messages' || snapshot.phase === 'ready')) {
       this.channelsSaved = true
