@@ -115,3 +115,13 @@ export function messageVisibility(messages: readonly StoredMessage[], hidePossib
     visible: hidePossibleRepeats ? messages.filter((message) => !repeats.has(message.id)) : messages,
   }
 }
+
+export function receiptPathDescription(pathLength: number) {
+  if (pathLength === 0xff) return 'Direct receipt'
+  if (!Number.isInteger(pathLength) || pathLength < 0 || pathLength > 0xff || pathLength >>> 6 === 3) {
+    return 'Unsupported path metadata'
+  }
+  const hops = pathLength & 63
+  const width = (pathLength >>> 6) + 1
+  return `${hops} path hop${hops === 1 ? '' : 's'} · ${width}-byte path hashes`
+}
