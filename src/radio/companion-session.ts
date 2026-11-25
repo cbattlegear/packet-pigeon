@@ -488,7 +488,9 @@ export class CompanionSession {
     })
   }
 
-  readonly changeChannel = async (radioKey: string, index: number, expectedName: string, name: string | null) => {
+  readonly changeChannel = async (
+    radioKey: string, index: number, expectedName: string, name: string | null, afterRename?: () => Promise<void>,
+  ) => {
     const nextName = name === null ? '' : channelName(name)
     if (name !== null && (expectedName.startsWith('#') || nextName.startsWith('#'))) {
       throw new Error('Hashtag channels cannot be renamed: their key is derived from their name.')
@@ -502,9 +504,15 @@ export class CompanionSession {
         throw new Error('The channel changed on the radio. Reconnect and check before retrying.')
       }
       await writeChannelSlot(link, index, nextName, name === null ? new Uint8Array(16) : slot.secret)
-      this.update({ channels: name === null
-        ? this.snapshot.channels.filter((channel) => channel.index !== index)
-        : this.snapshot.channels.map((channel) => channel.index === index ? { index, name: nextName } : channel) })
+      try {
+        if (name !== null && nextName !== expectedName) await afterRename?.()
+      } finally {
+        if (this.attempt?.link === link) {
+          this.update({ channels: name === null
+            ? this.snapshot.channels.filter((channel) => channel.index !== index)
+            : this.snapshot.channels.map((channel) => channel.index === index ? { index, name: nextName } : channel) })
+        }
+      }
     })
   }
 

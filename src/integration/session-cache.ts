@@ -16,7 +16,11 @@ type CacheStatus = {
   readonly error: string | null
 }
 
-type PendingUpdate = { key: RadioKey; update: RadioUpdate }
+type PendingUpdate = {
+  key: RadioKey
+  update: RadioUpdate
+  completion?: { resolve: () => void; reject: (error: unknown) => void }
+}
 
 function storedMessage(message: CompanionMessage): StoredMessage {
   return {
@@ -109,10 +113,19 @@ export class SessionCache {
     }
   }
 
-  private enqueue(key: RadioKey, update: RadioUpdate) {
-    this.queue.push({ key, update })
+  private enqueue(key: RadioKey, update: RadioUpdate, completion?: PendingUpdate['completion']) {
+    this.queue.push({ key, update, completion })
     this.setStatus({ pending: this.queue.length })
     if (!this.status.error) void this.flush()
+  }
+
+  readonly renameChannelRetention = (
+    key: RadioKey, rename: NonNullable<RadioUpdate['channelRetentionRename']>,
+  ) => {
+    if (this.status.error) return Promise.reject(new Error('Retry saving the radio cache before updating retention.'))
+    return new Promise<void>((resolve, reject) => {
+      this.enqueue(key, { channelRetentionRename: rename }, { resolve, reject })
+    })
   }
 
   readonly retry = () => {
@@ -127,16 +140,33 @@ export class SessionCache {
     try {
       this.storage ??= await this.openStorage()
       while (this.queue.length) {
-        const { key, update } = this.queue[0]
+        const { key, update, completion } = this.queue[0]
         await this.storage.update(key, update)
         this.queue.shift()
         this.setStatus({ pending: this.queue.length })
+        completion?.resolve()
       }
       this.setStatus({ saving: false })
     } catch (error) {
       this.storage?.close()
       this.storage = undefined
+      const failed = this.queue[0]
+      if (failed?.completion) {
+        this.queue.shift()
+        failed.completion.reject(error)
+        this.setStatus({ pending: this.queue.length, saving: false })
+        if (this.queue.length) void this.flush()
+        return
+      }
+      for (let index = this.queue.length - 1; index >= 0; index--) {
+        const completion = this.queue[index].completion
+        if (completion) {
+          this.queue.splice(index, 1)
+          completion.reject(error)
+        }
+      }
       this.setStatus({
+        pending: this.queue.length,
         saving: false,
         error: error instanceof Error ? error.message : 'Could not save radio data.',
       })
