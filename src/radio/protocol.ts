@@ -29,7 +29,7 @@ export type CompanionErrorCode =
   | 'insecure-context' | 'unsupported-browser' | 'chooser-failed' | 'open-failed'
   | 'disconnected' | 'serial-io' | 'timeout' | 'protocol' | 'device-error'
   | 'unsupported-firmware'
-  | 'ownership' | 'identity' | 'reconnect-failed'
+  | 'ownership' | 'identity' | 'reconnect-failed' | 'cleanup-failed'
 
 export class CompanionError extends Error {
   readonly code: CompanionErrorCode

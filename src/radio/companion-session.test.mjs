@@ -436,6 +436,139 @@ test('a port close failure keeps ownership and requires a reload', async () => {
   assert.equal(other.getSnapshot().error.code, 'ownership')
 })
 
+test('a failed close after reopening without streams stops retries and retains ownership', async () => {
+  const locks = fixtureLocks()
+  const first = workingPort()
+  const broken = new FixturePort(() => assert.fail('No command should be sent'))
+  let opens = 0
+  let closes = 0
+  let scans = 0
+  let choices = 0
+  broken.open = async () => {
+    opens++
+    broken.readable = null
+    broken.writable = null
+  }
+  broken.close = async () => { closes++; throw new Error('close failed') }
+  const session = sessionWith(first, 1000, {
+    locks,
+    environment: { secureContext: true, serial: {
+      requestPort: async () => { choices++; return first },
+      getPorts: async () => { scans++; return [broken] },
+    } },
+    retryDelays: [1, 1, 1],
+  })
+
+  await session.connect()
+  first.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => session.getSnapshot().phase === 'error')
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.equal(session.getSnapshot().error.code, 'cleanup-failed')
+  assert.match(session.getSnapshot().error.message, /Reload/)
+  assert.equal(scans, 1)
+  assert.equal(opens, 1)
+  assert.equal(closes, 1)
+  assert.deepEqual(broken.commands, [])
+
+  await session.disconnect()
+  assert.equal(session.getSnapshot().error.code, 'cleanup-failed')
+  await session.connect()
+  assert.equal(session.getSnapshot().error.code, 'cleanup-failed')
+  assert.equal(choices, 1)
+  const otherPort = workingPort()
+  let otherOpens = 0
+  otherPort.open = async () => { otherOpens++ }
+  const other = sessionWith(otherPort, 1000, { locks })
+  await other.connect()
+  assert.equal(other.getSnapshot().error.code, 'ownership')
+  assert.equal(otherOpens, 0)
+  assert.deepEqual(otherPort.commands, [])
+})
+
+test('a failed manual close cannot release ownership on a later disconnect', async () => {
+  const locks = fixtureLocks()
+  const port = workingPort()
+  let closes = 0
+  port.close = async () => { closes++; throw new Error('close failed') }
+  const session = sessionWith(port, 1000, { locks })
+  await session.connect()
+  await session.disconnect()
+  assert.equal(session.getSnapshot().error.code, 'cleanup-failed')
+  assert.equal(closes, 1)
+  assert.match(session.getSnapshot().error.message, /Reload/)
+  await session.disconnect()
+  assert.equal(session.getSnapshot().error.code, 'cleanup-failed')
+  assert.equal(closes, 1)
+
+  const other = sessionWith(workingPort(), 1000, { locks })
+  await other.connect()
+  assert.equal(other.getSnapshot().error.code, 'ownership')
+})
+
+test('a failed close after cancelling an in-flight open retains ownership', async () => {
+  const locks = fixtureLocks()
+  const port = new FixturePort(() => assert.fail('No command should be sent'))
+  let releaseOpen
+  port.open = () => new Promise((resolve) => { releaseOpen = resolve })
+  port.close = () => { throw new Error('close failed') }
+  const session = sessionWith(port, 1000, { locks })
+  const connecting = session.connect()
+  await waitFor(() => typeof releaseOpen === 'function')
+  const disconnecting = session.disconnect()
+  releaseOpen()
+  await Promise.all([connecting, disconnecting])
+  assert.equal(session.getSnapshot().error.code, 'cleanup-failed')
+  await session.disconnect()
+  assert.equal(session.getSnapshot().error.code, 'cleanup-failed')
+
+  const other = sessionWith(workingPort(), 1000, { locks })
+  await other.connect()
+  assert.equal(other.getSnapshot().error.code, 'ownership')
+})
+
+test('disconnect releases ownership when an unusable opening port closes successfully', async () => {
+  const locks = fixtureLocks()
+  const port = new FixturePort(() => assert.fail('No command should be sent'))
+  let releaseClose
+  port.open = async () => { port.readable = null; port.writable = null }
+  port.close = () => new Promise((resolve) => { releaseClose = resolve })
+  const session = sessionWith(port, 1000, { locks })
+  const connecting = session.connect()
+  await waitFor(() => typeof releaseClose === 'function')
+  const disconnecting = session.disconnect()
+  releaseClose()
+  await Promise.all([connecting, disconnecting])
+  assert.equal(session.getSnapshot().phase, 'idle')
+
+  const other = sessionWith(workingPort(), 1000, { locks })
+  await other.connect()
+  assert.equal(other.getSnapshot().phase, 'ready')
+  await other.disconnect()
+})
+
+test('a successfully closed unusable port permits a later retry', async () => {
+  const first = workingPort()
+  const broken = new FixturePort(() => assert.fail('No command should be sent'))
+  broken.open = async () => { broken.readable = null; broken.writable = null }
+  broken.close = async () => { broken.closed = true }
+  const replugged = workingPort()
+  let scans = 0
+  const session = sessionWith(first, 1000, {
+    environment: { secureContext: true, serial: {
+      requestPort: async () => first,
+      getPorts: async () => [scans++ === 0 ? broken : replugged],
+    } },
+    retryDelays: [1, 1],
+  })
+  await session.connect()
+  first.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => session.getSnapshot().phase === 'ready')
+  assert.equal(broken.closed, true)
+  assert.equal(scans, 2)
+  assert.deepEqual(replugged.commands.map(([code]) => code), [22, 1, 4])
+  await session.disconnect()
+})
+
 test('ownership and port enumeration failures give actionable errors', async () => {
   const first = workingPort()
   const unavailable = sessionWith(first, 1000, {

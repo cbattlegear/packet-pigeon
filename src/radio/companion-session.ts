@@ -43,6 +43,10 @@ const initial: CompanionSnapshot = {
   phase: 'idle', error: null, device: null, contacts: [], channels: [], messages: [], progress: null,
 }
 
+function cleanupError(cause: unknown) {
+  return new CompanionError('cleanup-failed', 'Could not release the USB serial port. Reload this tab before reconnecting.', { cause })
+}
+
 export class CompanionSession {
   private readonly events = new EventTarget()
   private readonly environment?: WebSerialEnvironment
@@ -51,6 +55,7 @@ export class CompanionSession {
   private readonly retryDelays: readonly number[]
   private snapshot = initial
   private attempt?: Attempt
+  // Keep failed cleanup observable so a later disconnect cannot release ownership.
   private cleanup = Promise.resolve()
   private failure = Promise.resolve()
   private releaseOwnership?: () => void
@@ -113,7 +118,7 @@ export class CompanionSession {
     } catch (cause) {
       if (generation === this.generation) this.update({
         phase: 'error', progress: null,
-        error: new CompanionError('serial-io', 'Could not release the USB serial port. Reload this tab before reconnecting.', { cause }),
+        error: cleanupError(cause),
       })
     }
   }
@@ -193,7 +198,7 @@ export class CompanionSession {
       throw error
     }
     if (this.attempt !== attempt) {
-      await port.close()
+      await this.closePort(port)
       return null
     }
     try {
@@ -201,13 +206,15 @@ export class CompanionSession {
         (frame) => this.onPush(attempt, frame), (error) => this.fail(attempt, error))
       return attempt.link
     } catch (error) {
-      try {
-        await port.close()
-      } catch (closeError) {
-        console.error('Could not release the USB serial port after opening.', closeError)
-      }
+      await this.closePort(port)
+      if (this.attempt !== attempt) return null
       throw error
     }
+  }
+
+  private closePort(port: CompanionSerialPort) {
+    this.cleanup = Promise.resolve().then(() => port.close())
+    return this.cleanup
   }
 
   readonly disconnect = async () => {
@@ -223,13 +230,15 @@ export class CompanionSession {
     this.update({ phase: 'closing', progress: null, error: null })
     try {
       if (attempt?.locking) await attempt.locking.catch(() => {})
-      await (attempt?.link?.close() ?? attempt?.opening ?? this.cleanup)
+      if (attempt?.link) this.cleanup = attempt.link.close()
+      else if (attempt?.opening) await attempt.opening
+      await this.cleanup
       await this.releaseLock()
       this.update({ phase: 'idle' })
     } catch (error) {
       this.update({
         phase: 'error',
-        error: new CompanionError('serial-io', 'Could not close the USB serial port.', { cause: error }),
+        error: cleanupError(error),
       })
     }
   }

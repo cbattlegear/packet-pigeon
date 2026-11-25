@@ -52,7 +52,9 @@ Web Locks reserve one USB session per origin across cooperating Packet Pigeon
 tabs, including during retries; a second tab must wait for the owner to release
 it. Browsers without Web Locks cannot connect safely. Other applications and
 older versions of Packet Pigeon do not participate in this coordination.
-If the port cannot be released, reload the owning tab before trying again.
+If the port cannot be released, the owning tab keeps the lock and disables
+reconnection until it is reloaded. If the browser or OS still holds the port,
+close the tab or unplug the device before trying again.
 Automatic USB recovery has been exercised with mocked ports, not a physical
 unplug/replug on every supported browser.
 

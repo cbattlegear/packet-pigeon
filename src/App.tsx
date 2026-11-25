@@ -101,7 +101,7 @@ function App() {
             </div>
             <button
               type="button"
-              disabled={busy || (!canDisconnect && !support.supported)}
+              disabled={busy || snapshot.error?.code === 'cleanup-failed' || (!canDisconnect && !support.supported)}
               aria-describedby="connection-warning"
               onClick={() => void (canDisconnect ? session.disconnect() : session.connect())}
             >
