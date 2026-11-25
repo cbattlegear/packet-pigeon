@@ -208,6 +208,7 @@ test('contact writes and queued message requests do not interrupt one another', 
       default: assert.fail(`Unexpected command ${code}`)
     }
   })
+
   const session = sessionWith(port)
   const radioKey = 'ab'.repeat(32)
   const contact = { publicKey: 'cb'.repeat(32), name: 'Relay', type: 2 }
@@ -234,6 +235,56 @@ test('contact writes and queued message requests do not interrupt one another', 
   assert.deepEqual(session.getSnapshot().contacts, [])
   await sync.sync()
   assert.equal(sync.getSnapshot().error, null)
+  await session.disconnect()
+})
+
+test('direct commands refresh and validate recipients without interrupting receipt ownership', async () => {
+  let duplicate = false
+  let finishSend
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: {
+        serial.emit(2, duplicate ? 2 : 1, 0, 0, 0)
+        serial.emit(...contactInfo())
+        if (duplicate) {
+          const other = contactInfo()
+          other[7] = 0xcc
+          serial.emit(...other)
+        }
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      }
+      case 2:
+        finishSend = () => serial.emit(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0)
+        break
+      case 13: serial.emit(0); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const session = sessionWith(port)
+  const radioKey = 'ab'.repeat(32)
+  const contactKey = 'bc'.repeat(32)
+  await session.connect()
+  const lease = session.reserveQueuedMessage(radioKey)
+  await assert.rejects(session.sendDirect(radioKey, contactKey, 123, 0, 'Hello'), /pending receipt/)
+  lease.release()
+
+  duplicate = true
+  await assert.rejects(session.sendDirect(radioKey, contactKey, 123, 0, 'Hello'), /ambiguous/)
+  assert.equal(port.commands.some(([code]) => code === 2), false)
+  duplicate = false
+  const sending = session.sendDirect(radioKey, contactKey, 123, 0, 'Hello')
+  await waitFor(() => typeof finishSend === 'function')
+  assert.throws(() => session.reserveQueuedMessage(radioKey), /direct-message command/)
+  await assert.rejects(session.removeContact(radioKey, contactKey), /direct-message command/)
+  finishSend()
+  assert.deepEqual(await sending, { route: 'direct', expectedAck: '01020304', timeoutMs: 1000 })
+  assert.deepEqual(port.commands.at(-1), [2, 0, 0, 123, 0, 0, 0, ...Array(6).fill(0xbc), ...encode('Hello')])
+
+  await session.resetDirectPath(radioKey, contactKey)
+  assert.deepEqual(port.commands.at(-1), [13, ...Array(32).fill(0xbc)])
   await session.disconnect()
 })
 

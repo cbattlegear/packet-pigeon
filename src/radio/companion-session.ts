@@ -8,6 +8,8 @@ import { browserSerialEnvironment, choosePort } from './web-serial.ts'
 import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
 import { addContactCommand, contactPublicKey, removeContactCommand, writeContactCommand } from './contact-commands.ts'
 import type { NewContact } from './contact-commands.ts'
+import { decodeDirectSent, directMessageCommand, resetPathCommand } from './direct-message.ts'
+import type { DirectSendReceipt } from './direct-message.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -76,6 +78,7 @@ export class CompanionSession {
   private port?: CompanionSerialPort
   private expectedKey?: string
   private contactWritePending = false
+  private directCommandPending = false
 
   constructor(options: { environment?: WebSerialEnvironment; timeoutMs?: number; locks?: LockProvider; retryDelays?: readonly number[] } = {}) {
     this.environment = options.environment
@@ -268,6 +271,9 @@ export class CompanionSession {
     if (this.contactWritePending) {
       throw new CompanionError('protocol', 'Wait for the contact change to finish before syncing messages.')
     }
+    if (this.directCommandPending) {
+      throw new CompanionError('protocol', 'Wait for the direct-message command to finish before syncing messages.')
+    }
     const hold = Symbol()
     this.receiptHolds.add(hold)
     let used = false
@@ -317,6 +323,7 @@ export class CompanionSession {
       || this.snapshot.device?.publicKey !== radioKey
     ) throw new Error('Connect the selected radio and wait for it to finish syncing.')
     if (this.contactWritePending) throw new Error('A radio contact change is already in progress.')
+    if (this.directCommandPending) throw new Error('Wait for the direct-message command to finish before changing contacts.')
     if (this.receiptHolds.size) throw new Error('Finish message sync or save the pending receipt before changing contacts.')
 
     this.contactWritePending = true
@@ -377,6 +384,71 @@ export class CompanionSession {
     await this.changeContacts(radioKey, async (link) => {
       await writeContactCommand(link, removeContactCommand(key))
       return this.snapshot.contacts.filter((contact) => contact.publicKey !== key)
+    })
+  }
+
+  private async withDirectContact<T>(
+    radioKey: string,
+    recipient: string,
+    command: (link: SerialLink) => Promise<T>,
+  ) {
+    const key = contactPublicKey(recipient)
+    const attempt = this.attempt
+    const link = attempt?.link
+    if (!link || this.snapshot.phase !== 'ready' || this.snapshot.device?.publicKey !== radioKey) {
+      throw new Error('Connect the selected radio before sending messages.')
+    }
+    if (this.receiptHolds.size) throw new Error('Finish message sync or save the pending receipt before sending.')
+    if (this.contactWritePending || this.directCommandPending) throw new Error('Another radio command is in progress.')
+    this.directCommandPending = true
+    try {
+      const contacts = await this.readContacts(link)
+      if (this.attempt !== attempt || this.snapshot.phase !== 'ready' || this.snapshot.device?.publicKey !== radioKey) {
+        throw new Error('The radio disconnected before the message command could be sent.')
+      }
+      this.update({ contacts })
+      const matches = contacts.filter((contact) => contact.publicKey.slice(0, 12) === key.slice(0, 12))
+      if (matches.length !== 1 || matches[0].publicKey !== key) {
+        throw new Error('The destination is missing or its six-byte key prefix is ambiguous on the radio.')
+      }
+      if (matches[0].type !== 1 && matches[0].type !== 3) {
+        throw new Error('Direct messages require a companion or room contact.')
+      }
+      return await command(link)
+    } finally {
+      this.directCommandPending = false
+    }
+  }
+
+  readonly sendDirect = async (radioKey: string, recipient: string, timestamp: number, attempt: number, text: string) => {
+    const command = directMessageCommand(recipient, timestamp, attempt, text)
+    return this.withDirectContact(radioKey, recipient, async (link) => {
+      const result = await link.request<{ error: Uint8Array } | { receipt: DirectSendReceipt }>(command, (frame) => {
+        if (frame[0] === Response.error || frame[0] === Response.disabled) return { value: { error: frame } }
+        return { value: { receipt: decodeDirectSent(frame) } }
+      })
+      if ('error' in result) {
+        const detail = result.error.length > 1 ? ` (device error ${result.error[1]})` : ''
+        throw new CompanionError('device-error', `The radio rejected the message${detail}.`)
+      }
+      return result.receipt
+    })
+  }
+
+  readonly resetDirectPath = async (radioKey: string, recipient: string) => {
+    const command = resetPathCommand(recipient)
+    return this.withDirectContact(radioKey, recipient, async (link) => {
+      const frame = await link.request(command, (response) => {
+        if (response[0] !== Response.error && response[0] !== Response.disabled) expectResponse(response, Response.ok)
+        return { value: response }
+      })
+      if (frame[0] !== Response.ok) {
+        throw new CompanionError('device-error', 'The radio could not clear the contact route for flood retries.')
+      }
+      this.update({
+        contacts: this.snapshot.contacts.map((contact) => contact.publicKey === recipient
+          ? { ...contact, pathLength: 0xff } : contact),
+      })
     })
   }
 

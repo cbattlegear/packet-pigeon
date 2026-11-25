@@ -1,17 +1,21 @@
 export const Command = {
   appStart: 1,
+  sendDirect: 2,
   contacts: 4,
   nextMessage: 10,
+  resetPath: 13,
   deviceQuery: 22,
   channel: 31,
 } as const
 
 export const Response = {
+  ok: 0,
   error: 1,
   contactsStart: 2,
   contact: 3,
   contactsEnd: 4,
   selfInfo: 5,
+  sent: 6,
   directText: 7,
   channelText: 8,
   noMoreMessages: 10,
@@ -24,6 +28,7 @@ export const Response = {
 } as const
 
 export const messageWaiting = 0x83
+export const messageAcknowledged = 0x82
 
 export type CompanionErrorCode =
   | 'insecure-context' | 'unsupported-browser' | 'chooser-failed' | 'open-failed'
