@@ -27,8 +27,9 @@ npm run preview
 
 `lint` runs the standard scaffold's Oxlint configuration. `build` runs the
 TypeScript project build and produces the static site in `dist`. `preview`
-serves that build locally; it is not a production server. There is no automated
-test suite yet; add focused tests alongside the first real behavior.
+serves that build locally; it is not a production server. Run the focused
+browser storage tests with `npm run test:storage`; they use a test-only
+IndexedDB implementation without connecting to a radio.
 
 ## Workstream boundaries
 
@@ -46,6 +47,17 @@ Keep work small and split by behavior, rather than creating empty layers up fron
   session logic independent of React: no React imports or UI state in those
   modules. Introduce only the contracts needed by that behavior and test it
   independently.
+- **Storage:** `src/storage` keeps a separate IndexedDB cache for each radio.
+  Use the full public key verified by the radio session, never its display
+  name or port, and capture that key when starting a sync. While offline,
+  explicitly select a cached key using `listRadioKeys`, then `read` it. Map
+  radio data into the storage records; do not include channel secrets or
+  credentials. Assign each received message a per-radio ID and reuse it when
+  retrying that storage write. The radio does not supply a message ID, so
+  separate receipts are not deduplicated by timestamp or text. An `update`
+  atomically replaces supplied contact/channel lists, appends unseen messages,
+  and applies any supplied local edits. Failed writes reject without replacing
+  the previous cache. Browser data clearing or eviction can remove the cache.
 - **Integration:** once radio behavior exists, connect it to the UI through a
   small React adapter or hook with explicit loading and error states. Coordinate
   that boundary between workstreams before both sides depend on it.
