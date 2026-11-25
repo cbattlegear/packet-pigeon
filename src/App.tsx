@@ -19,6 +19,7 @@ import { useAppPreferences } from './preferences/use-app-preferences.ts'
 import { useScreenWakeLock } from './preferences/use-screen-wake-lock.ts'
 import { ImportShare, ShareCode } from './sharing/ShareDialogs.tsx'
 import { formatCompanionSetup } from './sharing/setupLink.ts'
+import { RxInspector } from './diagnostics/RxInspector.tsx'
 import { openRadioStorage } from './storage/index.ts'
 
 const session = new CompanionSession()
@@ -40,7 +41,7 @@ function applyStartupRetention() {
   return startupRetention
 }
 
-const sections = ['Chats', 'Contacts', 'Discovery', 'Channels', 'Map', 'Tools', 'Settings'] as const
+const sections = ['Chats', 'Contacts', 'Discovery', 'Channels', 'Map', 'Tools', 'Diagnostics', 'Settings'] as const
 type Section = (typeof sections)[number]
 
 function sectionFromHash(): Section {
@@ -78,11 +79,12 @@ function App() {
   const [retention, setRetention] = useState<{ checking: boolean; removed: number; error: string | null }>({
     checking: true, removed: 0, error: null,
   })
-  const [{ activeSection, hasOpenedMap, hasOpenedContacts, hasOpenedDiscovery }, setNavigation] = useState(() => {
+  const [{ activeSection, hasOpenedMap, hasOpenedContacts, hasOpenedDiscovery, hasOpenedDiagnostics }, setNavigation] = useState(() => {
     const activeSection = sectionFromHash()
     return {
       activeSection, hasOpenedMap: isMapSection(activeSection), hasOpenedContacts: activeSection === 'Contacts',
       hasOpenedDiscovery: activeSection === 'Discovery',
+      hasOpenedDiagnostics: activeSection === 'Diagnostics',
     }
   })
   const [discoveryMapRequest, setDiscoveryMapRequest] = useState(0)
@@ -149,6 +151,7 @@ function App() {
         hasOpenedMap: previous.hasOpenedMap || isMapSection(activeSection),
         hasOpenedContacts: previous.hasOpenedContacts || activeSection === 'Contacts',
         hasOpenedDiscovery: previous.hasOpenedDiscovery || activeSection === 'Discovery',
+        hasOpenedDiagnostics: previous.hasOpenedDiagnostics || activeSection === 'Diagnostics',
       }))
     }
     window.addEventListener('hashchange', updateSection)
@@ -282,6 +285,12 @@ function App() {
             mapPosition={sharePosition}
             readChannelKey={(key, channel) => session.readChannelShareKey(key, channel.index, channel.name)} />
         </div>
+        {hasOpenedDiagnostics && <div hidden={activeSection !== 'Diagnostics'}>
+          <div className="section-pane">
+            <div className="pane-heading"><h1>Diagnostics</h1></div>
+            <RxInspector snapshot={snapshot} session={session} prefs={settings.preferences} locale={settings.locale} />
+          </div>
+        </div>}
         {activeSection === 'Settings' && (
           <div className="section-pane">
             <div className="pane-heading"><h1>Settings</h1></div>
