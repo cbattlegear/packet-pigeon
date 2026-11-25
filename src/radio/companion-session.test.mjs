@@ -117,6 +117,47 @@ function contactInfo() {
   return frame
 }
 
+test('channel management rechecks slots, preserves keys on rename, and refuses full or stale slots', async () => {
+  const slots = [new Uint8Array(48), new Uint8Array(48)]
+  slots[0].set(encode('Public'))
+  slots[0].fill(0x42, 32)
+  let rejectWrite = false
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo(2)); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 31: serial.emit(18, command[1], ...slots[command[1]]); break
+      case 32:
+        if (rejectWrite) serial.emit(1, 5)
+        else { slots[command[1]].set(command.slice(2)); serial.emit(0) }
+        break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  const key = 'ab'.repeat(32)
+  await session.connect()
+  const hold = session.reserveQueuedMessage(key)
+  await assert.rejects(session.createChannel(key, { kind: 'public', name: 'Other', secret: '' }), /Finish message sync/)
+  hold.release()
+  await session.createChannel(key, { kind: 'hashtag', name: '#test', secret: '' })
+  assert.deepEqual(session.getSnapshot().channels.map(({ name }) => name), ['Public', '#test'])
+  assert.equal(Buffer.from(slots[1].slice(32)).toString('hex'), '9cd8fcf22a47333b591d96a2b848b73f')
+  await assert.rejects(session.createChannel(key, { kind: 'public', name: 'Other', secret: '' }), /No empty channel slot/)
+  await assert.rejects(session.changeChannel(key, 1, '#test', '#other'), /cannot be renamed/)
+  await session.changeChannel(key, 0, 'Public', 'General')
+  assert.deepEqual([...slots[0].slice(32)], Array(16).fill(0x42))
+  await assert.rejects(session.changeChannel(key, 0, 'Public', null), /changed on the radio/)
+  rejectWrite = true
+  await assert.rejects(session.changeChannel(key, 0, 'General', null), /device error 5/)
+  assert.equal(session.getSnapshot().channels[0].name, 'General')
+  rejectWrite = false
+  await session.changeChannel(key, 1, '#test', null)
+  assert.ok(slots[1].every((byte) => byte === 0))
+  await session.disconnect()
+})
+
 test('USB framing tolerates split headers, noise and multiple packets per read', () => {
   const decoder = new SerialFrameDecoder()
   assert.deepEqual([...decoder.read(Uint8Array.of(0, 0x3e, 0, 0, 0x3e, 177, 0, 0x3e))], [])
