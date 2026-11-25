@@ -17,6 +17,8 @@ test('channel actions require a ready radio and disclose unsupported controls', 
     const ready = render('ready')
     assert.match(ready, /Public and hashtag keys are discoverable/)
     assert.match(ready, /per-channel region scope are not available yet/)
+    assert.match(ready, /Message retention/)
+    assert.match(ready, /permanently deleted using the sender/)
     assert.match(ready, /Observed sender names/)
     assert.match(ready, /not a membership list/)
     assert.match(ready, /Names can be impersonated or changed/)

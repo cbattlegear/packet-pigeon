@@ -240,9 +240,21 @@ Blocking a name uses an exact match across channels for the selected radio;
 matching receipts are hidden in Chats but retained in the cache and reappear
 when unblocked. Messages without a recognizable name remain visible. Blocking
 does not prevent reception by the radio. Names and blocks are browser-local.
-Notification modes, retention, and per-channel region scope are not implemented.
-No region scope is changed by these controls. Channel changes have been
-exercised with simulated transports rather than physical hardware.
+
+Each channel can keep cached messages forever (the default), or for 1, 7, 30,
+or 90 days. At app startup, expired dated channel messages are permanently
+deleted from this browser's cache, along with their read markers. Age uses the
+sender-provided timestamp, which can be wrong or manipulated; undated entries
+and entries with a zero timestamp are kept. The setting is per radio and
+channel slot, and is preserved on local renames. If a slot's name changes
+outside the app, cleanup stays paused until a new setting is chosen, even if
+the old name returns; a replacement
+with the same slot and name cannot be distinguished. A synced deletion clears
+the setting. Retention does not change the radio or delete direct messages.
+
+Notification modes and per-channel region scope are not implemented. No region
+scope is changed by these controls. Channel changes have been exercised with
+simulated transports rather than physical hardware.
 
 ## Discovered adverts
 

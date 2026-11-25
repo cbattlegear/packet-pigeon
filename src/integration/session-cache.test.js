@@ -98,9 +98,12 @@ test('persists changed channel lists without replacing messages or local prefere
   const cache = new SessionCache(session, () => openRadioStorage(factory))
   const key = radioKeyFromPublicKey('ab'.repeat(32))
   const storage = await openRadioStorage(factory)
-  await storage.update(key, { preferences: { selectedConversationId: 'channel:0' }, messages: [{
-    id: 'm', conversationId: 'channel:0', sender: '', timestamp: 1, text: 'saved',
-  }] })
+  await storage.update(key, {
+    channels: [{ index: 0, name: 'Public' }],
+    channelRetention: { index: 0, channelName: 'Public', days: 30 },
+    preferences: { selectedConversationId: 'channel:0' },
+    messages: [{ id: 'm', conversationId: 'channel:0', sender: '', timestamp: 1, text: 'saved' }],
+  })
   session.emit({ phase: 'handshake' })
   session.emit({ phase: 'ready', device: { publicKey: key }, channels: [{ index: 0, name: 'Public' }] })
   await waitFor(() => !cache.getSnapshot().saving && !cache.getSnapshot().pending)
@@ -110,5 +113,120 @@ test('persists changed channel lists without replacing messages or local prefere
   assert.deepEqual(data.channels, [{ index: 0, name: 'Renamed' }, { index: 1, name: '#topic' }])
   assert.equal(data.messages[0].text, 'saved')
   assert.equal(data.preferences.selectedConversationId, 'channel:0')
+  assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Public', days: 30, paused: true }])
+  storage.close()
+})
+
+test('local retention rename waits for queued channel snapshots', async () => {
+  const factory = new IDBFactory()
+  const session = new FixtureSession()
+  const key = radioKeyFromPublicKey('ab'.repeat(32))
+  const otherKey = radioKeyFromPublicKey('cd'.repeat(32))
+  const storage = await openRadioStorage(factory)
+  for (const radio of [key, otherKey]) {
+    await storage.update(radio, {
+      channels: [{ index: 0, name: 'Public' }],
+      channelRetention: { index: 0, channelName: 'Public', days: 30 },
+    })
+  }
+  let release
+  let entered
+  const blocked = new Promise((resolve) => { release = resolve })
+  const started = new Promise((resolve) => { entered = resolve })
+  const cache = new SessionCache(session, async () => {
+    const connection = await openRadioStorage(factory)
+    return {
+      ...connection,
+      update: async (radio, update) => {
+        if (update.channels) { entered(); await blocked }
+        return connection.update(radio, update)
+      },
+    }
+  })
+  session.emit({ phase: 'handshake' })
+  session.emit({ phase: 'ready', device: { publicKey: key }, channels: [{ index: 0, name: 'Public' }] })
+  await started
+  const renamed = cache.renameChannelRetention(key, { index: 0, from: 'Public', to: 'Renamed' })
+  release()
+  await renamed
+  session.emit({ channels: [{ index: 0, name: 'Renamed' }] })
+  await waitFor(() => !cache.getSnapshot().saving && !cache.getSnapshot().pending)
+  assert.deepEqual((await storage.read(key)).channelRetention, [{ index: 0, channelName: 'Renamed', days: 30 }])
+  assert.deepEqual((await storage.read(otherKey)).channelRetention, [{ index: 0, channelName: 'Public', days: 30 }])
+  storage.close()
+})
+
+test('a failed queued cache write rejects and does not retry the retention migration later', async () => {
+  const factory = new IDBFactory()
+  const session = new FixtureSession()
+  const key = radioKeyFromPublicKey('ab'.repeat(32))
+  const storage = await openRadioStorage(factory)
+  await storage.update(key, {
+    channels: [{ index: 0, name: 'Public' }],
+    channelRetention: { index: 0, channelName: 'Public', days: 30 },
+  })
+  let release
+  let entered
+  let fail = true
+  const blocked = new Promise((resolve) => { release = resolve })
+  const started = new Promise((resolve) => { entered = resolve })
+  const cache = new SessionCache(session, async () => {
+    const connection = await openRadioStorage(factory)
+    return {
+      ...connection,
+      update: async (radio, update) => {
+        if (update.channels && fail) {
+          entered()
+          await blocked
+          fail = false
+          throw new Error('Disk unavailable')
+        }
+        return connection.update(radio, update)
+      },
+    }
+  })
+  session.emit({ phase: 'handshake' })
+  session.emit({ phase: 'ready', device: { publicKey: key }, channels: [{ index: 0, name: 'Public' }] })
+  await started
+  const result = assert.rejects(cache.renameChannelRetention(key, { index: 0, from: 'Public', to: 'Renamed' }), /Disk unavailable/)
+  release()
+  await result
+  session.emit({ channels: [{ index: 0, name: 'Renamed' }] })
+  cache.retry()
+  await waitFor(() => !cache.getSnapshot().saving && !cache.getSnapshot().pending)
+  assert.equal(cache.getSnapshot().error, null)
+  assert.deepEqual((await storage.read(key)).channelRetention,
+    [{ index: 0, channelName: 'Public', days: 30, paused: true }])
+  storage.close()
+})
+
+test('a failed retention migration does not block later channel caching', async () => {
+  const factory = new IDBFactory()
+  const session = new FixtureSession()
+  const key = radioKeyFromPublicKey('ab'.repeat(32))
+  const storage = await openRadioStorage(factory)
+  await storage.update(key, {
+    channels: [{ index: 0, name: 'Public' }],
+    channelRetention: { index: 0, channelName: 'Public', days: 30 },
+  })
+  const cache = new SessionCache(session, async () => {
+    const connection = await openRadioStorage(factory)
+    return {
+      ...connection,
+      update: async (radio, update) => {
+        if (update.channelRetentionRename) throw new Error('Retention write failed')
+        return connection.update(radio, update)
+      },
+    }
+  })
+  session.emit({ phase: 'handshake' })
+  session.emit({ phase: 'ready', device: { publicKey: key }, channels: [{ index: 0, name: 'Public' }] })
+  await waitFor(() => !cache.getSnapshot().saving && !cache.getSnapshot().pending)
+  await assert.rejects(cache.renameChannelRetention(key, { index: 0, from: 'Public', to: 'Renamed' }), /Retention write failed/)
+  session.emit({ channels: [{ index: 0, name: 'Renamed' }] })
+  await waitFor(() => !cache.getSnapshot().saving && !cache.getSnapshot().pending)
+  assert.equal(cache.getSnapshot().error, null)
+  assert.deepEqual((await storage.read(key)).channelRetention,
+    [{ index: 0, channelName: 'Public', days: 30, paused: true }])
   storage.close()
 })

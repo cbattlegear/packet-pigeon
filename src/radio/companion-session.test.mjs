@@ -152,12 +152,19 @@ test('channel management rechecks slots, preserves keys on rename, and refuses f
   assert.equal(Buffer.from(slots[1].slice(32)).toString('hex'), '9cd8fcf22a47333b591d96a2b848b73f')
   await assert.rejects(session.createChannel(key, { kind: 'join', name: 'Other', secret: '23'.repeat(16) }), /No empty channel slot/)
   await assert.rejects(session.changeChannel(key, 1, '#test', '#other'), /cannot be renamed/)
-  await session.changeChannel(key, 0, 'Public', 'General')
+  await session.changeChannel(key, 0, 'Public', 'General', async () => {
+    assert.equal(new TextDecoder().decode(slots[0].slice(0, 7)), 'General')
+    assert.equal(session.getSnapshot().channels[0].name, 'Public')
+  })
   assert.deepEqual([...slots[0].slice(32)], [...publicSecret])
   await assert.rejects(session.changeChannel(key, 0, 'Public', null), /changed on the radio/)
+  await assert.rejects(session.changeChannel(key, 0, 'General', 'Updated', async () => {
+    throw new Error('Storage unavailable')
+  }), /Storage unavailable/)
+  assert.equal(session.getSnapshot().channels[0].name, 'Updated')
   rejectWrite = true
-  await assert.rejects(session.changeChannel(key, 0, 'General', null), /device error 5/)
-  assert.equal(session.getSnapshot().channels[0].name, 'General')
+  await assert.rejects(session.changeChannel(key, 0, 'Updated', null), /device error 5/)
+  assert.equal(session.getSnapshot().channels[0].name, 'Updated')
   rejectWrite = false
   await session.changeChannel(key, 1, '#test', null)
   assert.ok(slots[1].every((byte) => byte === 0))
@@ -196,6 +203,65 @@ test('applies the setup preset and hash width to the chosen radio, preserving re
   await assert.rejects(session.setSetupPathWidth(key, 1), /rejected the command/)
   assert.equal(session.getSnapshot().device.capabilities.pathHashMode, 1)
   await session.disconnect()
+})
+
+test('a delayed channel rename cannot publish into a different radio session', async () => {
+  function channelPort(key, name) {
+    const slot = new Uint8Array(48)
+    slot.set(encode(name))
+    slot.fill(1, 32)
+    return new FixturePort((command, serial) => {
+      switch (command[0]) {
+        case 22: serial.emit(...deviceInfo(1)); break
+        case 1: {
+          const info = selfInfo()
+          info.fill(key, 4, 36)
+          serial.emit(...info)
+          break
+        }
+        case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+        case 31: serial.emit(18, command[1], ...slot); break
+        case 32: slot.set(command.slice(2)); serial.emit(0); break
+        default: assert.fail(`Unexpected command ${command[0]}`)
+      }
+    })
+  }
+  const ports = [channelPort(0xab, 'Public'), channelPort(0xcd, 'Other')]
+  const session = new CompanionSession({
+    environment: { secureContext: true, serial: { requestPort: async () => ports.shift(), getPorts: async () => [] } },
+    timeoutMs: 1000, locks: fixtureLocks(),
+  })
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const secondKey = radioKeyFromPublicKey('cd'.repeat(32))
+  await storage.update(secondKey, {
+    channels: [{ index: 0, name: 'Other' }],
+    channelRetention: { index: 0, channelName: 'Other', days: 30 },
+  })
+  const cache = new SessionCache(session, () => openRadioStorage(factory))
+  await session.connect()
+  let release
+  let entered
+  const blocked = new Promise((resolve) => { release = resolve })
+  const started = new Promise((resolve) => { entered = resolve })
+  const rename = assert.rejects(session.changeChannel('ab'.repeat(32), 0, 'Public', 'Renamed', async () => {
+    entered()
+    await blocked
+  }), /radio disconnected/)
+  await started
+  await session.disconnect()
+  await session.connect()
+  await waitFor(() => cache.getSnapshot().pending === 0 && !cache.getSnapshot().saving)
+  release()
+  await rename
+  await waitFor(() => cache.getSnapshot().pending === 0 && !cache.getSnapshot().saving)
+  assert.equal(session.getSnapshot().device.publicKey, secondKey)
+  assert.deepEqual(session.getSnapshot().channels, [{ index: 0, name: 'Other' }])
+  const data = await storage.read(secondKey)
+  assert.deepEqual(data.channels, [{ index: 0, name: 'Other' }])
+  assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Other', days: 30 }])
+  await session.disconnect()
+  storage.close()
 })
 
 test('USB framing tolerates split headers, noise and multiple packets per read', () => {

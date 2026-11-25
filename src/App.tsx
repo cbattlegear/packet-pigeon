@@ -19,6 +19,7 @@ import { useAppPreferences } from './preferences/use-app-preferences.ts'
 import { useScreenWakeLock } from './preferences/use-screen-wake-lock.ts'
 import { ImportShare, ShareCode } from './sharing/ShareDialogs.tsx'
 import { formatCompanionSetup } from './sharing/setupLink.ts'
+import { openRadioStorage } from './storage/index.ts'
 
 const session = new CompanionSession()
 const cache = new SessionCache(session)
@@ -28,6 +29,16 @@ const messageSync = new MessageSync(session, undefined, () => {
 })
 const directMessages = new DirectMessages(session)
 const MapWorkspace = lazy(() => import('./map/MapWorkspace.tsx'))
+let startupRetention: Promise<number> | undefined
+
+function applyStartupRetention() {
+  startupRetention ??= (async () => {
+    const storage = await openRadioStorage()
+    try { return await storage.pruneChannelMessages(Date.now()) }
+    finally { storage.close() }
+  })()
+  return startupRetention
+}
 
 const sections = ['Chats', 'Contacts', 'Discovery', 'Channels', 'Map', 'Tools', 'Settings'] as const
 type Section = (typeof sections)[number]
@@ -64,6 +75,9 @@ function StateMessage({ kind, title, description }: StateMessageProps) {
 function App() {
   const settings = useAppPreferences()
   const wake = useScreenWakeLock(settings.preferences.keepScreenOn)
+  const [retention, setRetention] = useState<{ checking: boolean; removed: number; error: string | null }>({
+    checking: true, removed: 0, error: null,
+  })
   const [{ activeSection, hasOpenedMap, hasOpenedContacts, hasOpenedDiscovery }, setNavigation] = useState(() => {
     const activeSection = sectionFromHash()
     return {
@@ -112,6 +126,20 @@ function App() {
     : snapshot.phase === 'syncing' ? 'Syncing' : snapshot.phase === 'ready' ? 'Idle' : 'Not syncing'
 
   useEffect(() => {
+    let active = true
+    void applyStartupRetention().then(
+      (removed) => { if (active) setRetention({ checking: false, removed, error: null }) },
+      (error: unknown) => {
+        if (active) setRetention({
+          checking: false, removed: 0,
+          error: error instanceof Error ? error.message : 'Could not apply channel retention.',
+        })
+      },
+    )
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
     const updateSection = () => {
       const activeSection = sectionFromHash()
       setShareDialog(null)
@@ -139,6 +167,8 @@ function App() {
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [messageStatus.syncing, messageStatus.pending, directStatus.activeId, directStatus.pending])
+
+  if (retention.checking) return <div role="status">Applying channel retention…</div>
 
   return (
     <div className={`app-shell${activeSection === 'Chats' ? ' app-shell--chats' : ''}`}>
@@ -209,9 +239,11 @@ function App() {
       </nav>
 
       <main className="main-content" id="main-content" tabIndex={-1}>
-        {(!usbSupport.supported || !bluetoothSupport.supported || snapshot.error
+        {(!usbSupport.supported || !bluetoothSupport.supported || snapshot.error || retention.error || retention.removed > 0
           || cacheStatus.error || messageStatus.error || messageStatus.pending || directStatus.error) && (
           <div className="notices">
+            {retention.error && <p role="alert">Channel retention could not finish: {retention.error} Check the radio cache and channel settings, then reload to retry.</p>}
+            {retention.removed > 0 && <p role="status">Channel retention removed {retention.removed} cached message{retention.removed === 1 ? '' : 's'}.</p>}
             {!usbSupport.supported && <p role="status">{usbSupport.error.message}</p>}
             {!bluetoothSupport.supported && <p role="status">{bluetoothSupport.error.message}</p>}
             {snapshot.error && <p role="alert">{snapshot.error.message}</p>}
@@ -280,7 +312,7 @@ function App() {
         {activeSection === 'Channels' && (
           <div className="section-pane">
             <div className="pane-heading"><h1>Channels</h1></div>
-            <ChannelsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving} messageSyncing={messageStatus.syncing}
+            <ChannelsPanel snapshot={snapshot} session={session} cache={cache} cacheSaving={cacheStatus.saving} messageSyncing={messageStatus.syncing}
               onImport={() => setShareDialog({ kind: 'import' })}
               onBlockedSendersChanged={(key) => {
                 if (directMessages.getSnapshot().key === key) void directMessages.load(key)

@@ -133,6 +133,240 @@ test('sender blocks preserve chat preferences and unread receipts until restored
   assert.equal(await page.getByLabel('Show conversation previews').isChecked(), false)
 })
 
+test('channel retention confirms deletion and pauses when a slot changes names', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1260, height: 900 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  const radio = 'ab'.repeat(32)
+  const otherRadio = 'ef'.repeat(32)
+  await page.goto(`${url}#channels`)
+  await page.evaluate(async ({ radio, otherRadio }) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const now = Date.now()
+    const messages = [
+      { id: 'old', timestamp: now - 2 * 86_400_000 },
+      { id: 'recent', timestamp: now - 60_000 },
+    ].map((entry) => ({
+      ...entry, conversationId: 'channel:0', sender: '', text: 'Cached message',
+    }))
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        channels: [{ index: 0, name: 'Public' }], messages, markRead: ['old', 'recent'],
+      })
+      await storage.update(radioKeyFromPublicKey(otherRadio), {
+        channels: [{ index: 0, name: 'Public' }], messages: [messages[0]],
+      })
+    } finally { storage.close() }
+  }, { radio, otherRadio })
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  const retention = page.getByRole('combobox', { name: 'Message retention for Public' })
+  assert.equal(await retention.inputValue(), 'forever')
+
+  let prompt = page.waitForEvent('dialog')
+  let selection = retention.selectOption('1')
+  let dialog = await prompt
+  assert.match(dialog.message(), /permanently deleted using sender-provided timestamps/)
+  await dialog.dismiss()
+  await selection
+  assert.equal(await retention.inputValue(), 'forever')
+
+  prompt = page.waitForEvent('dialog')
+  selection = retention.selectOption('1')
+  dialog = await prompt
+  await dialog.accept()
+  await selection
+  await page.getByText('Retention saved. Cleanup runs when the app starts.').waitFor()
+  await page.setViewportSize({ width: 390, height: 844 })
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  assert.ok(overflow <= 1, `Channel settings overflow by ${overflow}px`)
+  const before = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).messages.map(({ id }) => id) }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(before, ['old', 'recent'])
+
+  await page.reload()
+  await page.getByText('Channel retention removed 1 cached message.').waitFor()
+  const after = await page.evaluate(async ({ radio, otherRadio }) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try {
+      return {
+        current: await storage.read(radioKeyFromPublicKey(radio)),
+        other: await storage.read(radioKeyFromPublicKey(otherRadio)),
+      }
+    } finally { storage.close() }
+  }, { radio, otherRadio })
+  assert.deepEqual(after.current.messages.map(({ id }) => id), ['recent'])
+  assert.deepEqual(after.current.readMessages, ['recent'])
+  assert.deepEqual(after.other.messages.map(({ id }) => id), ['old'])
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  assert.equal(await retention.inputValue(), '1')
+
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        channels: [{ index: 0, name: 'Replacement' }],
+        messages: [{ id: 'replacement', conversationId: 'channel:0', sender: '',
+          timestamp: Date.now() - 2 * 86_400_000, text: 'Keep this' }],
+      })
+    } finally { storage.close() }
+  }, radio)
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  const replacement = page.getByRole('combobox', { name: 'Message retention for Replacement' })
+  assert.equal(await replacement.inputValue(), 'paused')
+  await page.getByText('Retention is paused because this slot changed names. Choose a setting for this channel.').waitFor()
+  const saved = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).messages.map(({ id }) => id) }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(saved, ['recent', 'replacement'])
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { await storage.update(radioKeyFromPublicKey(radio), { channels: [{ index: 0, name: 'Public' }] }) }
+    finally { storage.close() }
+  }, radio)
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  assert.equal(await retention.inputValue(), 'paused')
+  const afterReturn = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).messages.map(({ id }) => id) }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(afterReturn, ['recent', 'replacement'])
+  await retention.selectOption('forever')
+  await page.getByText('Retention saved. Cleanup runs when the app starts.').waitFor()
+  const cleared = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).channelRetention }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(cleared, [])
+
+  await page.evaluate(async (radio) => {
+    const database = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('packet-pigeon', 1)
+      request.onsuccess = () => resolve(request.result)
+      request.onerror = () => reject(request.error)
+    })
+    try {
+      await new Promise((resolve, reject) => {
+        const transaction = database.transaction('radios', 'readwrite')
+        const store = transaction.objectStore('radios')
+        const request = store.get(radio)
+        request.onsuccess = () => {
+          request.result.channelRetention = 'invalid'
+          store.put(request.result, radio)
+        }
+        transaction.oncomplete = resolve
+        transaction.onabort = () => reject(transaction.error)
+      })
+    } finally { database.close() }
+  }, radio)
+  await page.reload()
+  await page.getByText(/Channel retention could not finish: Invalid saved channel retention settings/).waitFor()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  prompt = page.waitForEvent('dialog')
+  const reset = page.getByRole('button', { name: 'Reset invalid retention settings' }).click()
+  dialog = await prompt
+  await dialog.accept()
+  await reset
+  await page.getByText('Retention settings reset. Reload to retry cleanup.').waitFor()
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).waitFor()
+  assert.equal(await page.getByText(/Channel retention could not finish/).count(), 0)
+  const recovered = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).messages.map(({ id }) => id) }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(recovered, ['recent', 'replacement'])
+})
+
+test('a locally renamed channel keeps its retention setting', async (t) => {
+  const context = await browser.newContext()
+  t.after(() => context.close())
+  const page = await context.newPage()
+  const radio = '12'.repeat(32)
+  await page.goto(`${url}#channels`)
+  await page.getByRole('heading', { name: 'Channels' }).waitFor()
+  await page.evaluate(async (radio) => {
+    const { default: React } = await import('/node_modules/.vite/deps/react.js')
+    const { default: { createRoot } } = await import('/node_modules/.vite/deps/react-dom_client.js')
+    const { ChannelsPanel } = await import('/src/channels/ChannelsPanel.tsx')
+    const { SessionCache } = await import('/src/integration/session-cache.ts')
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const key = radioKeyFromPublicKey(radio)
+    const storage = await openRadioStorage()
+    try {
+      await storage.update(key, {
+        channels: [{ index: 0, name: 'Public' }],
+        channelRetention: { index: 0, channelName: 'Public', days: 30 },
+      })
+    } finally { storage.close() }
+    document.getElementById('root').hidden = true
+    const element = document.createElement('div')
+    element.id = 'channel-rename-fixture'
+    document.body.append(element)
+    const root = createRoot(element)
+    let snapshot = {
+      phase: 'ready', device: { publicKey: radio, capabilities: { maxChannels: 8 } },
+      channels: [{ index: 0, name: 'Public' }], contacts: [], messages: [], progress: null,
+    }
+    const session = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      async changeChannel(key, index, _oldName, name, afterRename) {
+        await afterRename?.()
+        const storage = await openRadioStorage()
+        try { await storage.update(key, { channels: [{ index, name }] }) }
+        finally { storage.close() }
+        snapshot = { ...snapshot, channels: [{ index, name }] }
+        render()
+      },
+    }
+    const cache = new SessionCache(session)
+    function render() {
+      root.render(React.createElement(ChannelsPanel, {
+        snapshot, session, cache, cacheSaving: false, messageSyncing: false, onBlockedSendersChanged() {},
+      }))
+    }
+    render()
+  }, radio)
+  const fixture = page.locator('#channel-rename-fixture')
+  const retention = fixture.getByRole('combobox', { name: 'Message retention for Public' })
+  await retention.waitFor({ state: 'visible' })
+  await page.waitForFunction(() => {
+    const select = document.querySelector('#channel-rename-fixture select[aria-label="Message retention for Public"]')
+    return select && !select.disabled && select.value === '30'
+  })
+  await fixture.getByRole('textbox', { name: 'Rename' }).fill('Renamed')
+  await fixture.getByRole('button', { name: 'Save name' }).click()
+  await fixture.getByText('Channel renamed on the radio.').waitFor()
+  assert.equal(await fixture.getByRole('combobox', { name: 'Message retention for Renamed' }).inputValue(), '30')
+  const saved = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).channelRetention }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(saved, [{ index: 0, channelName: 'Renamed', days: 30 }])
+})
+
 test('restores an enabled wake lock after visibility changes during a pending request and release', async (t) => {
   const context = await browser.newContext()
   t.after(() => context.close())

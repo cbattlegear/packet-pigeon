@@ -24,6 +24,9 @@ export type StoredChannel = {
   name: string
 }
 
+export type ChannelRetentionDays = 1 | 7 | 30 | 90
+export type ChannelRetention = { index: number; channelName: string; days: ChannelRetentionDays; paused?: boolean }
+
 export type ContactPreference = { publicKey: string; customName: string | null; favorite: boolean }
 export type ContactPreferenceEdit = { publicKey: string; customName?: string | null; favorite?: boolean }
 
@@ -97,6 +100,7 @@ export type LocalPreferences = {
 
 export type RadioData = {
   blockedChannelSenders?: string[]
+  channelRetention?: ChannelRetention[]
   contacts: StoredContact[]
   channels: StoredChannel[]
   messages: StoredMessage[]
@@ -112,6 +116,9 @@ export type RadioData = {
 
 export type RadioUpdate = {
   blockedChannelSender?: { name: string; blocked: boolean }
+  channelRetention?: { index: number; channelName: string; days: ChannelRetentionDays | null }
+  channelRetentionRename?: { index: number; from: string; to: string }
+  resetChannelRetention?: true
   contacts?: readonly StoredContact[]
   channels?: readonly StoredChannel[]
   messages?: readonly StoredMessage[]
@@ -150,6 +157,10 @@ export function radioKeyFromPublicKey(publicKey: string): RadioKey {
 function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   const { contacts, channels, messages, draft, preferences, contactPreference, discovery, directSendOptions } = update
   const next = { ...current }
+  if (update.resetChannelRetention !== undefined) {
+    if (update.resetChannelRetention !== true) throw new RadioStorageError('update', 'Invalid retention reset.')
+    next.channelRetention = []
+  }
   if (contacts) {
     next.contacts = contacts.map(({ publicKey, name, details }) => ({
       publicKey, name, ...(details ? {
@@ -164,6 +175,31 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   }
   if (channels) {
     next.channels = channels.map(({ index, name }) => ({ index, name }))
+    if (next.channelRetention) {
+      const slots = new Map(next.channels.map(({ index, name }) => [index, name]))
+      next.channelRetention = next.channelRetention.filter(({ index }) => slots.has(index)).map((entry) =>
+        slots.get(entry.index) !== entry.channelName ? { ...entry, paused: true } : entry)
+    }
+  }
+  if (update.channelRetention) {
+    const { index, channelName, days } = update.channelRetention
+    if (!validChannelIndex(index) || (days !== null && !validRetentionDays(days))
+      || !next.channels.some((channel) => channel.index === index && channel.name === channelName)) {
+      throw new RadioStorageError('update', 'The channel or retention setting changed. Refresh the channel list and retry.')
+    }
+    const settings = (next.channelRetention ?? []).filter((entry) => entry.index !== index)
+    if (days !== null) settings.push({ index, channelName, days })
+    next.channelRetention = settings
+  }
+  if (update.channelRetentionRename) {
+    const { index, from, to } = update.channelRetentionRename
+    if (!validChannelIndex(index) || typeof from !== 'string' || !from || typeof to !== 'string' || !to) {
+      throw new RadioStorageError('update', 'Invalid channel retention rename.')
+    }
+    if (next.channelRetention) {
+      next.channelRetention = next.channelRetention.map((entry) =>
+        entry.index === index && entry.channelName === from && !entry.paused ? { ...entry, channelName: to } : entry)
+    }
   }
   if (messages?.length) {
     const seen = new Set(current.messages.map(({ id }) => id))
@@ -233,6 +269,62 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
       ...update.markRead.filter((id) => knownReceipts.has(id))])]
   }
   return next
+}
+
+function validChannelIndex(index: number) {
+  return Number.isInteger(index) && index >= 0 && index <= 255
+}
+
+function validRetentionDays(days: unknown): days is ChannelRetentionDays {
+  return days === 1 || days === 7 || days === 30 || days === 90
+}
+
+export function validChannelRetentionSettings(value: unknown): value is ChannelRetention[] {
+  if (!Array.isArray(value)) return false
+  const seen = new Set<number>()
+  for (const raw of value as unknown[]) {
+    if (!raw || typeof raw !== 'object') return false
+    const setting = raw as { index?: unknown; channelName?: unknown; days?: unknown; paused?: unknown }
+    if (typeof setting.index !== 'number' || !validChannelIndex(setting.index)
+      || typeof setting.channelName !== 'string' || !setting.channelName
+      || !validRetentionDays(setting.days) || (setting.paused !== undefined && typeof setting.paused !== 'boolean')
+      || seen.has(setting.index)) return false
+    seen.add(setting.index)
+  }
+  return true
+}
+
+function pruneChannelMessages(data: RadioData, now: number, radio: string) {
+  if (data.channelRetention === undefined) return { data, removed: 0 }
+  if (!validChannelRetentionSettings(data.channelRetention)) {
+    throw new RadioStorageError('update', `Invalid saved channel retention settings for radio ${radio.slice(0, 12)}.`)
+  }
+  const slots = new Map(data.channels.map(({ index, name }) => [index, name]))
+  const policies = new Map<number, ChannelRetentionDays>()
+  for (const setting of data.channelRetention) {
+    if (!setting.paused && slots.get(setting.index) === setting.channelName) policies.set(setting.index, setting.days)
+  }
+  const removed = new Set<string>()
+  const messages = data.messages.filter((message) => {
+    const match = /^channel:(0|[1-9]\d*)$/.exec(message.conversationId)
+    if (!match || message.outgoing) return true
+    const index = Number(match[1])
+    const days = policies.get(index)
+    if (!days || (message.receipt && (message.receipt.kind === 'direct-text' || message.receipt.channelIndex !== index))
+      || message.timestamp === null || !Number.isFinite(message.timestamp) || message.timestamp <= 0
+      || message.timestamp >= now - days * 86_400_000) return true
+    removed.add(message.id)
+    return false
+  })
+  if (!removed.size) return { data, removed: 0 }
+  return {
+    data: {
+      ...data,
+      messages,
+      ...(data.readMessages ? { readMessages: data.readMessages.filter((id) => !removed.has(id)) } : {}),
+    },
+    removed: removed.size,
+  }
 }
 
 export function validateDirectOptions(options: DirectSendOptions): DirectSendOptions {
@@ -473,6 +565,26 @@ export async function openRadioStorage(factory?: IDBFactory) {
     read: (key: RadioKey) => runTransaction<RadioData | null>(db, 'readonly', (store, finish) => {
       const request = store.get(radioKeyFromPublicKey(key))
       request.onsuccess = () => finish(request.result ?? null)
+    }),
+    pruneChannelMessages: (now: number) => runTransaction<number>(db, 'readwrite', (store, finish, abort) => {
+      if (!Number.isFinite(now) || now < 0) throw new RadioStorageError('update', 'Invalid retention cleanup time.')
+      let removed = 0
+      const request = store.openCursor()
+      request.onsuccess = () => {
+        try {
+          const cursor = request.result
+          if (!cursor) {
+            finish(removed)
+            return
+          }
+          const result = pruneChannelMessages(cursor.value as RadioData, now, String(cursor.key))
+          if (result.removed) cursor.update(result.data)
+          removed += result.removed
+          cursor.continue()
+        } catch (error) {
+          abort(error)
+        }
+      }
     }),
     update: (key: RadioKey, update: RadioUpdate) => runTransaction<void>(
       db,
