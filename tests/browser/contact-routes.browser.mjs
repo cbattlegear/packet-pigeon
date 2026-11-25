@@ -45,8 +45,13 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
           table.forEach(emit)
           emit([4, 0, 0, 0, 0])
         } else if (data[0] === 30) emit(found())
-        else if (data[0] === 9) { changes.push([...data]); found().set(data.slice(1), 1); emit([0]) }
-        else if (data[0] === 13) { changes.push([...data]); found()[35] = 255; emit([0]) }
+        else if (data[0] === 9) {
+          changes.push([...data])
+          const record = found()
+          record.set(data.slice(1), 1)
+          new DataView(record.buffer).setUint32(144, changes.length, true)
+          emit([0])
+        }
         else if (data[0] === 36) {
           changes.push([...data])
           const tag = data.slice(1, 5)
@@ -93,5 +98,6 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Clear saved route' }).click()
   await page.getByText('Cleared the saved route.').waitFor()
-  assert.deepEqual(await page.evaluate(() => window.radioChanges.map(([code]) => code)), [9, 9, 36, 13])
+  assert.deepEqual(await page.evaluate(() => window.radioChanges.map(([code]) => code)), [9, 9, 36, 9])
+  assert.equal(await page.evaluate(() => window.radioChanges[3][35]), 255)
 })

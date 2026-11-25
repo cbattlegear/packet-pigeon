@@ -14,6 +14,7 @@ const addOrUpdateContact = 9
 const removeContact = 15
 const ok = 0
 const getContactByKey = 30
+const contactUpdateLength = 144
 
 export const contactPermissions = {
   telemetry: 0x02,
@@ -78,19 +79,24 @@ export async function readContactFrame(link: SerialLink, publicKey: string) {
   return frame
 }
 
-export function contactPathUpdate(frame: Uint8Array, input: { width: ContactPathWidth; text: string }) {
-  const path = parseContactPath(input.text, input.width)
-  const command = frame.slice(0, 148)
+function contactUpdate(frame: Uint8Array) {
+  // The optional final four bytes override the firmware's last-modified clock.
+  const command = frame.slice(0, contactUpdateLength)
   command[0] = addOrUpdateContact
-  command[35] = path.encoded
+  return command
+}
+
+export function contactPathUpdate(frame: Uint8Array, input: { width: ContactPathWidth; text: string } | null) {
+  const path = input ? parseContactPath(input.text, input.width) : null
+  const command = contactUpdate(frame)
+  command[35] = path?.encoded ?? pathUnknown
   command.fill(0, 36, 100)
-  if (path.hex) command.set(keyBytes(path.hex), 36)
+  if (path?.hex) command.set(keyBytes(path.hex), 36)
   return command
 }
 
 export function contactPermissionsUpdate(frame: Uint8Array, permissions: ContactPermissions) {
-  const command = frame.slice(0, 148)
-  command[0] = addOrUpdateContact
+  const command = contactUpdate(frame)
   for (const name of Object.keys(contactPermissions) as (keyof ContactPermissions)[]) {
     const enabled = permissions[name]
     if (typeof enabled !== 'boolean') continue
@@ -98,10 +104,6 @@ export function contactPermissionsUpdate(frame: Uint8Array, permissions: Contact
     command[34] = enabled ? command[34] | mask : command[34] & ~mask
   }
   return command
-}
-
-export function contactWithoutPath(frame: Uint8Array) {
-  return { ...decodeContact(frame), pathLength: pathUnknown }
 }
 
 export async function writeContactCommand(link: SerialLink, command: Uint8Array) {

@@ -7,7 +7,7 @@ import { expectResponse, SerialLink } from './serial-link.ts'
 import type { CompanionLinkPort } from './serial-link.ts'
 import { browserSerialEnvironment, choosePort } from './web-serial.ts'
 import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
-import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contactPublicKey, contactWithoutPath,
+import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contactPublicKey,
   readContactFrame, removeContactCommand, writeContactCommand } from './contact-commands.ts'
 import type { ContactPermissions, NewContact } from './contact-commands.ts'
 import type { ContactPathWidth } from './contact-path.ts'
@@ -463,13 +463,14 @@ export class CompanionSession {
     })
   }
 
-  private async editContact(radioKey: string, contactKey: string, edit: (link: SerialLink, frame: Uint8Array) => Promise<CompanionContact>) {
+  private async editContact(radioKey: string, contactKey: string, edit: (frame: Uint8Array) => Uint8Array) {
     const key = contactPublicKey(contactKey)
     await this.changeContacts(radioKey, async (link) => {
       if (this.snapshot.transport !== 'usb') throw new Error('Connect over USB to edit radio paths or permissions.')
       const frame = await readContactFrame(link, key)
       if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') throw new Error('The radio disconnected before the edit.')
-      const changed = await edit(link, frame)
+      await writeContactCommand(link, edit(frame))
+      const changed = decodeContact(await readContactFrame(link, key))
       return this.snapshot.contacts.some(({ publicKey }) => publicKey === key)
         ? this.snapshot.contacts.map((contact) => contact.publicKey === key ? changed : contact)
         : [...this.snapshot.contacts, changed]
@@ -477,30 +478,23 @@ export class CompanionSession {
   }
 
   readonly saveContactPath = (radioKey: string, contactKey: string, width: ContactPathWidth, text: string) =>
-    this.editContact(radioKey, contactKey, async (link, frame) => {
+    this.editContact(radioKey, contactKey, (frame) => {
       if (width > 1 && (this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0) < 10) {
         throw new Error('This firmware supports only one-byte contact path hashes.')
       }
-      const command = contactPathUpdate(frame, { width, text })
-      await writeContactCommand(link, command)
-      return decodeContact(command)
+      return contactPathUpdate(frame, { width, text })
     })
 
   readonly resetContactPath = (radioKey: string, contactKey: string) =>
-    this.editContact(radioKey, contactKey, async (link, frame) => {
-      await writeContactCommand(link, resetPathCommand(contactPublicKey(contactKey)))
-      return contactWithoutPath(frame)
-    })
+    this.editContact(radioKey, contactKey, (frame) => contactPathUpdate(frame, null))
 
   readonly saveContactPermissions = (radioKey: string, contactKey: string, permissions: ContactPermissions) =>
-    this.editContact(radioKey, contactKey, async (link, frame) => {
+    this.editContact(radioKey, contactKey, (frame) => {
       const version = this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0
       if (version < 5 || (permissions.remoteCli !== undefined && version < 14)) {
         throw new Error('This firmware does not support these contact permissions.')
       }
-      const command = contactPermissionsUpdate(frame, permissions)
-      await writeContactCommand(link, command)
-      return decodeContact(command)
+      return contactPermissionsUpdate(frame, permissions)
     })
 
   readonly pingContact = async (radioKey: string, contactKey: string, width: PingHashWidth, signal: AbortSignal) => {

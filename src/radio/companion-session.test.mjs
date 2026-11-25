@@ -5,6 +5,7 @@ import { setImmediate } from 'node:timers/promises'
 import { IDBFactory } from 'fake-indexeddb'
 import { CompanionSession, getWebSerialSupport } from './index.ts'
 import { SerialFrameDecoder } from './web-serial.ts'
+import { SerialLink } from './serial-link.ts'
 import { SessionCache } from '../integration/session-cache.ts'
 import { MessageSync } from '../integration/message-sync.ts'
 import { DirectMessages } from '../integration/direct-messages.ts'
@@ -209,17 +210,31 @@ test('edits saved routes and permissions with a fresh contact record, preserving
   const contact = contactInfo()
   contact[34] = 0xe1
   const original = contact.slice()
-  const port = new FixturePort((command, serial) => {
+  const record = new DataView(contact.buffer)
+  const oldTimestamp = record.getUint32(144, true)
+  let clock = oldTimestamp
+  function handleCommand(command, serial) {
     switch (command[0]) {
       case 22: serial.emit(...deviceInfo()); break
       case 1: serial.emit(...selfInfo()); break
-      case 4: serial.emit(2, 1, 0, 0, 0); serial.emit(...contact); serial.emit(4, 0, 0, 0, 0); break
+      case 4: {
+        const since = command.length === 5 ? new DataView(Uint8Array.from(command).buffer).getUint32(1, true) : 0
+        serial.emit(2, 1, 0, 0, 0)
+        if (record.getUint32(144, true) > since) serial.emit(...contact)
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      }
       case 30: assert.deepEqual(command.slice(1), Array(32).fill(0xbc)); serial.emit(...contact); break
-      case 9: contact.set(command.slice(1), 1); serial.emit(0); break
-      case 13: contact[35] = 255; serial.emit(0); break
+      case 9:
+        assert.equal(command.length, 144)
+        contact.set(command.slice(1), 1)
+        record.setUint32(144, ++clock, true)
+        serial.emit(0)
+        break
       default: assert.fail(`Unexpected command ${command[0]}`)
     }
-  })
+  }
+  const port = new FixturePort(handleCommand)
   const key = 'ab'.repeat(32)
   const target = 'bc'.repeat(32)
   const session = sessionWith(port)
@@ -228,16 +243,33 @@ test('edits saved routes and permissions with a fresh contact record, preserving
   assert.equal(contact[35], 0x42)
   assert.deepEqual([...contact.slice(36, 42)], [1, 2, 0xaa, 0xbb, 0, 0])
   assert.deepEqual(contact.slice(0, 35), original.slice(0, 35))
-  assert.deepEqual(contact.slice(100), original.slice(100))
+  assert.deepEqual(contact.slice(100, 144), original.slice(100, 144))
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldTimestamp + 1)
   await session.saveContactPermissions(key, target, { telemetry: true, location: false, remoteCli: true })
   assert.equal(contact[34], 0xf3)
   assert.equal(session.getSnapshot().contacts[0].flags, 0xf3)
   assert.equal(session.getSnapshot().contacts[0].pathLength, 0x42)
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldTimestamp + 2)
   await session.resetContactPath(key, target)
   assert.equal(session.getSnapshot().contacts[0].pathLength, 0xff)
   assert.equal(contact[34], 0xf3)
-  assert.deepEqual(port.commands.slice(3).map(([code]) => code), [30, 9, 30, 9, 30, 13])
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldTimestamp + 3)
+  assert.deepEqual(port.commands.slice(3).map(([code]) => code), [30, 9, 30, 30, 9, 30, 30, 9, 30])
   await session.disconnect()
+
+  const secondClient = new SerialLink(new FixturePort(handleCommand), 1000, () => {}, assert.fail)
+  const incremental = Uint8Array.of(4, 0, 0, 0, 0)
+  new DataView(incremental.buffer).setUint32(1, oldTimestamp, true)
+  const unseen = []
+  try {
+    await secondClient.request(incremental, (frame) => {
+      if (frame[0] === 4) return { value: undefined }
+      if (frame[0] === 3) unseen.push(frame)
+    })
+    assert.deepEqual(unseen, [contact])
+  } finally {
+    await secondClient.close()
+  }
 })
 
 test('refuses ambiguous pings, correlates the trace response and cancels without a retry', async () => {
