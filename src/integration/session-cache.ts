@@ -39,7 +39,7 @@ export class SessionCache {
   private storage?: Awaited<ReturnType<typeof openRadioStorage>>
   private status: CacheStatus = { pending: 0, saving: false, error: null }
   private savedContacts?: CompanionSnapshot['contacts']
-  private channelsSaved = false
+  private savedChannels?: CompanionSnapshot['channels']
   private phase: CompanionSnapshot['phase'] = 'idle'
 
   constructor(session: SessionSource, openStorage = openRadioStorage) {
@@ -78,7 +78,7 @@ export class SessionCache {
   private capture(snapshot: CompanionSnapshot) {
     if (snapshot.phase === 'handshake' && this.phase !== 'handshake') {
       this.savedContacts = undefined
-      this.channelsSaved = false
+      this.savedChannels = undefined
       this.seenReceipts.clear()
     }
     this.phase = snapshot.phase
@@ -98,8 +98,8 @@ export class SessionCache {
       this.savedContacts = snapshot.contacts
       this.enqueue(key, { contacts: snapshot.contacts.map(storedContact), contactsCapturedAt: Date.now() })
     }
-    if (!this.channelsSaved && (stage === 'messages' || snapshot.phase === 'ready')) {
-      this.channelsSaved = true
+    if (this.savedChannels !== snapshot.channels && (stage === 'messages' || snapshot.phase === 'ready')) {
+      this.savedChannels = snapshot.channels
       this.enqueue(key, { channels: snapshot.channels.map(({ index, name }) => ({ index, name })) })
     }
     for (const message of snapshot.messages) {

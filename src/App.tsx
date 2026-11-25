@@ -6,6 +6,7 @@ import { DirectMessages } from './integration/direct-messages.ts'
 import { ChatPanel } from './chats/ChatPanel.tsx'
 import { ContactsPanel } from './contacts/ContactsPanel.tsx'
 import { DiscoveryPanel } from './discovery/DiscoveryPanel.tsx'
+import { ChannelsPanel } from './channels/ChannelsPanel.tsx'
 import { discoveryEntries, discoveryMapNodes } from './discovery/model.ts'
 import { useRadioDiscoveries } from './discovery/use-radio-discoveries.ts'
 import { storedContact } from './integration/contact-record.ts'
@@ -36,10 +37,6 @@ function sectionFromHash(): Section {
 
 function isMapSection(section: Section): section is 'Map' | 'Tools' {
   return section === 'Map' || section === 'Tools'
-}
-
-const sectionDescriptions: Record<Exclude<Section, 'Chats' | 'Contacts' | 'Discovery' | 'Map' | 'Tools' | 'Settings'>, string> = {
-  Channels: 'Channels will appear here when that feature is available.',
 }
 
 type StateMessageProps =
@@ -251,17 +248,10 @@ function App() {
           </div>
         )}
         {activeSection === 'Channels' && (
-          <section className="section-pane" aria-labelledby="section-heading">
-            <div className="pane-heading">
-              <h1 id="section-heading">{activeSection}</h1>
-              <p>Workspace</p>
-            </div>
-            <StateMessage
-              kind="empty"
-              title={`${activeSection} is not available yet`}
-              description={sectionDescriptions[activeSection]}
-            />
-          </section>
+          <div className="section-pane">
+            <div className="pane-heading"><h1>Channels</h1></div>
+            <ChannelsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving} />
+          </div>
         )}
         {hasOpenedContacts && (
           <div hidden={activeSection !== 'Contacts'}>

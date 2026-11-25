@@ -47,6 +47,7 @@ test('persists completed syncs and retries original receipts under their capture
       },
     }
   })
+
   const contact = {
     publicKey: secondKey, name: 'Contact', type: 1, flags: 2, pathLength: 0,
     pathHex: '', lastAdvertisedAt: 4, latitude: 0, longitude: 0, lastModifiedAt: 5,
@@ -88,5 +89,26 @@ test('persists completed syncs and retries original receipts under their capture
   assert.equal(firstData.messages[2].timestamp, null)
   assert.deepEqual(secondData.messages, [])
   assert.deepEqual(secondData.contacts, [])
+  storage.close()
+})
+
+test('persists changed channel lists without replacing messages or local preferences', async () => {
+  const factory = new IDBFactory()
+  const session = new FixtureSession()
+  const cache = new SessionCache(session, () => openRadioStorage(factory))
+  const key = radioKeyFromPublicKey('ab'.repeat(32))
+  const storage = await openRadioStorage(factory)
+  await storage.update(key, { preferences: { selectedConversationId: 'channel:0' }, messages: [{
+    id: 'm', conversationId: 'channel:0', sender: '', timestamp: 1, text: 'saved',
+  }] })
+  session.emit({ phase: 'handshake' })
+  session.emit({ phase: 'ready', device: { publicKey: key }, channels: [{ index: 0, name: 'Public' }] })
+  await waitFor(() => !cache.getSnapshot().saving && !cache.getSnapshot().pending)
+  session.emit({ channels: [{ index: 0, name: 'Renamed' }, { index: 1, name: '#topic' }] })
+  await waitFor(() => !cache.getSnapshot().saving && !cache.getSnapshot().pending)
+  const data = await storage.read(key)
+  assert.deepEqual(data.channels, [{ index: 0, name: 'Renamed' }, { index: 1, name: '#topic' }])
+  assert.equal(data.messages[0].text, 'saved')
+  assert.equal(data.preferences.selectedConversationId, 'channel:0')
   storage.close()
 })

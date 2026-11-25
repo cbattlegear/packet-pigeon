@@ -15,6 +15,7 @@ import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort }
 import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bluetooth.ts'
 import { readAdvertPath, readAutoAddPolicy, writeAutoAddPolicy } from './discovery-commands.ts'
 import type { AutoAddPolicy } from './discovery-commands.ts'
+import { channelName, makeChannelSecret, readChannelSlot, secretHex, writeChannelSlot } from './channel-commands.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -362,8 +363,8 @@ export class CompanionSession {
       || this.snapshot.device?.publicKey !== radioKey
     ) throw new Error('Connect the selected radio and wait for it to finish syncing.')
     if (this.contactWritePending) throw new Error('A radio action is already in progress.')
-    if (this.directCommandPending) throw new Error('Wait for the direct-message command to finish before changing contacts or discovery.')
-    if (this.receiptHolds.size) throw new Error('Finish message sync or save the pending receipt before changing contacts or discovery.')
+    if (this.directCommandPending) throw new Error('Wait for the direct-message command to finish before another radio action.')
+    if (this.receiptHolds.size) throw new Error('Finish message sync or save the pending receipt before another radio action.')
 
     this.contactWritePending = true
     try {
@@ -453,6 +454,57 @@ export class CompanionSession {
     await this.changeContacts(radioKey, async (link) => {
       await writeContactCommand(link, removeContactCommand(key))
       return this.snapshot.contacts.filter((contact) => contact.publicKey !== key)
+    })
+  }
+
+  readonly createChannel = async (radioKey: string, input: {
+    kind: 'private' | 'join' | 'public' | 'hashtag'; name: string; secret: string
+  }) => {
+    const name = channelName(input.name)
+    if (input.kind !== 'hashtag' && name.startsWith('#')) {
+      throw new Error('Names starting with # are reserved for hashtag channels.')
+    }
+    const secret = await makeChannelSecret(input.kind, name, input.secret)
+    return this.runRadioCommand(radioKey, async (link) => {
+      const count = this.snapshot.device!.capabilities.maxChannels
+      let free = -1
+      let duplicateSecret = false
+      const channels: CompanionChannel[] = []
+      for (let index = 0; index < count; index++) {
+        const slot = await readChannelSlot(link, index)
+        if (slot?.channel.name) {
+          channels.push(slot.channel)
+          if (slot.secret.every((byte, position) => byte === secret[position])) duplicateSecret = true
+        }
+        else if (slot && slot.secret.every((byte) => byte === 0) && free < 0) free = index
+      }
+      this.update({ channels })
+      if (channels.some((channel) => channel.name === name)) throw new Error('A channel with this name already exists.')
+      if (duplicateSecret) throw new Error('A channel with this key already exists on the radio. Use its existing slot.')
+      if (free < 0) throw new Error('No empty channel slot is available on this radio.')
+      await writeChannelSlot(link, free, name, secret)
+      this.update({ channels: [...channels, { index: free, name }] })
+      return input.kind === 'private' ? secretHex(secret) : null
+    })
+  }
+
+  readonly changeChannel = async (radioKey: string, index: number, expectedName: string, name: string | null) => {
+    const nextName = name === null ? '' : channelName(name)
+    if (name !== null && (expectedName.startsWith('#') || nextName.startsWith('#'))) {
+      throw new Error('Hashtag channels cannot be renamed: their key is derived from their name.')
+    }
+    await this.runRadioCommand(radioKey, async (link) => {
+      if (!Number.isInteger(index) || index < 0 || index >= this.snapshot.device!.capabilities.maxChannels) {
+        throw new Error('Invalid channel slot.')
+      }
+      const slot = await readChannelSlot(link, index)
+      if (!slot || slot.channel.name !== expectedName || !expectedName) {
+        throw new Error('The channel changed on the radio. Reconnect and check before retrying.')
+      }
+      await writeChannelSlot(link, index, nextName, name === null ? new Uint8Array(16) : slot.secret)
+      this.update({ channels: name === null
+        ? this.snapshot.channels.filter((channel) => channel.index !== index)
+        : this.snapshot.channels.map((channel) => channel.index === index ? { index, name: nextName } : channel) })
     })
   }
 

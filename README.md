@@ -91,7 +91,7 @@ The implementation targets MeshCore USB companion firmware with protocol v3 or
 newer. It uses the firmware's framed serial protocol directly: MeshCore.js was
 used as a reference, but its package entrypoint includes native transports and
 its browser adapter does not provide the request deadlines and error handling
-needed here. The session does not expose channel secrets.
+needed here. The session does not cache channel secrets.
 
 ## Bluetooth companion session
 
@@ -193,6 +193,24 @@ individual or selected contacts after confirmation. The app reports rejected
 changes and how many removals succeeded if a batch stops early. Use **Export
 selected** for a JSON copy or **Copy public key** from a contact's details.
 Exports include public keys and any advertised positions.
+
+## Channels
+
+Browse and search synced channel names online or from a selected cached radio.
+With a connected radio, create a private channel, join using a 16-byte hex
+secret, add the well-known public channel or a deterministic hashtag channel,
+rename a channel, or delete one. Private creation displays its generated secret
+once; store it securely. Channel secrets are not saved to the browser cache.
+Public and hashtag keys are discoverable and are not private. Renaming retains
+the existing key, so hashtag channels cannot be renamed. The firmware limits
+names to 31 UTF-8 bytes and reports the number of available slots. A rejected
+or interrupted change may need a reconnect to check the radio's actual state.
+
+Deleting a channel does not delete cached messages; reusing its slot can make
+old messages appear associated with the replacement. Notification modes,
+retention, participants, blocked senders and per-channel region scope are not
+implemented. No region scope is changed by these controls. Channel changes
+have been exercised with simulated transports rather than physical hardware.
 
 ## Discovered adverts
 

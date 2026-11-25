@@ -1,0 +1,9 @@
+.channel-workspace { display: grid; gap: 1rem; max-width: 64rem; }
+.channel-workspace p { margin: 0; }
+.channel-workspace label { display: grid; gap: .3rem; }
+.channel-filters, .channel-list form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+.channel-list { display: grid; gap: .75rem; list-style: none; padding: 0; margin: 0; }
+.channel-list li, .channel-create, .channel-secret { display: grid; gap: .75rem; padding: 1rem; border: 1px solid var(--border-color, #778); border-radius: .5rem; }
+.channel-create { max-width: 32rem; }
+.channel-secret output { overflow-wrap: anywhere; }
+.channel-secret button, .channel-create button { justify-self: start; }
