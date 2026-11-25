@@ -32,6 +32,8 @@ export type StoredMessage = {
   timestamp: number | null
   text: string
   receipt?: StoredReceipt
+  /** Exact companion response bytes, including for unsupported receipt types. */
+  rawHex?: string
 }
 
 export type StoredReceipt = {
@@ -114,7 +116,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   if (messages?.length) {
     const seen = new Set(current.messages.map(({ id }) => id))
     next.messages = [...current.messages]
-    for (const { id, conversationId, sender, timestamp, text, receipt } of messages) {
+    for (const { id, conversationId, sender, timestamp, text, receipt, rawHex } of messages) {
       if (!id.trim()) {
         throw new RadioStorageError('update', 'A stable message identifier is required.')
       }
@@ -123,6 +125,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
       next.messages.push({
         id, conversationId, sender, timestamp, text,
         ...(receipt ? { receipt: copyReceipt(receipt) } : {}),
+        ...(rawHex !== undefined ? { rawHex } : {}),
       })
     }
   }

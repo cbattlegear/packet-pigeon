@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { CompanionSession, getWebSerialSupport } from './radio/index.ts'
 import { SessionCache } from './integration/session-cache.ts'
+import { MessageSync } from './integration/message-sync.ts'
 import { ContactsPanel } from './contacts/ContactsPanel.tsx'
 import { mapRadioContacts } from './map/nodes.ts'
 import type { Coordinates } from './map/nodes.ts'
@@ -9,6 +10,10 @@ import { OfflineStatus } from './offline/OfflineStatus.tsx'
 
 const session = new CompanionSession()
 const cache = new SessionCache(session)
+const messageSync = new MessageSync(session, undefined, () => {
+  const status = cache.getSnapshot()
+  return !status.error && status.pending === 0 && !status.saving
+})
 const MapWorkspace = lazy(() => import('./map/MapWorkspace.tsx'))
 
 const sections = ['Chats', 'Contacts', 'Channels', 'Map', 'Tools', 'Settings'] as const
@@ -57,6 +62,7 @@ function App() {
   const mapVisible = isMapSection(activeSection)
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
+  const messageStatus = useSyncExternalStore(messageSync.subscribe, messageSync.getSnapshot)
   const radioNodes = useMemo(() => mapRadioContacts(snapshot.contacts), [snapshot.contacts])
   const support = getWebSerialSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
@@ -89,6 +95,19 @@ function App() {
     window.addEventListener('hashchange', updateSection)
     return () => window.removeEventListener('hashchange', updateSection)
   }, [])
+
+  useEffect(() => {
+    if (snapshot.device?.publicKey) void messageSync.load(snapshot.device.publicKey)
+  }, [snapshot.device?.publicKey])
+
+  useEffect(() => {
+    if (!messageStatus.syncing && !messageStatus.pending) return
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [messageStatus.syncing, messageStatus.pending])
 
   return (
     <div className="app-shell">
@@ -127,7 +146,7 @@ function App() {
             </button>
           </div>
           <p className="connection-warning" id="connection-warning">
-            Message sync is paused; queued messages remain on the radio.
+            Message sync is manual. Sending is not available yet.
           </p>
           <OfflineStatus />
         </div>
@@ -153,10 +172,17 @@ function App() {
       </nav>
 
       <main className="main-content" id="main-content" tabIndex={-1}>
-        {(!support.supported || snapshot.error || cacheStatus.error) && (
+        {(!support.supported || snapshot.error || cacheStatus.error || messageStatus.error || messageStatus.pending) && (
           <div className="notices">
             {!support.supported && <p role="status">{support.error.message}</p>}
             {snapshot.error && <p role="alert">{snapshot.error.message}</p>}
+            {messageStatus.error && <p role="alert">Message sync: {messageStatus.error}</p>}
+            {messageStatus.pending && (
+              <div role="alert">
+                <p>A received message is not saved. Keep this page open and retry saving. USB ownership stays reserved until the receipt is saved.</p>
+                <button type="button" disabled={messageStatus.syncing} onClick={() => void messageSync.sync()}>Retry saving</button>
+              </div>
+            )}
             {cacheStatus.error && (
               <div role="alert">
                 <p>Cache error: {cacheStatus.error}</p>
@@ -175,25 +201,38 @@ function App() {
             <section className="conversation-list" aria-labelledby="chats-heading">
               <div className="pane-heading">
                 <h1 id="chats-heading">Chats</h1>
-                <p>Conversations</p>
+                <p>Received messages</p>
               </div>
-              <StateMessage
-                kind="empty"
-                title="Conversation browsing unavailable"
-                description="Conversation browsing and message sync are not available yet."
-              />
+              <div className="message-controls">
+                <button type="button" onClick={() => void messageSync.sync()} disabled={messageStatus.syncing || (snapshot.phase !== 'ready' && !messageStatus.pending)}>
+                  {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending ? 'Retry saving and sync' : 'Sync messages'}
+                </button>
+                <p>Each receipt is saved before requesting the next. Interruptions can still lose a message.</p>
+              </div>
             </section>
 
-            <section className="conversation-pane" aria-label="Active conversation">
+            <section className="conversation-pane" aria-label="Received messages">
               <div className="conversation-heading">
-                <p>Conversation</p>
-                <span>Not available yet</span>
+                <p>Received messages</p>
+                <span>{messageStatus.key ? `Radio ${messageStatus.key.slice(0, 12)}…` : 'Connect a radio to view its messages'}</span>
               </div>
-              <StateMessage
-                kind="empty"
-                title="Conversation view unavailable"
-                description="Conversation browsing will be added in a later increment."
-              />
+              {messageStatus.data?.messages.length ? (
+                <ol className="received-messages">
+                  {messageStatus.data.messages.map((message) => (
+                    <li key={message.id}>
+                      <strong>{message.conversationId}</strong>
+                      {message.timestamp !== null && <time dateTime={new Date(message.timestamp).toISOString()}> {new Date(message.timestamp).toLocaleString()}</time>}
+                      {message.text && <p>{message.text}</p>}
+                      {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
+                      {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
+                      {!message.receipt && !message.rawHex && <p>{message.text || 'Empty message'}</p>}
+                      {message.rawHex && <details><summary>Raw receipt</summary><code>{message.rawHex}</code></details>}
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <StateMessage kind="empty" title="No cached messages" description="Connect a radio and sync to read its queued messages." />
+              )}
             </section>
           </div>
         ) : !mapVisible && activeSection !== 'Contacts' && (
@@ -214,6 +253,7 @@ function App() {
             <div className="section-pane">
               <div className="pane-heading"><h1>Contacts</h1></div>
               <ContactsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving}
+                messageSyncing={messageStatus.syncing}
                 onMap={(position, terrain) => {
                   setContactFocus({ position, terrain })
                   window.location.hash = terrain ? 'tools' : 'map'

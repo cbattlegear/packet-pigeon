@@ -2,9 +2,12 @@ import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import test from 'node:test'
 import { setImmediate } from 'node:timers/promises'
+import { IDBFactory } from 'fake-indexeddb'
 import { CompanionSession, getWebSerialSupport } from './index.ts'
 import { SerialFrameDecoder } from './web-serial.ts'
 import { SessionCache } from '../integration/session-cache.ts'
+import { MessageSync } from '../integration/message-sync.ts'
+import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 
 const encode = (text) => new TextEncoder().encode(text)
 const response = (...payload) => Uint8Array.of(0x3e, payload.length, 0, ...payload)
@@ -187,6 +190,53 @@ test('writes contacts only to the selected ready radio and keeps rejected writes
   await assert.rejects(session.removeContact(radioKey, contact.publicKey), /Connect the selected radio/)
 })
 
+test('contact writes and queued message requests do not interrupt one another', async () => {
+  let contactReads = 0
+  let finishContactRead
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, 0, 0, 0, 0)
+        if (++contactReads === 1) serial.emit(4, 0, 0, 0, 0)
+        else finishContactRead = () => serial.emit(4, 0, 0, 0, 0)
+        break
+      case 9:
+      case 15: serial.emit(0); break
+      case 10: serial.emit(10); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const session = sessionWith(port)
+  const radioKey = 'ab'.repeat(32)
+  const contact = { publicKey: 'cb'.repeat(32), name: 'Relay', type: 2 }
+  const sync = new MessageSync(session, () => openRadioStorage(new IDBFactory()))
+  await session.connect()
+  const adding = session.addContact(radioKey, contact)
+  await waitFor(() => typeof finishContactRead === 'function')
+  await sync.sync()
+  assert.match(sync.getSnapshot().error, /contact change/)
+  assert.equal(port.commands.some(([code]) => code === 10), false)
+  finishContactRead()
+  await adding
+  assert.equal(session.getSnapshot().contacts[0].publicKey, contact.publicKey)
+
+  const lease = session.reserveQueuedMessage(radioKey)
+  try {
+    await assert.rejects(session.removeContact(radioKey, contact.publicKey), /message sync/)
+    assert.equal(port.commands.some(([code]) => code === 15), false)
+    assert.equal(await lease.request(() => assert.fail('Queue should be empty')), false)
+  } finally {
+    lease.release()
+  }
+  await session.removeContact(radioKey, contact.publicKey)
+  assert.deepEqual(session.getSnapshot().contacts, [])
+  await sync.sync()
+  assert.equal(sync.getSnapshot().error, null)
+  await session.disconnect()
+})
+
 test('handshakes and syncs advertised slots without dequeuing messages', async () => {
   const pendingMessages = [
     [16, 0xf6, 0, 0, 1, 2, 3, 4, 5, 6, 0xff, 2, 42, 0, 0, 0, 7, 8, 9, 10, ...encode('hello')],
@@ -217,6 +267,7 @@ test('handshakes and syncs advertised slots without dequeuing messages', async (
       default: assert.fail(`Unexpected command ${code}`)
     }
   })
+
   const session = sessionWith(port)
   const pushes = []
   const progress = []
@@ -257,6 +308,146 @@ test('handshakes and syncs advertised slots without dequeuing messages', async (
   await session.disconnect()
   assert.equal(port.closed, true)
   assert.equal(session.getSnapshot().phase, 'idle')
+})
+
+test('only manually requests queued messages from the selected ready radio', async () => {
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 10: serial.emit(0x55, 1, 2); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  assert.throws(() => session.reserveQueuedMessage('cd'.repeat(32)), { code: 'disconnected' })
+  assert.equal(port.commands.some(([code]) => code === 10), false)
+  const lease = session.reserveQueuedMessage('ab'.repeat(32))
+  let received
+  try {
+    assert.throws(() => session.reserveQueuedMessage('ab'.repeat(32)), /Save the previous/)
+    assert.equal(await lease.request((frame) => { received = frame }), true)
+    assert.deepEqual([...received], [0x55, 1, 2])
+    assert.throws(() => session.reserveQueuedMessage('ab'.repeat(32)), /Save the previous/)
+  } finally {
+    lease.release()
+  }
+  await session.disconnect()
+  assert.throws(() => session.reserveQueuedMessage('ab'.repeat(32)), { code: 'disconnected' })
+})
+
+test('an unsaved receipt keeps USB ownership across disconnect until it is saved', async () => {
+  const locks = fixtureLocks()
+  const factory = new IDBFactory()
+  const receipt = [7, 1, 2, 3, 4, 5, 6, 0, 0, 42, 0, 0, 0, ...encode('hello')]
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 10: serial.emit(...receipt); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const otherPort = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 10: serial.emit(10); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const session = sessionWith(port, 1000, { locks })
+  const other = sessionWith(otherPort, 1000, { locks })
+  let fail = true
+  const sync = new MessageSync(session, async () => {
+    const storage = await openRadioStorage(factory)
+    return {
+      ...storage,
+      update: async (key, update) => {
+        if (fail) { fail = false; throw new Error('Disk unavailable') }
+        await storage.update(key, update)
+      },
+    }
+  })
+  const otherSync = new MessageSync(other, () => openRadioStorage(factory))
+  let disconnection
+  try {
+    await session.connect()
+    await sync.sync()
+    assert.equal(sync.getSnapshot().pending, true)
+    disconnection = session.disconnect()
+    await waitFor(() => port.closed)
+    await other.connect()
+    await otherSync.sync()
+    assert.equal(otherPort.commands.some(([code]) => code === 10), false)
+    assert.equal(other.getSnapshot().error?.code, 'ownership')
+
+    await sync.sync()
+    await disconnection
+    assert.equal(sync.getSnapshot().pending, false)
+    const storage = await openRadioStorage(factory)
+    const data = await storage.read(radioKeyFromPublicKey('ab'.repeat(32)))
+    storage.close()
+    assert.equal(data.messages[0].text, 'hello')
+
+    await other.connect()
+    await otherSync.sync()
+    assert.equal(otherPort.commands.filter(([code]) => code === 10).length, 1)
+  } finally {
+    if (sync.getSnapshot().pending) await sync.sync()
+    if (disconnection) await disconnection
+    await session.disconnect()
+    await other.disconnect()
+  }
+})
+
+test('saves a complete queue response received before a delayed write fails', async (t) => {
+  for (const failure of ['disconnect', 'write']) {
+    await t.test(failure, async () => {
+      const factory = new IDBFactory()
+      let settleWrite
+      let rejectWrite
+      const receipt = [7, 1, 2, 3, 4, 5, 6, 0, 0, 42, 0, 0, 0, ...encode('hello')]
+      const port = new FixturePort(([code], serial) => {
+        switch (code) {
+          case 22: serial.emit(...deviceInfo()); break
+          case 1: serial.emit(...selfInfo()); break
+          case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+          case 10:
+            serial.emit(...receipt)
+            return new Promise((resolve, reject) => { settleWrite = resolve; rejectWrite = reject })
+          default: assert.fail(`Unexpected command ${code}`)
+        }
+      })
+      const session = sessionWith(port, 1000, { retryDelays: [] })
+      const sync = new MessageSync(session, () => openRadioStorage(factory))
+      try {
+        await session.connect()
+        const syncing = sync.sync()
+        await waitFor(() => typeof settleWrite === 'function')
+        await setImmediate()
+        const capturedBeforeFailure = sync.getSnapshot().pending
+        if (failure === 'disconnect') port.dispatchEvent(new Event('disconnect'))
+        else rejectWrite(new Error('Write failed'))
+        await syncing
+        const storage = await openRadioStorage(factory)
+        const data = await storage.read(radioKeyFromPublicKey('ab'.repeat(32)))
+        storage.close()
+        assert.equal(capturedBeforeFailure, true)
+        assert.equal(data.messages.length, 1)
+        assert.equal(data.messages[0].text, 'hello')
+        assert.match(sync.getSnapshot().error, failure === 'disconnect' ? /disconnected/ : /write/)
+        assert.equal(port.commands.filter(([code]) => code === 10).length, 1)
+      } finally {
+        settleWrite?.()
+        await session.disconnect()
+      }
+    })
+  }
 })
 
 test('timeout closes the port and prevents any further write', async () => {
