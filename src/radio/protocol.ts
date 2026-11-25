@@ -36,6 +36,7 @@ export type CompanionErrorCode =
   | 'disconnected' | 'serial-io' | 'timeout' | 'protocol' | 'device-error'
   | 'unsupported-firmware' | 'unsupported-transport'
   | 'ownership' | 'identity' | 'reconnect-failed' | 'cleanup-failed'
+  | 'scope-recovery'
 
 export class CompanionError extends Error {
   readonly code: CompanionErrorCode

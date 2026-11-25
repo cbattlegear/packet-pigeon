@@ -473,6 +473,11 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                       ? 'Accepted by radio' : 'Send status uncertain'}
                   </strong>
                   {message.channelOutgoing.error && <p>{message.channelOutgoing.error}</p>}
+                  {preferences.regionMetadata && message.channelOutgoing.scope && <p>
+                    Requested sending scope: {message.channelOutgoing.scope.mode === 'region'
+                      ? message.channelOutgoing.scope.name : message.channelOutgoing.scope.mode === 'unscoped'
+                        ? 'Explicitly unscoped' : 'Radio default'}
+                  </p>}
                   {message.channelOutgoing.status !== 'sending'
                     && conversation.channel?.name === message.channelOutgoing.channelName && (
                     <button type="button" disabled={status.activeId !== null || status.pending > 0}
@@ -513,7 +518,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
           </div>
           <p id="chat-draft-error" className="chat-action-error">{invalid}</p>
           <p>{isChannel
-            ? 'The radio adds its sender name. A channel message is a broadcast and cannot be recalled.'
+            ? 'The radio adds its sender name. Sending scope is configured in Channels. A channel message is a broadcast and cannot be recalled.'
             : 'Flood fallback clears this contact’s saved radio route. Sent packets cannot be recalled.'}</p>
         </form>
       )}
