@@ -44,10 +44,11 @@ function formatPosition(position: Coordinates) {
 }
 
 export default function MapWorkspace({
-  radioNodes = emptyNodes, radioPosition = null, showTerrain = false, contactFocus = null,
+  radioNodes = emptyNodes, radioPosition = null, showTerrain = false, contactFocus = null, discoveryRequest = 0,
 }: {
   radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null; showTerrain?: boolean
   contactFocus?: { position: Coordinates; terrain: boolean } | null
+  discoveryRequest?: number
 }) {
   const [localNodes, setLocalNodes] = useState(savedNodes)
   const [publicNodes, setPublicNodes] = useState<MapNode[]>([])
@@ -73,6 +74,7 @@ export default function MapWorkspace({
   const [profile, setProfile] = useState<ProfileResult | null>(null)
   const [coverage, setCoverage] = useState<CoverageLayer[]>([])
   const [appliedContactFocus, setAppliedContactFocus] = useState<typeof contactFocus>(null)
+  const [appliedDiscoveryRequest, setAppliedDiscoveryRequest] = useState(0)
   const mapPanel = useRef<HTMLDivElement>(null)
   const self = myLocation ?? (mapPosition(radioPosition) ? radioPosition : null)
 
@@ -115,6 +117,15 @@ export default function MapWorkspace({
       setFocus(contactFocus.position)
       if (contactFocus.terrain) putCoordinate('start', contactFocus.position)
     }
+  }
+  if (appliedDiscoveryRequest !== discoveryRequest) {
+    setAppliedDiscoveryRequest(discoveryRequest)
+    setSource('discovery')
+    setSelection(null)
+    setSearch('')
+    setRole('all')
+    setFavoritesOnly(false)
+    setResultPage(0)
   }
   const pickFromMap = useCallback((position: Coordinates) => {
     if (picking) putCoordinate(picking, position)
@@ -220,6 +231,7 @@ export default function MapWorkspace({
         }}>Clear my location</button>}
       </div>
       <p className="map-help" id="tile-privacy">Selecting OpenStreetMap sends the viewed area to its tile service.</p>
+      {source === 'discovery' && <p className="map-help"><a href="#discovery">Browse discovery history and radio paths</a></p>}
       {tileError && <p role="status" className="map-notice">Map tiles could not load. Node and terrain layers are still available.</p>}
       {locationMessage && <p role="status" className="map-help">{locationMessage}</p>}
       <div className="map-layout">
