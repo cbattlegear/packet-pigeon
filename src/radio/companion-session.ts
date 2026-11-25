@@ -18,6 +18,9 @@ import type { AutoAddPolicy } from './discovery-commands.ts'
 import { channelName, makeChannelSecret, readChannelSlot, secretHex, writeChannelSlot } from './channel-commands.ts'
 import { channelMessageCommand } from './channel-message.ts'
 import { writeSetupPathWidth, writeSetupRadioSettings } from './setup-commands.ts'
+import { assertScopeSupported, channelScopeCommand, validateChannelScope, writeChannelScope } from './channel-scope.ts'
+import type { ChannelScope } from './channel-scope.ts'
+import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -52,6 +55,7 @@ interface Attempt {
   opening?: Promise<SerialLink | null>
   locking?: Promise<void>
   recovering?: boolean
+  scopePending?: boolean
 }
 
 type SelectedTransport =
@@ -68,6 +72,11 @@ const initial: CompanionSnapshot = {
 
 function cleanupError(cause: unknown) {
   return new CompanionError('cleanup-failed', 'Could not release the radio connection. Reload this tab before reconnecting.', { cause })
+}
+
+function scopeRecoveryError(cause: unknown) {
+  return new CompanionError('scope-recovery',
+    'Scope recovery could not finish. The radio may retain a temporary override. Check browser storage and reconnect to retry before using the radio.', { cause })
 }
 
 export class CompanionSession {
@@ -93,6 +102,8 @@ export class CompanionSession {
   private expectedKey?: string
   private contactWritePending = false
   private directCommandPending = false
+  private readonly openScopeStorage: typeof openRadioStorage
+  private scopeTail: Promise<void> = Promise.resolve()
 
   constructor(options: {
     environment?: WebSerialEnvironment
@@ -100,12 +111,14 @@ export class CompanionSession {
     timeoutMs?: number
     locks?: LockProvider
     retryDelays?: readonly number[]
+    openScopeStorage?: typeof openRadioStorage
   } = {}) {
     this.environment = options.environment
     this.bluetoothEnvironment = options.bluetoothEnvironment
     this.timeoutMs = options.timeoutMs ?? 5000
     this.locks = options.locks ?? globalThis.navigator?.locks
     this.retryDelays = options.retryDelays ?? [1000, 2000, 4000, 8000, 16000]
+    this.openScopeStorage = options.openScopeStorage ?? openRadioStorage
   }
 
   readonly getSnapshot = (): CompanionSnapshot => this.snapshot
@@ -131,6 +144,8 @@ export class CompanionSession {
   private fail(attempt: Attempt, error: CompanionError) {
     if (this.attempt !== attempt) return
     if (attempt.recovering) return
+    const scopePending = attempt.scopePending
+    if (scopePending) error = scopeRecoveryError(error)
     this.attempt = undefined
     if (attempt.link) {
       this.cleanup = attempt.link.close()
@@ -140,6 +155,7 @@ export class CompanionSession {
       this.update({ phase: 'reconnecting', error, progress: null })
       void this.reconnect(generation)
     } else {
+      if (scopePending) this.update({ phase: 'closing', error, progress: null })
       this.failure = this.finishFailure(error, this.generation)
     }
   }
@@ -184,6 +200,8 @@ export class CompanionSession {
     if (this.receiptHolds.size) {
       await new Promise<void>((resolve) => this.receiptWaiters.add(resolve))
     }
+    // A delayed marker write must finish before another tab can own the radio.
+    await this.scopeTail
     this.releaseOwnership?.()
     this.releaseOwnership = undefined
     await this.ownership
@@ -520,9 +538,15 @@ export class CompanionSession {
 
   readonly sendChannel = async (
     radioKey: string, index: number, expectedChannel: string, senderName: string, timestamp: number, text: string,
+    scope: ChannelScope = { mode: 'default' },
   ) => {
     const command = channelMessageCommand(index, timestamp, text, senderName)
+    const validScope = validateChannelScope(scope)
+    const scopeCommand = await channelScopeCommand(validScope)
     await this.runRadioCommand(radioKey, async (link) => {
+      const attempt = this.attempt!
+      const version = this.snapshot.device!.capabilities.firmwareProtocolVersion
+      assertScopeSupported(validScope, version)
       if (index >= this.snapshot.device!.capabilities.maxChannels) throw new Error('Invalid channel slot.')
       const slot = await readChannelSlot(link, index)
       if (this.attempt?.link !== link || this.snapshot.phase !== 'ready'
@@ -532,14 +556,78 @@ export class CompanionSession {
       if (!slot || slot.channel.name !== expectedChannel || !expectedChannel) {
         throw new Error('The channel changed on the radio. Reconnect and check before sending.')
       }
-      const frame = await link.request(command, (response) => {
-        if (response[0] !== Response.error && response[0] !== Response.disabled) expectResponse(response, Response.ok)
-        return { value: response }
-      })
-      if (frame[0] !== Response.ok) {
-        const detail = frame.length > 1 ? ` (device error ${frame[1]})` : ''
-        throw new CompanionError('device-error', `The radio rejected the channel message${detail}.`)
+      const send = async () => {
+        const frame = await link.request(command, (response) => {
+          if (response[0] !== Response.error && response[0] !== Response.disabled) expectResponse(response, Response.ok)
+          return { value: response }
+        })
+        if (frame[0] !== Response.ok) {
+          const detail = frame.length > 1 ? ` (device error ${frame[1]})` : ''
+          throw new CompanionError('device-error', `The radio rejected the channel message${detail}.`)
+        }
       }
+      if (version < 8) return send()
+      await this.serialScope(async () => {
+        if (this.attempt !== attempt) throw new CompanionError('disconnected', 'The radio disconnected before applying the sending scope.')
+        let recovered = false
+        try {
+          attempt.scopePending = true
+          await this.saveScopeMarker(radioKey, true)
+          if (this.attempt !== attempt) throw new CompanionError('disconnected', 'The radio disconnected before applying the sending scope.')
+          let sendError: { cause: unknown } | undefined
+          try {
+            await writeChannelScope(link, scopeCommand)
+            if (this.attempt !== attempt) throw new CompanionError('disconnected', 'The radio disconnected before sending.')
+            await send()
+          } catch (cause) { sendError = { cause } }
+          await writeChannelScope(link, Uint8Array.of(54, 0))
+          if (this.attempt !== attempt) throw new CompanionError('disconnected', 'The radio disconnected before scope recovery completed.')
+          await this.saveScopeMarker(radioKey, false)
+          attempt.scopePending = false
+          recovered = true
+          if (sendError) throw sendError.cause
+        } catch (cause) {
+          if (!recovered) {
+            const error = scopeRecoveryError(cause)
+            if (this.attempt === attempt) this.fail(attempt, error)
+            throw error
+          }
+          throw cause
+        }
+      })
+    })
+  }
+
+  private serialScope<T>(work: () => Promise<T>): Promise<T> {
+    // Recovery must wait for delayed marker writes from older connections too.
+    const result = this.scopeTail.then(work)
+    this.scopeTail = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  private async saveScopeMarker(publicKey: string, pending: boolean) {
+    const storage = await this.openScopeStorage()
+    try { await storage.update(radioKeyFromPublicKey(publicKey), { scopeRecovery: pending }) }
+    finally { storage.close() }
+  }
+
+  private async recoverScope(attempt: Attempt, link: SerialLink, device: CompanionDevice) {
+    await this.serialScope(async () => {
+      if (this.attempt !== attempt) return
+      try {
+        const storage = await this.openScopeStorage()
+        let pending: boolean | undefined
+        try { pending = (await storage.read(radioKeyFromPublicKey(device.publicKey)))?.scopeRecovery }
+        finally { storage.close() }
+        if (pending !== undefined && typeof pending !== 'boolean') throw new Error('Invalid saved scope recovery marker.')
+        if (this.attempt !== attempt || !pending) return
+        attempt.scopePending = true
+        if (device.capabilities.firmwareProtocolVersion < 8) throw new Error('This firmware cannot reset the pending scope override.')
+        await writeChannelScope(link, Uint8Array.of(54, 0))
+        if (this.attempt !== attempt) throw new Error('The radio disconnected during scope recovery.')
+        await this.saveScopeMarker(device.publicKey, false)
+        attempt.scopePending = false
+      } catch (cause) { throw scopeRecoveryError(cause) }
     })
   }
   readonly readChannelShareKey = (radioKey: string, index: number, expectedName: string) =>
@@ -666,6 +754,10 @@ export class CompanionSession {
       throw new CompanionError('identity', 'The reconnected device belongs to a different radio. Use a connection button to choose the correct device.')
     }
     this.expectedKey = device.publicKey
+    this.update({ device })
+    if (this.attempt !== attempt) return
+    await this.recoverScope(attempt, link, device)
+    if (this.attempt !== attempt) return
     this.update({ device, phase: 'syncing', progress: { stage: 'contacts', completed: 0, total: null } })
 
     const contacts = await this.readContacts(link, (progress) => this.update({ progress }))
@@ -751,7 +843,7 @@ export class CompanionSession {
           this.attempt = undefined
           if (attempt.link) this.cleanup = attempt.link.close()
           await this.cleanup
-          if (error instanceof CompanionError && error.code === 'identity') throw error
+          if (error instanceof CompanionError && (error.code === 'identity' || error.code === 'scope-recovery')) throw error
           lastError = error instanceof CompanionError ? error : new CompanionError('open-failed', 'Could not reopen the radio connection.', { cause: error })
           this.update({ phase: 'reconnecting', error: lastError, progress: null })
         }

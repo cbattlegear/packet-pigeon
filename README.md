@@ -213,6 +213,8 @@ clipboard, upload a QR image or scan with the camera. QR processing runs in the
 browser. Contact and channel changes require a connected radio and confirmation.
 Channel invitations carry the channel key. A link can contain a region scope.
 Packet Pigeon asks before joining a scoped channel without that scope.
+Imports do not apply invitation scopes; configure the sending scope in
+**Channels** before sending.
 
 Contact and channel details offer a share link and downloadable QR code.
 Settings can generate a MeshCore v1 companion setup link for the connected
@@ -293,9 +295,44 @@ the old name returns; a replacement
 with the same slot and name cannot be distinguished. A synced deletion clears
 the setting. Retention does not change the radio or delete direct messages.
 
-Notification modes and per-channel region scope are not implemented. No region
-scope is changed by these controls. Channel changes have been exercised with
-simulated transports rather than physical hardware.
+Each channel can use **Radio default**, a case-sensitive named public hashtag
+region (companion protocol v8+), or **Explicitly unscoped** (v12+).
+Names are trimmed and prefixed with `#` if absent; the first 16 bytes of their
+SHA-256 hash select the region, matching MeshCore's companion protocol.
+These settings are browser-local and per radio/slot. An observed name change,
+including a local rename, pauses a saved scope until it is explicitly chosen
+again; a same-name replacement cannot be detected. Unsupported firmware or
+invalid/paused settings prevent sending instead of silently dropping the scope.
+An outgoing message records its requested scope. A deliberate resend uses the
+channel's current setting, not necessarily the original message's scope.
+
+The temporary override is radio-session-global and also affects contact flood
+sends. On protocol v8+, Packet Pigeon durably writes a per-radio recovery marker
+before applying a channel's scope, using strict IndexedDB durability (required),
+then excludes other commands throughout
+apply/send/reset. It clears the marker only after the radio acknowledges reset
+to its configured default. This does not modify the radio's saved default
+region or restore another application's temporary override.
+On reconnect or reload, the identity handshake happens first; any pending
+override is reset before contact/channel sync, readiness, or message commands.
+Storage or reset failure closes the session with an explicit recovery error;
+check browser storage and reconnect to retry. Interrupted sends are not
+automatically retransmitted. Even a successfully reset but interrupted send
+can remain uncertain; radio acceptance is not delivery.
+The owning tab retains its radio lock until in-flight scope recovery work
+settles, even after disconnect or failure; other tabs cannot connect meanwhile.
+
+**Residual risk:** an override can remain active after a crash/disconnect.
+Other applications, browser profiles or origins do not consult this browser's
+marker and can send with that override. Reconnect with this app and the same
+browser storage to recover before using another app, or reboot the radio to
+clear its temporary state. Clearing/evicting browser storage loses the marker.
+Region names and scopes are routing filters, not privacy or reachability
+guarantees. Received region metadata, actual route hashes, correlated
+heard-repeat attribution, and notification modes remain unavailable.
+Channel changes and scope recovery have been exercised with simulated
+transports and storage, not physical hardware; the BLE framing limitation above
+remains unchanged.
 
 ## Discovered adverts
 

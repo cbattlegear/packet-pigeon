@@ -354,6 +354,12 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
     const select = document.querySelector('#channel-rename-fixture select[aria-label="Message retention for Public"]')
     return select && !select.disabled && select.value === '30'
   })
+  const scope = fixture.getByRole('combobox', { name: 'Sending scope for Public' })
+  await scope.selectOption('region')
+  await fixture.getByRole('textbox', { name: 'Region name for Public' }).fill('North')
+  await fixture.getByRole('button', { name: 'Save sending scope' }).click()
+  await fixture.getByText('Sending scope saved for this browser and radio. No radio settings were changed.').waitFor()
+  assert.equal(await fixture.getByRole('textbox', { name: 'Region name for Public' }).inputValue(), '#North')
   await fixture.getByRole('textbox', { name: 'Rename' }).fill('Renamed')
   await fixture.getByRole('button', { name: 'Save name' }).click()
   await fixture.getByText('Channel renamed on the radio.').waitFor()
@@ -361,10 +367,20 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
   const saved = await page.evaluate(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()
-    try { return (await storage.read(radioKeyFromPublicKey(radio))).channelRetention }
+    try {
+      const data = await storage.read(radioKeyFromPublicKey(radio))
+      return { retention: data.channelRetention, scopes: data.channelScopes }
+    }
     finally { storage.close() }
   }, radio)
-  assert.deepEqual(saved, [{ index: 0, channelName: 'Renamed', days: 30 }])
+  assert.deepEqual(saved.retention, [{ index: 0, channelName: 'Renamed', days: 30 }])
+  assert.deepEqual(saved.scopes, [{ index: 0, channelName: 'Public', scope: { mode: 'region', name: '#North' }, paused: true }])
+  await fixture.getByText('Sending scope is paused because this slot changed names. Save a scope before sending.').waitFor()
+  await fixture.getByRole('combobox', { name: 'Sending scope for Renamed' }).selectOption('default')
+  await fixture.getByRole('button', { name: 'Save sending scope' }).click()
+  await fixture.getByText('Sending scope is paused because this slot changed names. Save a scope before sending.').waitFor({ state: 'hidden' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 1)
 })
 
 test('channel chat sends, replies by name, and keeps local message actions scoped to the radio', async (t) => {
@@ -396,13 +412,14 @@ test('channel chat sends, replies by name, and keeps local message actions scope
       await storage.update(key, {
         channels: [{ index: 0, name: 'Public' }, { index: 1, name: 'Quiet' }],
         messages, markRead: ['Bob'], channelRetention: { index: 0, channelName: 'Public', days: 30 },
+        channelScope: { index: 0, channelName: 'Public', scope: { mode: 'region', name: '#North' } },
       })
     } finally { storage.close() }
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true, value: { writeText: async (text) => { window.copiedChannelText = text } },
     })
     const snapshot = {
-      phase: 'ready', transport: 'usb', device: { publicKey: radio, name: 'Pigeon' },
+      phase: 'ready', transport: 'usb', device: { publicKey: radio, name: 'Pigeon', capabilities: { firmwareProtocolVersion: 14 } },
       channels: [{ index: 0, name: 'Public' }, { index: 1, name: 'Quiet' }],
     }
     window.channelSends = []
@@ -460,6 +477,7 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   await conversation.getByRole('button', { name: 'Send message' }).click()
   await conversation.getByText('Accepted by radio').waitFor()
   assert.equal(await page.evaluate(() => window.channelSends[0][5]), '@[Bob] Hello')
+  assert.deepEqual(await page.evaluate(() => window.channelSends[0][6]), { mode: 'region', name: '#North' })
   await input.fill('Keep this draft')
   let prompt = page.waitForEvent('dialog')
   const resending = conversation.getByRole('button', { name: 'Resend channel message: @[Bob] Hello' }).click()

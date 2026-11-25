@@ -11,7 +11,7 @@ const recipient = 'bc'.repeat(32)
 const options = { directAttempts: 2, floodAttempts: 1 }
 
 class FixtureSource {
-  snapshot = { phase: 'ready', device: { publicKey, name: 'Pigeon' } }
+  snapshot = { phase: 'ready', device: { publicKey, name: 'Pigeon', capabilities: { firmwareProtocolVersion: 14 } } }
   listeners = new Set()
   pushes = new Set()
   sends = []
@@ -29,8 +29,8 @@ class FixtureSource {
     this.sends.push(send)
     return this.onSend(send)
   }
-  async sendChannel(sender, index, channel, senderName, timestamp, text) {
-    const send = { sender, index, channel, senderName, timestamp, text }
+  async sendChannel(sender, index, channel, senderName, timestamp, text, scope) {
+    const send = { sender, index, channel, senderName, timestamp, text, scope }
     this.channelSends.push(send)
     return this.onChannelSend(send)
   }
@@ -347,7 +347,7 @@ test('a late channel send outcome stays under its captured radio identity', asyn
   assert.equal(await direct.sendChannel(key, 0, 'Public', 'Hello'), true)
   await started
   source.phase('idle')
-  source.snapshot = { phase: 'ready', device: { publicKey: otherKey, name: 'Other' } }
+  source.snapshot = { phase: 'ready', device: { publicKey: otherKey, name: 'Other', capabilities: { firmwareProtocolVersion: 14 } } }
   source.phase('ready')
   await direct.load(otherKey)
   release()
@@ -355,5 +355,31 @@ test('a late channel send outcome stays under its captured radio identity', asyn
   assert.equal((await storage.read(key)).messages[0].channelOutgoing.status, 'accepted')
   assert.deepEqual((await storage.read(otherKey)).messages, [])
   assert.equal(direct.getSnapshot().key, otherKey)
+  storage.close()
+})
+
+test('channel sends capture scope atomically and deliberate resends use the current setting', async () => {
+  const { source, direct, openStorage } = await fixture()
+  const storage = await openStorage()
+  await storage.update(key, {
+    channels: [{ index: 0, name: 'Public' }],
+    channelScope: { index: 0, channelName: 'Public', scope: { mode: 'region', name: '#North' } },
+  })
+  await direct.load(key)
+  source.onChannelSend = async (send) => {
+    assert.deepEqual((await storage.read(key)).messages.at(-1).channelOutgoing.scope, send.scope)
+  }
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Hello'), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  assert.deepEqual(source.channelSends[0].scope, { mode: 'region', name: '#North' })
+  await storage.update(key, { channelScope: { index: 0, channelName: 'Public', scope: { mode: 'unscoped' } } })
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Hello', true, true), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  assert.deepEqual(source.channelSends[1].scope, { mode: 'unscoped' })
+  source.snapshot.device.capabilities.firmwareProtocolVersion = 11
+  assert.equal(await direct.sendChannel(key, 0, 'Public', 'Keep this'), false)
+  assert.match(direct.getSnapshot().error, /v12/)
+  assert.equal(direct.draft(key, 'channel:0'), 'Keep this')
+  assert.equal(source.channelSends.length, 2)
   storage.close()
 })

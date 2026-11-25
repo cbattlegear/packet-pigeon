@@ -152,7 +152,7 @@ export function ImportShare({ snapshot, session, close }: {
       {preview.kind === 'contact' && <p><code>{preview.publicKey}</code></p>}
       {preview.kind === 'channel' && preview.regionScope && <label className="share-checkbox">
         <input type="checkbox" checked={unscoped} disabled={saving} onChange={(event) => setUnscoped(event.currentTarget.checked)} />
-        Join without the provided region scope ({preview.regionScope}). Packet Pigeon currently cannot apply it.
+        Join without the provided region scope ({preview.regionScope}). Configure the sending scope in Channels before sending.
       </label>}
       {radio ? <p>Apply to {radio.name || 'the connected radio'}.</p> : <p>Connect and sync a radio to apply this link.</p>}
       <div className="share-actions">

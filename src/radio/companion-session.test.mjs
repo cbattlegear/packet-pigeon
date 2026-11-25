@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import 'fake-indexeddb/auto'
 import { once } from 'node:events'
 import test from 'node:test'
 import { setImmediate } from 'node:timers/promises'
@@ -10,6 +11,7 @@ import { MessageSync } from '../integration/message-sync.ts'
 import { DirectMessages } from '../integration/direct-messages.ts'
 import { expectedDirectAck } from './direct-message.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
+import { assertScopeSupported, channelScopeCommand, validateChannelScope } from './channel-scope.ts'
 
 const encode = (text) => new TextEncoder().encode(text)
 const response = (...payload) => Uint8Array.of(0x3e, payload.length, 0, ...payload)
@@ -116,6 +118,404 @@ function contactInfo() {
   data.setUint32(144, 456, true)
   return frame
 }
+
+function scopeFixture(options = {}) {
+  const factory = options.factory ?? new IDBFactory()
+  const key = (options.key ?? 'ab').repeat(32)
+  const events = []
+  let scopeCommands = 0
+  const port = new FixturePort(async (command, serial) => {
+    events.push(['command', ...command])
+    switch (command[0]) {
+      case 22: {
+        const info = deviceInfo(1)
+        info[1] = options.version ?? 14
+        serial.emit(...info)
+        break
+      }
+      case 1: {
+        const info = selfInfo()
+        info.set(Buffer.from(key, 'hex'), 4)
+        serial.emit(...info)
+        break
+      }
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 31: {
+        const slot = new Uint8Array(48)
+        slot.set(encode('Public'))
+        slot.fill(1, 32)
+        serial.emit(18, 0, ...slot)
+        break
+      }
+      case 54:
+        scopeCommands++
+        if (options.onScope) await options.onScope(command, serial, scopeCommands)
+        else serial.emit(0)
+        break
+      case 3:
+        if (options.onSend) await options.onSend(command, serial)
+        else serial.emit(0)
+        break
+      default: assert.fail(`Unexpected scope fixture command ${command[0]}`)
+    }
+  })
+  const openScopeStorage = async () => {
+    if (options.storageOpenFailure) throw new Error('Storage open unavailable')
+    const storage = await openRadioStorage(factory)
+    const wrapped = {
+      ...storage,
+      update: async (radio, update) => {
+        await storage.update(radio, update)
+        if (update.scopeRecovery !== undefined) events.push(['marker', update.scopeRecovery])
+      },
+    }
+    return options.wrapStorage ? options.wrapStorage(wrapped) : wrapped
+  }
+  const session = sessionWith(port, options.timeoutMs ?? 1000, {
+    locks: options.locks ?? fixtureLocks(),
+    environment: { secureContext: true, serial: {
+      requestPort: async () => options.selectPort?.() ?? port, getPorts: async () => [],
+    } },
+    openScopeStorage,
+  })
+  return {
+    factory, key, session, port, events,
+    send: (scope = { mode: 'region', name: '#North' }) => session.sendChannel(key, 0, 'Public', 'Pigeon', 123, 'Hello', scope),
+    marker: async () => {
+      const storage = await openRadioStorage(factory)
+      try { return (await storage.read(radioKeyFromPublicKey(key)))?.scopeRecovery }
+      finally { storage.close() }
+    },
+  }
+}
+
+test('scope commands use exact case-sensitive hashtag hashes and enforce firmware gates', async () => {
+  const hash = (await import('node:crypto')).createHash('sha256').update('#North').digest().subarray(0, 16)
+  assert.deepEqual([...await channelScopeCommand({ mode: 'region', name: 'North' })], [54, 0, ...hash])
+  assert.notDeepEqual(await channelScopeCommand({ mode: 'region', name: '#north' }), Uint8Array.of(54, 0, ...hash))
+  assert.deepEqual([...await channelScopeCommand({ mode: 'unscoped' })], [54, 1])
+  assert.deepEqual([...await channelScopeCommand({ mode: 'default' })], [54, 0])
+  for (const name of ['', '#', '   ', '#\0bad', '#\nname', '#\ud800']) {
+    assert.throws(() => validateChannelScope({ mode: 'region', name }), /Region names/)
+  }
+  assert.throws(() => assertScopeSupported({ mode: 'region', name: '#North' }, 7), /v8/)
+  assert.throws(() => assertScopeSupported({ mode: 'unscoped' }, 11), /v12/)
+  assert.throws(() => assertScopeSupported({ mode: 'default' }, NaN), /protocol version/)
+})
+
+test('scope journaling commits before apply and excludes all other commands until reset', async () => {
+  let sendEntered = false
+  const fixture = scopeFixture({ onSend: (_command, port) => { sendEntered = true; fixture.respond = () => port.emit(0) } })
+  await fixture.session.connect()
+  const sent = fixture.send()
+  await waitFor(() => sendEntered)
+  assert.equal(await fixture.marker(), true)
+  await assert.rejects(fixture.send(), /already in progress/)
+  await assert.rejects(fixture.session.readChannelShareKey(fixture.key, 0, 'Public'), /already in progress/)
+  await assert.rejects(fixture.session.sendDirect(fixture.key, 'bc'.repeat(32), 124, 0, 'Other'), /in progress/)
+  assert.throws(() => fixture.session.reserveQueuedMessage(fixture.key), /finish before syncing/)
+  fixture.respond()
+  await sent
+  const command = [...await channelScopeCommand({ mode: 'region', name: '#North' })]
+  assert.deepEqual(fixture.events.filter((event) => event[0] === 'marker' || [54, 3].includes(event[1])), [
+    ['marker', true], ['command', ...command],
+    ['command', 3, 0, 0, 123, 0, 0, 0, ...encode('Hello')], ['command', 54, 0], ['marker', false],
+  ])
+  assert.equal(await fixture.marker(), false)
+  await fixture.session.disconnect()
+})
+
+test('default, region and unscoped sends are firmware-gated and restore the radio default', async (t) => {
+  for (const [version, scope, supported] of [
+    [7, { mode: 'default' }, true], [7, { mode: 'region', name: '#North' }, false],
+    [8, { mode: 'region', name: '#North' }, true], [11, { mode: 'unscoped' }, false],
+    [12, { mode: 'unscoped' }, true], [14, { mode: 'default' }, true],
+  ]) await t.test(`${version} ${scope.mode}`, async () => {
+    const fixture = scopeFixture({ version })
+    await fixture.session.connect()
+    if (supported) await fixture.send(scope)
+    else await assert.rejects(fixture.send(scope), /requires companion protocol/)
+    assert.equal(fixture.port.commands.filter(([code]) => code === 3).length, supported ? 1 : 0)
+    assert.equal(fixture.port.commands.filter(([code]) => code === 54).length, supported && version >= 8 ? 2 : 0)
+    if (supported && version >= 8) assert.deepEqual(fixture.port.commands.at(-1), [54, 0])
+    await fixture.session.disconnect()
+  })
+})
+
+test('explicit apply/send rejection still resets and preserves the original error', async (t) => {
+  for (const stage of ['apply', 'send']) await t.test(stage, async () => {
+    const fixture = scopeFixture({
+      onScope: (_command, port, count) => port.emit(...(stage === 'apply' && count === 1 ? [1, 2] : [0])),
+      onSend: (_command, port) => port.emit(1, 2),
+    })
+    await fixture.session.connect()
+    await assert.rejects(fixture.send(), { code: 'device-error' })
+    assert.equal(await fixture.marker(), false)
+    assert.equal(fixture.session.getSnapshot().phase, 'ready')
+    assert.equal(fixture.port.commands.filter(([code]) => code === 3).length, stage === 'apply' ? 0 : 1)
+    assert.deepEqual(fixture.port.commands.at(-1), [54, 0])
+    await fixture.session.disconnect()
+  })
+})
+
+test('disconnect at apply, send or reset leaves a durable marker recovered by a new session', async (t) => {
+  for (const stage of ['apply', 'send', 'reset']) await t.test(stage, async () => {
+    let waiting = false
+    const fixture = scopeFixture({
+      onScope: (_command, port, count) => {
+        if ((stage === 'apply' && count === 1) || (stage === 'reset' && count === 2)) waiting = true
+        else port.emit(0)
+      },
+      onSend: (_command, port) => { if (stage === 'send') waiting = true; else port.emit(0) },
+    })
+    await fixture.session.connect()
+    const stopped = assert.rejects(fixture.send(), { code: 'scope-recovery' })
+    await waitFor(() => waiting)
+    await fixture.session.disconnect()
+    await stopped
+    assert.equal(await fixture.marker(), true)
+    const reloaded = scopeFixture({ factory: fixture.factory })
+    await reloaded.session.connect()
+    assert.equal(reloaded.session.getSnapshot().phase, 'ready')
+    assert.deepEqual(reloaded.port.commands.map(([code]) => code), [22, 1, 54, 4, 31])
+    assert.equal(await reloaded.marker(), false)
+    await reloaded.session.disconnect()
+  })
+})
+
+test('storage failures and rejected or missing reset acknowledgements fail closed and can be retried', async (t) => {
+  for (const failure of ['open', 'read', 'mark', 'clear', 'reset', 'reset-timeout', 'invalid-marker']) await t.test(failure, async () => {
+    const fixture = scopeFixture({
+      timeoutMs: 40,
+      storageOpenFailure: failure === 'open',
+      wrapStorage: (storage) => ({
+        ...storage,
+        read: async (radio) => {
+          if (failure === 'read') throw new Error('Storage read unavailable')
+          if (failure === 'invalid-marker') return { scopeRecovery: 'invalid' }
+          return storage.read(radio)
+        },
+        update: async (radio, update) => {
+          if ((failure === 'mark' && update.scopeRecovery === true) || (failure === 'clear' && update.scopeRecovery === false)) {
+            throw new Error('Storage write unavailable')
+          }
+          return storage.update(radio, update)
+        },
+      }),
+      onScope: (_command, port, count) => {
+        if (count !== 2) port.emit(0)
+        else if (failure === 'reset') port.emit(1, 2)
+        else if (failure !== 'reset-timeout') port.emit(0)
+      },
+    })
+    if (['open', 'read', 'invalid-marker'].includes(failure)) {
+      const storage = await openRadioStorage(fixture.factory)
+      await storage.update(radioKeyFromPublicKey(fixture.key), { scopeRecovery: true })
+      storage.close()
+    }
+    await fixture.session.connect()
+    if (!['open', 'read', 'invalid-marker'].includes(failure)) await assert.rejects(fixture.send(), { code: 'scope-recovery' })
+    await waitFor(() => fixture.session.getSnapshot().phase === 'error')
+    assert.equal(fixture.session.getSnapshot().error.code, 'scope-recovery')
+    if (['clear', 'reset', 'reset-timeout'].includes(failure)) assert.equal(await fixture.marker(), true)
+    if (['open', 'read', 'mark', 'invalid-marker'].includes(failure)) assert.equal(fixture.port.commands.some(([code]) => code === 3 || code === 54), false)
+    await fixture.session.disconnect()
+    const retry = scopeFixture({ factory: fixture.factory })
+    await retry.session.connect()
+    await retry.send()
+    assert.equal(await retry.marker(), false)
+    await retry.session.disconnect()
+  })
+})
+
+test('pending recovery is isolated by radio and cannot proceed on unsupported firmware', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const radio = radioKeyFromPublicKey('ab'.repeat(32))
+  await storage.update(radio, { scopeRecovery: true })
+  const other = scopeFixture({ factory, key: 'cd' })
+  await other.session.connect()
+  assert.equal(other.port.commands.some(([code]) => code === 54), false)
+  assert.equal((await storage.read(radio)).scopeRecovery, true)
+  await other.session.disconnect()
+  const old = scopeFixture({ factory, version: 7 })
+  await old.session.connect()
+  assert.equal(old.session.getSnapshot().error.code, 'scope-recovery')
+  assert.deepEqual(old.port.commands.map(([code]) => code), [22, 1])
+  assert.equal((await storage.read(radio)).scopeRecovery, true)
+  await old.session.disconnect()
+  const retry = scopeFixture({ factory })
+  await retry.session.connect()
+  assert.equal(await retry.marker(), false)
+  await retry.session.disconnect()
+  storage.close()
+})
+
+test('failed reconnect resets retain the marker and block sync and sends until repaired', async (t) => {
+  for (const failure of ['reset', 'reset-timeout', 'clear']) await t.test(failure, async () => {
+    const fixture = scopeFixture({
+      timeoutMs: 40,
+      onScope: (_command, port) => {
+        if (failure === 'reset') port.emit(1, 2)
+        else if (failure !== 'reset-timeout') port.emit(0)
+      },
+      wrapStorage: (storage) => ({
+        ...storage,
+        update: async (radio, update) => {
+          if (failure === 'clear' && update.scopeRecovery === false) throw new Error('Storage write unavailable')
+          return storage.update(radio, update)
+        },
+      }),
+    })
+    const storage = await openRadioStorage(fixture.factory)
+    await storage.update(radioKeyFromPublicKey(fixture.key), { scopeRecovery: true })
+    storage.close()
+    await fixture.session.connect()
+    await waitFor(() => fixture.session.getSnapshot().phase === 'error')
+    assert.equal(fixture.session.getSnapshot().error.code, 'scope-recovery')
+    assert.deepEqual(fixture.port.commands.map(([code]) => code), [22, 1, 54])
+    assert.equal(await fixture.marker(), true)
+    await assert.rejects(fixture.send(), /Connect the selected radio/)
+    await fixture.session.disconnect()
+    const retry = scopeFixture({ factory: fixture.factory })
+    await retry.session.connect()
+    assert.equal(await retry.marker(), false)
+    await retry.session.disconnect()
+  })
+})
+
+test('scope marker clears retain cross-tab ownership during disconnect and failure', async (t) => {
+  for (const operation of ['send', 'recovery']) {
+    for (const termination of ['disconnect', 'failure']) {
+      for (const clearResult of ['commit', 'reject']) await t.test(`${operation}, ${termination}, ${clearResult}`, async () => {
+        const factory = new IDBFactory()
+        const locks = fixtureLocks()
+        let releaseClear
+        let notifyClear
+        const clearGate = new Promise((resolve) => { releaseClear = resolve })
+        const clearStarted = new Promise((resolve) => { notifyClear = resolve })
+        let notifySend
+        let releaseSend
+        const sendStarted = new Promise((resolve) => { notifySend = resolve })
+        const first = scopeFixture({
+          factory, locks,
+          wrapStorage: (storage) => ({
+            ...storage,
+            update: async (radio, update) => {
+              if (update.scopeRecovery === false) {
+                notifyClear()
+                await clearGate
+                if (clearResult === 'reject') throw new Error('Delayed marker clear failed')
+              }
+              return storage.update(radio, update)
+            },
+          }),
+        })
+        const second = scopeFixture({
+          factory, locks,
+          onSend: (_command, port) => { releaseSend = () => port.emit(0); notifySend() },
+        })
+        let firstWork
+        let closing
+        let secondSend
+        try {
+          if (operation === 'recovery') {
+            const storage = await openRadioStorage(factory)
+            await storage.update(radioKeyFromPublicKey(first.key), { scopeRecovery: true })
+            storage.close()
+            firstWork = first.session.connect()
+          } else {
+            await first.session.connect()
+            firstWork = first.send().then(() => null, (error) => error)
+          }
+          await clearStarted
+          assert.equal(await first.marker(), true)
+          if (termination === 'disconnect') closing = first.session.disconnect()
+          else first.port.dispatchEvent(new Event('disconnect'))
+          await waitFor(() => first.port.closed)
+          assert.equal(first.session.getSnapshot().phase, 'closing')
+          if (termination === 'failure') assert.equal(first.session.getSnapshot().error?.code, 'scope-recovery')
+
+          await second.session.connect()
+          assert.equal(second.session.getSnapshot().error?.code, 'ownership')
+          assert.equal(second.port.commands.length, 0)
+
+          releaseClear()
+          if (closing) await closing
+          else await waitFor(() => first.session.getSnapshot().phase === 'error')
+          const outcome = await firstWork
+          if (operation === 'send') {
+            if (clearResult === 'reject') assert.equal(outcome.code, 'scope-recovery')
+            else assert.match(outcome.message, /disconnected/)
+          }
+          assert.equal(await first.marker(), clearResult === 'reject')
+
+          await second.session.connect()
+          assert.equal(second.session.getSnapshot().phase, 'ready')
+          if (clearResult === 'reject') assert.deepEqual(second.port.commands.slice(0, 3).map(([code]) => code), [22, 1, 54])
+          secondSend = second.send()
+          await sendStarted
+          assert.equal(await second.marker(), true)
+          await setImmediate()
+          assert.equal(await second.marker(), true)
+          releaseSend()
+          await secondSend
+          assert.equal(await second.marker(), false)
+        } finally {
+          releaseClear()
+          releaseSend?.()
+          await Promise.allSettled([firstWork, closing, secondSend].filter(Boolean))
+          await first.session.disconnect()
+          await second.session.disconnect()
+        }
+      })
+    }
+  }
+})
+
+test('reconnect waits for old delayed marker writes before recovery or another scoped send', async (t) => {
+  for (const delayedValue of [true, false]) await t.test(`delayed ${delayedValue}`, async () => {
+    let waiting = false
+    let release
+    const gate = new Promise((resolve) => { release = resolve })
+    let selected
+    const fixture = scopeFixture({
+      selectPort: () => selected,
+      wrapStorage: (storage) => ({
+        ...storage,
+        update: async (radio, update) => {
+          if (!waiting && update.scopeRecovery === delayedValue) { waiting = true; await gate }
+          return storage.update(radio, update)
+        },
+      }),
+    })
+    let stopped
+    let closing
+    try {
+      await fixture.session.connect()
+      stopped = assert.rejects(fixture.send(), delayedValue ? { code: 'scope-recovery' } : /disconnected/)
+      await waitFor(() => waiting)
+      closing = fixture.session.disconnect()
+      await waitFor(() => fixture.port.closed)
+      assert.equal(fixture.session.getSnapshot().phase, 'closing')
+      const reconnect = scopeFixture({ factory: fixture.factory })
+      selected = reconnect.port
+      await fixture.session.connect()
+      assert.equal(reconnect.port.commands.length, 0)
+      release()
+      await Promise.all([stopped, closing])
+      await fixture.session.connect()
+      assert.equal(fixture.session.getSnapshot().phase, 'ready')
+      assert.equal(await fixture.marker(), false)
+      await fixture.send()
+      assert.equal(await fixture.marker(), false)
+    } finally {
+      release()
+      await Promise.allSettled([stopped, closing].filter(Boolean))
+      await fixture.session.disconnect()
+    }
+  })
+})
 
 test('channel management rechecks slots, preserves keys on rename, and refuses full or stale slots', async () => {
   const slots = [new Uint8Array(48), new Uint8Array(48)]
@@ -276,6 +676,7 @@ test('channel sending rechecks the radio slot and treats OK as acceptance, not d
       case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
       case 31: serial.emit(18, command[1], ...slot); break
       case 3: serial.emit(...(reject ? [1, 2] : [0])); break
+      case 54: serial.emit(0); break
       default: assert.fail(`Unexpected command ${command[0]}`)
     }
   })
@@ -283,7 +684,8 @@ test('channel sending rechecks the radio slot and treats OK as acceptance, not d
   const key = 'ab'.repeat(32)
   await session.connect()
   await session.sendChannel(key, 0, 'Public', 'Pigeon', 0x12345678, 'Hello')
-  assert.deepEqual(port.commands.at(-1), [3, 0, 0, 0x78, 0x56, 0x34, 0x12, ...encode('Hello')])
+  assert.deepEqual(port.commands.at(-2), [3, 0, 0, 0x78, 0x56, 0x34, 0x12, ...encode('Hello')])
+  assert.deepEqual(port.commands.at(-1), [54, 0])
   await assert.rejects(session.sendChannel(key, 0, 'Wrong', 'Pigeon', 1, 'Hello'), /channel changed/)
   assert.equal(port.commands.at(-1)[0], 31)
   await assert.rejects(session.sendChannel(key, 0, 'Public', 'Wrong', 1, 'Hello'), /sender name changed/)
