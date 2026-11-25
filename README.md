@@ -4,7 +4,7 @@ Open source MeshCore web UI. This is an incremental, desktop-first starter built
 with React, TypeScript, Vite, and npm.
 
 The current app is a client-only shell with keyboard-accessible navigation and
-user-initiated USB companion connection. It syncs contacts and channels into a
+user-initiated USB or Bluetooth companion connections. It syncs contacts and channels into a
 per-radio local cache. Contacts supports offline browsing, and the map can
 show synced contacts from the current session. Chats can manually sync and
 display received queue entries. The app does not yet send mesh packets.
@@ -67,7 +67,7 @@ requesting another; receipts are shown individually and are not deduplicated
 by their contents. Unrecognized or malformed responses are saved as raw bytes
 and stop the sync for inspection; they can also be device errors rather than
 receipts. If saving fails, syncing stops and the receipt stays in memory
-for retry. Keep the tab open until it has been saved. USB ownership remains
+for retry. Keep the tab open until it has been saved. Radio ownership remains
 reserved, even after disconnect, until that receipt is saved; retry saving in
 the owning tab to let another tab connect. Browser or process termination can
 still lose the in-memory receipt and release the lock. Failed contact or channel
@@ -89,9 +89,22 @@ used as a reference, but its package entrypoint includes native transports and
 its browser adapter does not provide the request deadlines and error handling
 needed here. The session does not expose channel secrets or transmit over the mesh.
 
+## Bluetooth companion session
+
+On HTTPS or localhost in a browser with Web Bluetooth, use **Connect Bluetooth**
+to choose a radio advertising the MeshCore companion service. Browser support,
+Bluetooth adapter availability, and pairing permissions depend on the browser
+and operating system.
+
+Bluetooth uses the same companion handshake, sync, ownership lock, and bounded
+reconnect schedule as USB. Reconnection reuses the authorized Bluetooth device
+and checks its radio public key before syncing. **Disconnect** cancels recovery
+and releases the connection. Pairing, GATT data exchange and disconnect recovery
+are covered by simulated transport tests. Physical BLE hardware has not been tested.
+
 ## Contacts
 
-Open **Contacts** after USB sync, or select the full key of a saved radio to
+Open **Contacts** after radio sync, or select the full key of a saved radio to
 browse its contacts offline. Search by either name or public key, filter by
 role or favorite, and sort by name, last advert, or latest saved direct message.
 Local names and favorites stay with the selected radio's browser cache.
@@ -172,7 +185,7 @@ Use **Map** to pan, zoom, and search nodes by name or public key. The base map
 starts with public-domain [Natural Earth land data](https://www.naturalearthdata.com/downloads/110m-physical-vectors/110m-land/).
 Selecting OpenStreetMap requests tiles for the viewed area.
 **Show my location** requests browser permission and keeps that position in
-the current visit. The Local contacts view includes the current USB session's
+the current visit. The Local contacts view includes the current radio session's
 synced contacts. Imported local contacts and discovered nodes stay on this
 browser. A local JSON import replaces the previous imported list.
 
