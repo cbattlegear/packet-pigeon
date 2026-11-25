@@ -6,6 +6,7 @@ export type Conversation = {
   title: string
   description: string
   recipient: string | null
+  channel: { index: number; name: string } | null
   messages: StoredMessage[]
 }
 
@@ -30,7 +31,7 @@ export function conversations(data: RadioData): Conversation[] {
     const description = contact
       ? recipient ? contact.publicKey : matches.length > 1 ? 'Ambiguous key prefix; sending is unavailable.' : 'This contact cannot receive direct messages.'
       : 'Sender or former contact is not uniquely identified.'
-    return { id, title, description, recipient, messages: [] }
+    return { id, title, description, recipient, channel: null, messages: [] }
   }
 
   function add(id: string) {
@@ -41,9 +42,12 @@ export function conversations(data: RadioData): Conversation[] {
       } else if (id.startsWith('channel:')) {
         const index = Number(id.slice('channel:'.length))
         const channel = data.channels.find((entry) => entry.index === index)
-        conversation = { id, title: channel?.name || `Channel ${index}`, description: 'Received channel entries', recipient: null, messages: [] }
+        conversation = {
+          id, title: channel?.name || `Channel ${index}`, description: 'Channel messages; sender names are not verified.',
+          recipient: null, channel: channel ?? null, messages: [],
+        }
       } else {
-        conversation = { id, title: 'Unrecognized responses', description: 'Raw bytes are preserved for inspection.', recipient: null, messages: [] }
+        conversation = { id, title: 'Unrecognized responses', description: 'Raw bytes are preserved for inspection.', recipient: null, channel: null, messages: [] }
       }
       byId.set(id, conversation)
     }
@@ -53,6 +57,7 @@ export function conversations(data: RadioData): Conversation[] {
   for (const contact of data.contacts) {
     if (contact.details?.type === 1 || contact.details?.type === 3) add(`direct:${contact.publicKey.toLowerCase()}`)
   }
+  for (const channel of data.channels) add(`channel:${channel.index}`)
   for (const message of data.messages) {
     let id = message.outgoing ? `direct:${message.outgoing.recipient}` : message.conversationId
     if (id.startsWith('direct:')) {
@@ -92,7 +97,7 @@ export function possibleRepeats(messages: readonly StoredMessage[]) {
 }
 
 export function unreadReceipts(messages: readonly StoredMessage[], read: ReadonlySet<string>) {
-  return messages.filter((message) => !message.outgoing && !read.has(message.id))
+  return messages.filter((message) => !message.outgoing && !message.channelOutgoing && !read.has(message.id))
 }
 
 export function oldestUnreadReceipt(messages: readonly StoredMessage[]) {

@@ -16,6 +16,7 @@ import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bl
 import { readAdvertPath, readAutoAddPolicy, writeAutoAddPolicy } from './discovery-commands.ts'
 import type { AutoAddPolicy } from './discovery-commands.ts'
 import { channelName, makeChannelSecret, readChannelSlot, secretHex, writeChannelSlot } from './channel-commands.ts'
+import { channelMessageCommand } from './channel-message.ts'
 import { writeSetupPathWidth, writeSetupRadioSettings } from './setup-commands.ts'
 
 export interface SyncProgress {
@@ -517,6 +518,30 @@ export class CompanionSession {
     })
   }
 
+  readonly sendChannel = async (
+    radioKey: string, index: number, expectedChannel: string, senderName: string, timestamp: number, text: string,
+  ) => {
+    const command = channelMessageCommand(index, timestamp, text, senderName)
+    await this.runRadioCommand(radioKey, async (link) => {
+      if (index >= this.snapshot.device!.capabilities.maxChannels) throw new Error('Invalid channel slot.')
+      const slot = await readChannelSlot(link, index)
+      if (this.attempt?.link !== link || this.snapshot.phase !== 'ready'
+        || this.snapshot.device?.publicKey !== radioKey || this.snapshot.device.name !== senderName) {
+        throw new Error('The radio disconnected or its sender name changed before sending.')
+      }
+      if (!slot || slot.channel.name !== expectedChannel || !expectedChannel) {
+        throw new Error('The channel changed on the radio. Reconnect and check before sending.')
+      }
+      const frame = await link.request(command, (response) => {
+        if (response[0] !== Response.error && response[0] !== Response.disabled) expectResponse(response, Response.ok)
+        return { value: response }
+      })
+      if (frame[0] !== Response.ok) {
+        const detail = frame.length > 1 ? ` (device error ${frame[1]})` : ''
+        throw new CompanionError('device-error', `The radio rejected the channel message${detail}.`)
+      }
+    })
+  }
   readonly readChannelShareKey = (radioKey: string, index: number, expectedName: string) =>
     this.runRadioCommand(radioKey, async (link) => {
       if (!Number.isInteger(index) || index < 0 || index >= this.snapshot.device!.capabilities.maxChannels) {
