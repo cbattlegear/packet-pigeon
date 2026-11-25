@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { filterNodes, mapPosition, readImportNodes, readPublicNodes } from '../src/map/nodes.ts'
+import { filterNodes, mapPosition, mapRadioContacts, readImportNodes, readPublicNodes } from '../src/map/nodes.ts'
 
 const key = (digit) => digit.repeat(64)
 
@@ -41,4 +41,16 @@ test('combines name or public key search with role and favorite filters', () => 
   ])
   assert.deepEqual(filterNodes(nodes, { search: '  HILL ', role: 2, favoritesOnly: true }), [nodes[0]])
   assert.deepEqual(filterNodes(nodes, { search: key('c').slice(0, 8), role: 'all', favoritesOnly: false }), [nodes[2]])
+})
+
+test('maps USB contacts with usable coordinates and keeps unpositioned contacts searchable', () => {
+  const nodes = mapRadioContacts([
+    { publicKey: key('a'), name: 'Relay', type: 2, latitude: 40, longitude: -105 },
+    { publicKey: key('b'), name: 'Companion', type: 1, latitude: 0, longitude: 0 },
+    { publicKey: key('c'), name: 'Unsupported role', type: 33, latitude: 40, longitude: -105 },
+  ])
+  assert.deepEqual(nodes.map(({ source, position }) => [source, position]), [
+    ['local', { lat: 40, lon: -105 }],
+    ['local', null],
+  ])
 })

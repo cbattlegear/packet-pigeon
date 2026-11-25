@@ -238,7 +238,7 @@ export function TerrainTools({
   }
 
   return (
-    <section className="terrain-tools" id="terrain" aria-labelledby="terrain-heading">
+    <section className="terrain-tools" id="tools" aria-labelledby="terrain-heading">
       <h3 id="terrain-heading">Line of sight and coverage</h3>
       <form className="terrain-form" onSubmit={(event) => void calculate(event)} noValidate>
         <label><span id="map-calculation-label">Calculation</span>

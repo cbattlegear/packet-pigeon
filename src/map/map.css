@@ -4,6 +4,10 @@
   scroll-margin-top: 20px;
 }
 
+.map-workspace {
+  padding: 0 clamp(16px, 3vw, 28px) 28px;
+}
+
 .map-workspace :is(h3, h4) {
   margin: 0;
   line-height: 1.35;

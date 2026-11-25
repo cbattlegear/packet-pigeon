@@ -1,3 +1,5 @@
+import type { CompanionContact } from '../radio/index.ts'
+
 export type Coordinates = { lat: number; lon: number }
 export type NodeSource = 'local' | 'discovery' | 'public'
 
@@ -89,6 +91,14 @@ function normalizeNode(raw: UnvalidatedNode): MapNode | null {
     source: raw.source,
     favorite: raw.favorite === true,
   }
+}
+
+export function mapRadioContacts(contacts: readonly CompanionContact[]): MapNode[] {
+  return contacts.flatMap(({ publicKey, name, type, latitude, longitude }) => {
+    const position = latitude === 0 && longitude === 0 ? null : readCoordinates(latitude, longitude)
+    const node = normalizeNode({ publicKey, name, role: type, position, source: 'local' })
+    return node ? [node] : []
+  })
 }
 
 export function readPublicNodes(data: unknown): MapNode[] {

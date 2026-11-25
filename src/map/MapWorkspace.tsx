@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { MapCanvas } from './MapCanvas.tsx'
 import { TerrainTools } from './TerrainTools.tsx'
@@ -43,9 +43,9 @@ function formatPosition(position: Coordinates) {
   return `${position.lat.toFixed(5)}, ${position.lon.toFixed(5)}`
 }
 
-export function MapWorkspace({
-  radioNodes = emptyNodes, radioPosition = null,
-}: { radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null }) {
+export default function MapWorkspace({
+  radioNodes = emptyNodes, radioPosition = null, showTerrain = false,
+}: { radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null; showTerrain?: boolean }) {
   const [localNodes, setLocalNodes] = useState(savedNodes)
   const [publicNodes, setPublicNodes] = useState<MapNode[]>([])
   const [favorites, setFavorites] = useState(savedFavorites)
@@ -71,6 +71,10 @@ export function MapWorkspace({
   const [coverage, setCoverage] = useState<CoverageLayer[]>([])
   const mapPanel = useRef<HTMLDivElement>(null)
   const self = myLocation ?? (mapPosition(radioPosition) ? radioPosition : null)
+
+  useEffect(() => {
+    if (showTerrain) document.getElementById('tools')?.scrollIntoView()
+  }, [showTerrain])
 
   const nodes = useMemo(() => {
     const records = source === 'public' ? publicNodes : [...localNodes, ...radioNodes]
