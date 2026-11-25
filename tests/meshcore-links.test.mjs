@@ -69,8 +69,13 @@ test('reads a v1 setup payload and exports a preset without identity or channel 
     `${link}&json=%7B%7D`,
     setup({ radio_settings: { frequency: 'invalid' }, channels: [{ secret }] }),
     setup({ contacts: [{ name: 'No public key', private_key: publicKey, type: 1 }] }),
+    ...[123, false, {}, ['us']].map((region_scope) =>
+      setup({ channels: [{ name: 'Public', secret, region_scope }] })),
   ]) {
     assert.throws(() => parseCompanionSetup(invalid), (error) =>
       !error.message.includes(secret) && !error.message.includes(publicKey))
   }
+  assert.deepEqual(parseCompanionSetup(setup({
+    channels: [{ name: 'Public', secret, region_scope: null }],
+  })).channels, [{ kind: 'channel', name: 'Public', secret }])
 })

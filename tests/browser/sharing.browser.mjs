@@ -200,6 +200,7 @@ test('exports a radio preset and confirms setup writes while reporting a partial
   await imported.getByRole('button', { name: 'Review link' }).click()
   await imported.getByRole('checkbox', { name: /Set radio preset to 910.525/ }).check()
   await imported.getByRole('checkbox', { name: 'Use 2-byte path hashes' }).check()
+  await imported.getByRole('list', { name: 'Channel region scopes' }).getByText('Scoped channel: local').waitFor()
   const apply = imported.getByRole('button', { name: 'Apply selected setup' })
   await apply.click()
   assert.deepEqual(await page.evaluate(() => window.setupWrites), [])

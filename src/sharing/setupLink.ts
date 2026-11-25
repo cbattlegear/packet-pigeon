@@ -66,6 +66,9 @@ export function parseCompanionSetup(input: string): SetupShare | null {
     })
     const channels = list(data.channels).map((entry) => {
       const channel = fields(entry)
+      if (channel.region_scope != null && typeof channel.region_scope !== 'string') {
+        throw new Error('Invalid channel region scope.')
+      }
       return parseSetupItem('channel', {
         name: valueText(channel.name), secret: valueText(channel.secret), region_scope: valueText(channel.region_scope),
       }) as ChannelShare

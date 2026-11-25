@@ -24,7 +24,7 @@ export function SetupPreview({ setup, snapshot, session, discard }: Props) {
 
   const pathSupported = radio?.capabilities.pathHashMode != null
   const channelChoices = setup.channels.filter((channel) => !channel.regionScope || withoutScope)
-  const hasScoped = setup.channels.some((channel) => channel.regionScope)
+  const scopedChannels = setup.channels.filter(({ regionScope }) => regionScope)
   const hasChanges = radioSettings && setup.settings || pathWidth && pathSupported ||
     includeContacts && setup.contacts.length || includeChannels && channelChoices.length
 
@@ -93,10 +93,15 @@ export function SetupPreview({ setup, snapshot, session, discard }: Props) {
         <input type="checkbox" checked={includeChannels} onChange={(event) => setIncludeChannels(event.currentTarget.checked)} />
         Add channels ({setup.channels.map(({ name }) => name).join(', ')})
       </label>}
-      {includeChannels && hasScoped && <label className="share-checkbox">
-        <input type="checkbox" checked={withoutScope} onChange={(event) => setWithoutScope(event.currentTarget.checked)} />
-        Join scoped channels without their scopes. Leave unchecked to skip these channels.
-      </label>}
+      {includeChannels && scopedChannels.length > 0 && <>
+        <ul aria-label="Channel region scopes">{scopedChannels.map(({ name, regionScope }, index) => (
+          <li key={index}>{name}: {regionScope}</li>
+        ))}</ul>
+        <label className="share-checkbox">
+          <input type="checkbox" checked={withoutScope} onChange={(event) => setWithoutScope(event.currentTarget.checked)} />
+          Join the listed channels without their scopes. Leave unchecked to skip them.
+        </label>
+      </>}
     </fieldset>
     {radio ? <p>Apply to {radio.name || 'the connected radio'}.</p> : <p>Connect and sync a radio to continue.</p>}
     {results.length > 0 && <ul aria-label="Setup results">{results.map(({ text, failed }, index) =>
