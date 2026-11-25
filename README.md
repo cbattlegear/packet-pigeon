@@ -181,8 +181,10 @@ page open and retry saving the message changes; this does not retransmit.
 Incoming sender names are unverified and can be impersonated. Reply inserts a
 name mention; copy, local deletion and blocking a sender name do not affect
 other devices. A possible-repeat filter retains the individual receipts, which
-may represent distinct messages. Heard-repeat counts, multiple-path
-attribution and region-scoped channel sending are not available.
+may represent distinct messages. Matching channel receipts also show a count
+and, when enabled, their reported path lengths and signal readings, including
+receipts hidden by the filter. This is not a heard-repeat count: the radio may
+not queue every copy. Multiple-path attribution is not available.
 When path details are enabled, received flood messages show their encoded hop
 count and path-hash width. The queued receipt does not include the path hashes
 themselves, so these details do not identify a route or prove a repeat.

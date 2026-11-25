@@ -19,6 +19,44 @@ after(async () => {
   await server?.close()
 })
 
+test('matching channel receipts remain inspectable when possible repeats are hidden', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1260, height: 900 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  const radio = '12'.repeat(32)
+  await page.goto(`${url}#chats`)
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const messages = [1, 0xff].map((pathLength, index) => {
+      const id = `receipt-${index}`
+      const text = 'Alice: hello'
+      return {
+        id, conversationId: 'channel:0', sender: '', timestamp: 123000, text,
+        receipt: { kind: 'channel-text', receiptId: id, channelIndex: 0, textType: 0,
+          senderTimestamp: 123, text, pathLength, snrDb: index === 0 ? 2 : null },
+      }
+    })
+    try { await storage.update(radioKeyFromPublicKey(radio), { channels: [{ index: 0, name: 'Public' }], messages }) }
+    finally { storage.close() }
+  }, radio)
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  const conversation = page.getByRole('region', { name: 'Conversation with Public' })
+  await conversation.getByLabel(/Hide 1 possible repeat/).check()
+  assert.equal(await conversation.locator('[data-receipt-id]').count(), 1)
+  await conversation.getByText('2 matching queued receipts (possible repeats)').click()
+  await conversation.getByText('Direct receipt', { exact: true }).waitFor()
+  await conversation.getByText(/may not queue every heard copy/).waitFor()
+  const saved = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).messages.map(({ id }) => id) }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(saved, ['receipt-0', 'receipt-1'])
+})
+
 test('enabling oldest unread repositions the open conversation and preserves its draft', async (t) => {
   const context = await browser.newContext({ viewport: { width: 1260, height: 900 } })
   t.after(() => context.close())

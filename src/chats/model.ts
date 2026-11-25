@@ -81,19 +81,42 @@ export function conversations(data: RadioData): Conversation[] {
   })
 }
 
+function receiptIdentity(receipt: NonNullable<StoredMessage['receipt']>) {
+  if (receipt.kind === 'channel-data') return null
+  const origin = receipt.kind === 'direct-text'
+    ? `${receipt.senderKeyPrefix}:${receipt.signatureHex ?? ''}` : String(receipt.channelIndex)
+  return JSON.stringify([receipt.kind, origin, receipt.senderTimestamp, receipt.textType, receipt.text])
+}
+
 export function possibleRepeats(messages: readonly StoredMessage[]) {
   const seen = new Set<string>()
   const repeats = new Set<string>()
   for (const message of messages) {
     const receipt = message.receipt
-    if (!receipt || receipt.kind === 'channel-data') continue
-    const origin = receipt.kind === 'direct-text'
-      ? `${receipt.senderKeyPrefix}:${receipt.signatureHex ?? ''}` : String(receipt.channelIndex)
-    const identity = JSON.stringify([receipt.kind, origin, receipt.senderTimestamp, receipt.textType, receipt.text])
+    if (!receipt) continue
+    const identity = receiptIdentity(receipt)
+    if (identity === null) continue
     if (seen.has(identity)) repeats.add(message.id)
     seen.add(identity)
   }
   return repeats
+}
+
+export function matchingChannelReceipts(messages: readonly StoredMessage[]) {
+  const groups = new Map<string, StoredMessage[]>()
+  for (const message of messages) {
+    const receipt = message.receipt
+    if (receipt?.kind !== 'channel-text') continue
+    const key = receiptIdentity(receipt)!
+    const group = groups.get(key) ?? []
+    group.push(message)
+    groups.set(key, group)
+  }
+  const matches = new Map<string, StoredMessage[]>()
+  for (const group of groups.values()) {
+    if (group.length > 1) for (const message of group) matches.set(message.id, group)
+  }
+  return matches
 }
 
 export function unreadReceipts(messages: readonly StoredMessage[], read: ReadonlySet<string>) {
