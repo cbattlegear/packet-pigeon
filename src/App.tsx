@@ -282,7 +282,7 @@ function App() {
         {activeSection === 'Channels' && (
           <div className="section-pane">
             <div className="pane-heading"><h1>Channels</h1></div>
-            <ChannelsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving} messageSyncing={messageStatus.syncing}
+            <ChannelsPanel snapshot={snapshot} session={session} cache={cache} cacheSaving={cacheStatus.saving} messageSyncing={messageStatus.syncing}
               onBlockedSendersChanged={(key) => {
                 if (directMessages.getSnapshot().key === key) void directMessages.load(key)
               }} />

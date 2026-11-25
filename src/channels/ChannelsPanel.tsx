@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { CompanionSession, CompanionSnapshot } from '../radio/index.ts'
+import type { SessionCache } from '../integration/session-cache.ts'
 import { makeChannelSecret, secretHex } from '../radio/channel-commands.ts'
 import { openRadioStorage, radioKeyFromPublicKey, validChannelRetentionSettings } from '../storage/index.ts'
 import type { RadioData, RadioKey, StoredChannel } from '../storage/index.ts'
@@ -18,12 +19,13 @@ const retentionChoices = [
 type Props = {
   snapshot: CompanionSnapshot
   session: Pick<CompanionSession, 'createChannel' | 'changeChannel'>
+  cache: Pick<SessionCache, 'renameChannelRetention'>
   cacheSaving: boolean
   messageSyncing: boolean
   onBlockedSendersChanged: (key: RadioKey) => void
 }
 
-export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, onBlockedSendersChanged }: Props) {
+export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSyncing, onBlockedSendersChanged }: Props) {
   const live = snapshot.phase === 'ready' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [choice, setChoice] = useState('')
@@ -101,11 +103,11 @@ export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, 
       const renamed = nextName?.trim()
       const saveRename = renamed && renamed !== channel.name ? async () => {
         try {
+          await cache.renameChannelRetention(liveKey, {
+            index: channel.index, from: channel.name, to: renamed,
+          })
           const storage = await openRadioStorage()
           try {
-            await storage.update(liveKey, { channelRetentionRename: {
-              index: channel.index, from: channel.name, to: renamed,
-            } })
             const data = await storage.read(liveKey)
             setCached((current) => current?.key === liveKey ? { key: liveKey, data } : current)
           } finally { storage.close() }

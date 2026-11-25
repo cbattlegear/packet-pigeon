@@ -308,6 +308,7 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
     const { default: React } = await import('/node_modules/.vite/deps/react.js')
     const { default: { createRoot } } = await import('/node_modules/.vite/deps/react-dom_client.js')
     const { ChannelsPanel } = await import('/src/channels/ChannelsPanel.tsx')
+    const { SessionCache } = await import('/src/integration/session-cache.ts')
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const key = radioKeyFromPublicKey(radio)
     const storage = await openRadioStorage()
@@ -324,9 +325,11 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
     const root = createRoot(element)
     let snapshot = {
       phase: 'ready', device: { publicKey: radio, capabilities: { maxChannels: 8 } },
-      channels: [{ index: 0, name: 'Public' }],
+      channels: [{ index: 0, name: 'Public' }], contacts: [], messages: [], progress: null,
     }
     const session = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
       async changeChannel(key, index, _oldName, name, afterRename) {
         await afterRename?.()
         const storage = await openRadioStorage()
@@ -336,9 +339,10 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
         render()
       },
     }
+    const cache = new SessionCache(session)
     function render() {
       root.render(React.createElement(ChannelsPanel, {
-        snapshot, session, cacheSaving: false, messageSyncing: false, onBlockedSendersChanged() {},
+        snapshot, session, cache, cacheSaving: false, messageSyncing: false, onBlockedSendersChanged() {},
       }))
     }
     render()

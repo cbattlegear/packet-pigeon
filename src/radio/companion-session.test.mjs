@@ -172,6 +172,65 @@ test('channel management rechecks slots, preserves keys on rename, and refuses f
   await session.disconnect()
 })
 
+test('a delayed channel rename cannot publish into a different radio session', async () => {
+  function channelPort(key, name) {
+    const slot = new Uint8Array(48)
+    slot.set(encode(name))
+    slot.fill(1, 32)
+    return new FixturePort((command, serial) => {
+      switch (command[0]) {
+        case 22: serial.emit(...deviceInfo(1)); break
+        case 1: {
+          const info = selfInfo()
+          info.fill(key, 4, 36)
+          serial.emit(...info)
+          break
+        }
+        case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+        case 31: serial.emit(18, command[1], ...slot); break
+        case 32: slot.set(command.slice(2)); serial.emit(0); break
+        default: assert.fail(`Unexpected command ${command[0]}`)
+      }
+    })
+  }
+  const ports = [channelPort(0xab, 'Public'), channelPort(0xcd, 'Other')]
+  const session = new CompanionSession({
+    environment: { secureContext: true, serial: { requestPort: async () => ports.shift(), getPorts: async () => [] } },
+    timeoutMs: 1000, locks: fixtureLocks(),
+  })
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const secondKey = radioKeyFromPublicKey('cd'.repeat(32))
+  await storage.update(secondKey, {
+    channels: [{ index: 0, name: 'Other' }],
+    channelRetention: { index: 0, channelName: 'Other', days: 30 },
+  })
+  const cache = new SessionCache(session, () => openRadioStorage(factory))
+  await session.connect()
+  let release
+  let entered
+  const blocked = new Promise((resolve) => { release = resolve })
+  const started = new Promise((resolve) => { entered = resolve })
+  const rename = assert.rejects(session.changeChannel('ab'.repeat(32), 0, 'Public', 'Renamed', async () => {
+    entered()
+    await blocked
+  }), /radio disconnected/)
+  await started
+  await session.disconnect()
+  await session.connect()
+  await waitFor(() => cache.getSnapshot().pending === 0 && !cache.getSnapshot().saving)
+  release()
+  await rename
+  await waitFor(() => cache.getSnapshot().pending === 0 && !cache.getSnapshot().saving)
+  assert.equal(session.getSnapshot().device.publicKey, secondKey)
+  assert.deepEqual(session.getSnapshot().channels, [{ index: 0, name: 'Other' }])
+  const data = await storage.read(secondKey)
+  assert.deepEqual(data.channels, [{ index: 0, name: 'Other' }])
+  assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Other', days: 30 }])
+  await session.disconnect()
+  storage.close()
+})
+
 test('USB framing tolerates split headers, noise and multiple packets per read', () => {
   const decoder = new SerialFrameDecoder()
   assert.deepEqual([...decoder.read(Uint8Array.of(0, 0x3e, 0, 0, 0x3e, 177, 0, 0x3e))], [])

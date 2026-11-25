@@ -507,9 +507,11 @@ export class CompanionSession {
       try {
         if (name !== null && nextName !== expectedName) await afterRename?.()
       } finally {
-        this.update({ channels: name === null
-          ? this.snapshot.channels.filter((channel) => channel.index !== index)
-          : this.snapshot.channels.map((channel) => channel.index === index ? { index, name: nextName } : channel) })
+        if (this.attempt?.link === link) {
+          this.update({ channels: name === null
+            ? this.snapshot.channels.filter((channel) => channel.index !== index)
+            : this.snapshot.channels.map((channel) => channel.index === index ? { index, name: nextName } : channel) })
+        }
       }
     })
   }
