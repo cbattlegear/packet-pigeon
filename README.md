@@ -6,8 +6,8 @@ with React, TypeScript, Vite, and npm.
 The current app is a client-only shell with keyboard-accessible navigation and
 user-initiated USB or Bluetooth companion connections. It syncs contacts and channels into a
 per-radio local cache. Contacts supports offline browsing, and the map can
-show synced contacts from the current session. Chats can manually sync and
-display received queue entries. The app does not yet send mesh packets.
+show synced contacts from the current session. Chats supports direct messages,
+drafts, delivery tracking, and manually syncing received queue entries over USB.
 
 ## Getting started
 
@@ -33,6 +33,8 @@ tests with `npm run test:storage` and USB companion fixtures with
 `node --test src/radio/companion-session.test.mjs`. Run the session/cache
 integration fixture with `node --test src/integration/session-cache.test.js`.
 Run message sync fixtures with `node --test src/integration/message-sync.test.js`.
+Run direct-message fixtures with
+`node --test src/radio/direct-message.test.mjs src/integration/direct-messages.test.js src/chats/model.test.js`.
 These checks use mocks and do not need a radio.
 
 ## USB companion session
@@ -87,7 +89,7 @@ The implementation targets MeshCore USB companion firmware with protocol v3 or
 newer. It uses the firmware's framed serial protocol directly: MeshCore.js was
 used as a reference, but its package entrypoint includes native transports and
 its browser adapter does not provide the request deadlines and error handling
-needed here. The session does not expose channel secrets or transmit over the mesh.
+needed here. The session does not expose channel secrets.
 
 ## Bluetooth companion session
 
@@ -104,6 +106,50 @@ are covered by simulated transport tests. Physical BLE hardware has not been tes
 Use USB to sync queued messages. Some BLE firmware splits responses across
 notifications, and Web Bluetooth does not expose enough information to verify
 receipt boundaries. Bluetooth can display messages already saved to the cache.
+
+## Direct messages
+
+Choose a companion or room contact in **Chats**, write a message, and select
+**Send message** while the selected radio is connected. Messages use at most
+150 UTF-8 bytes and cannot contain NUL characters. A disconnected send reports
+an error and keeps its draft; it is not queued for automatic transmission.
+Drafts and messages are stored in the browser's per-radio cache, including when
+the radio is offline.
+
+The app saves the outgoing message and each expected acknowledgement before
+transmitting. It shows sending, sent, delivered, and failed states. Delivered
+means the radio received a matching MeshCore acknowledgement, not that a person
+read the message. Late acknowledgements can update failed or cancelled messages.
+The app does not attribute an acknowledgement that matches multiple messages,
+and stops if a predicted code collides with another saved message or differs
+from the radio's response. If the send response was lost, a predicted code
+alone is not enough to confirm delivery.
+
+Retry settings apply per radio: the default is four direct-phase and four
+flood-phase attempts, with a total of 1–8 configurable attempts. The direct
+phase uses the radio's saved route, so it may already flood when no route is
+known. Before the flood phase, the app clears that contact's saved radio route.
+The actual route reported by the radio is shown after each accepted send.
+The wait for an acknowledgement uses the radio's suggested timeout, bounded
+between one and 120 seconds. **Cancel sending** stops future attempts but cannot
+recall a packet already submitted. **Retry** updates the same local message with
+a new wire timestamp; the recipient may see a duplicate if an earlier packet
+was actually delivered. Wire timestamps increase per radio and can temporarily
+run ahead of the clock when several messages are sent in the same second.
+
+Interrupted sends are marked failed on reconnection and are never automatically
+retransmitted. If a post-send update or draft cannot be saved, keep the page
+open and use **Retry saving message changes**. Closing the page while an update
+is unsaved can lose its delivery state; a packet may already have been sent.
+Possible repeated receipts are labeled but retained separately because MeshCore
+does not provide a guaranteed unique message ID. Browser data clearing or
+eviction can remove saved history.
+
+Direct-message commands and acknowledgement handling have been tested with
+mocked USB and Bluetooth transports, not physical hardware. Some Bluetooth
+firmware may fragment notifications or reject larger writes; failures are
+reported rather than treated as delivery. USB remains necessary to sync the
+incoming queue.
 
 ## Contacts
 
@@ -170,13 +216,17 @@ Keep work small and split by behavior, rather than creating empty layers up fron
   retrying that storage write. The radio does not supply a message ID, so
   separate receipts are not deduplicated by timestamp or text. An `update`
   atomically replaces supplied contact/channel lists, appends unseen messages,
-  and applies any supplied local edits. Failed writes reject without replacing
-  the previous cache. Browser data clearing or eviction can remove the cache.
+  and applies any supplied local edits. Direct-message transitions allocate
+  wire timestamps and update acknowledgement state atomically within the same
+  per-radio cache. Failed writes reject without replacing the previous cache.
+  Browser data clearing or eviction can remove the cache.
 - **Integration:** `src/integration/session-cache.ts` captures completed lists
   and messages from session snapshots and queues writes under the session's
   full public key. `src/integration/message-sync.ts` saves each manually fetched
-  receipt before requesting the next. The UI subscribes to session and cache
-  state; coordinate future changes to that boundary between workstreams.
+  receipt before requesting the next. `src/integration/direct-messages.ts`
+  manages user-initiated sends, acknowledgement tracking, and durable drafts.
+  The UI subscribes to session and cache state; coordinate future changes to
+  that boundary between workstreams.
 
 Add a router or other dependencies only when a concrete feature needs them.
 Agree on ownership before parallel changes to shared shell files, global styles,

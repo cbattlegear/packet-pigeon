@@ -20,7 +20,7 @@ function ownership() {
   }
 }
 
-function fixture({ writeWithoutResponse = false, fragmentedReceipt = false } = {}) {
+function fixture({ writeWithoutResponse = false, fragmentedReceipt = false, directMessaging = false } = {}) {
   const device = new EventTarget()
   const notifications = new EventTarget()
   const writes = []
@@ -51,11 +51,16 @@ function fixture({ writeWithoutResponse = false, fragmentedReceipt = false } = {
       notify(Uint8Array.of(5, 1, 0, 0, ...new Uint8Array(32).fill(state.identity),
         ...new Uint8Array(22), ...encode('Bluetooth fixture')))
     } else if (command[0] === 4) {
-      const contact = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), 2, 0, 0xff, ...new Uint8Array(112))
+      const contact = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), directMessaging ? 1 : 2, 0, 0xff, ...new Uint8Array(112))
       contact.set(encode('Fixture repeater'), 100)
       notify(Uint8Array.of(2, 1, 0, 0, 0))
       notify(contact)
       notify(Uint8Array.of(4, 0, 0, 0, 0))
+    } else if (command[0] === 2 && directMessaging) {
+      notify(Uint8Array.of(0x82, 1, 2, 3, 4, 42, 0, 0, 0))
+      notify(Uint8Array.of(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0))
+    } else if (command[0] === 13 && directMessaging) {
+      notify(Uint8Array.of(0))
     } else if (command[0] === 10 && fragmentedReceipt) {
       const receipt = Uint8Array.of(7, 1, 2, 3, 4, 5, 6, 0xff, 0, 1, 0, 0, 0, ...encode('x'.repeat(100)))
       state.dequeued++
@@ -212,6 +217,22 @@ test('leaves a receipt that would span notifications queued across Bluetooth con
       await until(session, ({ phase }) => phase === 'ready')
     }
   }
+  await session.disconnect()
+})
+
+test('sends direct commands over Bluetooth while keeping queued receipts inaccessible', async () => {
+  const radio = fixture({ directMessaging: true, fragmentedReceipt: true })
+  const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks: ownership() })
+  const pushes = []
+  session.subscribeToPushes((push) => pushes.push(push))
+  await session.connectBluetooth()
+  const receipt = await session.sendDirect('ab'.repeat(32), 'bc'.repeat(32), 123, 0, 'Hello')
+  assert.deepEqual(receipt, { route: 'direct', expectedAck: '01020304', timeoutMs: 1000 })
+  assert.deepEqual([...pushes[0].payload], [1, 2, 3, 4, 42, 0, 0, 0])
+  await session.resetDirectPath('ab'.repeat(32), 'bc'.repeat(32))
+  assert.throws(() => session.reserveQueuedMessage('ab'.repeat(32)), /Connect over USB/)
+  assert.equal(radio.state.dequeued, 0)
+  assert(!radio.writes.some(({ bytes }) => bytes[0] === 10))
   await session.disconnect()
 })
 

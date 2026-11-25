@@ -1,0 +1,227 @@
+.chat-workspace :is(button, input, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.chat-workspace button:not(:disabled),
+.chat-retry-settings summary {
+  cursor: pointer;
+}
+
+.chat-radio {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.chat-workspace .conversation-heading span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.chat-conversation-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0 12px 16px;
+  list-style: none;
+}
+
+.chat-conversation-list button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.chat-conversation-list button[aria-current='page'] {
+  border-color: var(--accent);
+  background: #e6f0f1;
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.chat-conversation-list :is(span, small),
+.chat-empty-list,
+.chat-active,
+.chat-meta,
+.chat-delivery,
+.chat-composer p,
+.chat-retry-settings p {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.chat-conversation-list span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-empty-list,
+.chat-active {
+  padding: 0 24px 16px;
+}
+
+.chat-message-list {
+  flex: 1;
+  align-content: start;
+  margin: 0;
+}
+
+.chat-message-list li {
+  max-width: min(100%, 48rem);
+  background: var(--surface);
+}
+
+.chat-message-list .chat-message--outgoing {
+  justify-self: end;
+  background: #eef6f6;
+}
+
+.chat-message-header,
+.chat-compose-actions,
+.chat-delivery {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.chat-message-header time {
+  margin-left: auto;
+}
+
+.chat-delivery {
+  margin-top: 8px;
+}
+
+.chat-delivery p {
+  flex-basis: 100%;
+}
+
+.chat-failed,
+.chat-action-error {
+  color: #a02b2b;
+}
+
+.chat-message-list code {
+  overflow-wrap: anywhere;
+}
+
+.chat-composer,
+.chat-retry-settings {
+  display: grid;
+  gap: 8px;
+  padding: 16px 28px;
+  border-top: 1px solid var(--border);
+}
+
+.chat-composer label {
+  font-weight: 600;
+}
+
+.chat-composer textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.chat-compose-actions button {
+  margin-left: auto;
+  border-color: var(--accent);
+  color: white;
+  background: var(--accent);
+  font-weight: 600;
+}
+
+.chat-action-error:empty {
+  display: none;
+}
+
+.chat-retry-settings form {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.chat-retry-settings label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.chat-retry-settings input {
+  width: 6rem;
+}
+
+@media (min-width: 601px) {
+  .app-shell--chats {
+    height: 100svh;
+    min-height: 0;
+  }
+
+  .app-shell--chats .main-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .app-shell--chats .notices {
+    max-height: 35%;
+    overflow-y: auto;
+  }
+
+  .chat-slot {
+    flex: 1;
+    min-height: 0;
+  }
+
+  .chat-workspace {
+    height: 100%;
+    min-height: 0;
+  }
+
+  .chat-workspace .conversation-list,
+  .chat-message-list {
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .chat-workspace .conversation-pane {
+    min-height: 0;
+  }
+
+  .chat-workspace .conversation-heading,
+  .chat-composer,
+  .chat-retry-settings {
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .chat-conversation-list {
+    max-height: 14rem;
+    overflow-y: auto;
+  }
+
+  .chat-composer,
+  .chat-retry-settings {
+    padding: 16px 20px;
+  }
+
+  .chat-message-list {
+    padding: 20px;
+  }
+}
