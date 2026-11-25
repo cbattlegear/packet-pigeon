@@ -254,6 +254,22 @@ may be truncated.
 Copy and export use the filtered list and omit raw bytes, payloads, node and
 channel identifiers, path hashes, transport codes, and packet hashes.
 
+## Path viewing and tracing
+
+Contact routes, loaded advert paths, and captured packets with hop hashes
+show matching node names, ambiguous prefixes, and distance between adjacent
+mapped hops. Copy the hashes in forward or reverse order or show the route on
+the map. Missing or ambiguous coordinates leave gaps. Saved chat receipts
+provide path counts and hash widths. The companion does not identify which
+captured packet produced a particular queued receipt.
+
+From **Diagnostics → Path tracing**, enter a route or append known repeaters.
+From **Map**, select repeaters, add them in order, and choose **Review map
+trace**. The final repeater must be audible directly. Confirm that before
+sending. Tracing requires USB and uses 1-, 2-, or 4-byte hashes, depending on
+firmware. A reply shows SNR per hop, return SNR, and the elapsed time. Stop
+waiting or reset the trace locally. The app never retransmits automatically.
+
 Direct-message commands and acknowledgement handling have been tested with
 mocked USB and Bluetooth transports, not physical hardware. Some Bluetooth
 firmware may fragment notifications or reject larger writes. A rejected write

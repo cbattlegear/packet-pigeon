@@ -414,6 +414,9 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       <div className="conversation-heading">
         <p>{conversation.title}</p>
         <span>{conversation.description}</span>
+        {preferences.pathMetadata && conversation.messages.some(({ receipt }) => receipt &&
+          receipt.pathLength !== 0xff && (receipt.pathLength & 63) > 0) &&
+          <span>Saved receipts report hop count and hash width. For live hop identities, inspect captured packets in <a href="#diagnostics">Diagnostics</a>.</span>}
         {isChannel && <span>Heard-repeat and multiple-path tracking are not available. Radio acceptance does not confirm delivery.</span>}
       </div>
       {repeats.size > 0 && (

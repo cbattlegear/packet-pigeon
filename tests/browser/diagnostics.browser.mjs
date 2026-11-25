@@ -85,11 +85,13 @@ test('captures received packets, filters the log and redacts clipboard and file 
   await page.getByText('2 of 5 packets').waitFor()
   await page.getByRole('button', { name: 'RX Channel text' }).first().click()
   await page.getByRole('heading', { name: 'Matching encrypted channel-packet observations: 2' }).waitFor()
-  assert.match(await page.getByRole('listitem').filter({ hasText: 'aa' }).textContent(), /Flood · 1 traversed hop/)
-  assert.match(await page.getByRole('listitem').filter({ hasText: 'bb, cc' }).textContent(),
+  const observed = page.getByRole('list', { name: 'Matching channel packet paths', exact: true })
+  assert.match(await observed.getByRole('listitem').filter({ has: page.locator('time'), hasText: 'aa' }).textContent(),
+    /Flood · 1 traversed hop/)
+  assert.match(await observed.getByRole('listitem').filter({ has: page.locator('time'), hasText: 'bb, cc' }).textContent(),
     /Direct with transport codes · 2 remaining hops/)
-  await page.getByText('bb, cc', { exact: true }).waitFor()
-  await page.getByText('1234, 5678', { exact: true }).waitFor()
+  await observed.getByText('bb, cc', { exact: true }).waitFor()
+  await observed.getByText('1234, 5678', { exact: true }).waitFor()
   await page.getByText(/not delivery confirmations/).waitFor()
   await page.getByRole('button', { name: 'Stop capture' }).click()
   await page.getByRole('button', { name: 'Clear log' }).click()

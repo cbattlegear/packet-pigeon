@@ -11,8 +11,8 @@ import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contact
   readContactForEdit, readContactFrame, removeContactCommand, writeContactCommand } from './contact-commands.ts'
 import type { ContactPermissions, NewContact } from './contact-commands.ts'
 import type { ContactPathWidth } from './contact-path.ts'
-import { contactPingWidth, sendContactPing } from './contact-ping.ts'
-import type { PingHashWidth } from './contact-ping.ts'
+import { contactPingWidth, parseTracePath, sendContactPing, sendPathTrace } from './contact-ping.ts'
+import type { PingHashWidth, TraceHashWidth } from './contact-ping.ts'
 import { decodeDirectSent, directMessageCommand, resetPathCommand } from './direct-message.ts'
 import type { DirectSendReceipt } from './direct-message.ts'
 import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort } from './web-bluetooth.ts'
@@ -543,6 +543,36 @@ export class CompanionSession {
           throw new Error('This prefix matches more than one known radio. Choose a wider ping hash.')
         }
         return await sendContactPing(link, key, width, this.subscribeToPushes, request)
+      } finally {
+        stopWatching()
+      }
+    })
+  }
+
+  readonly tracePath = async (radioKey: string, text: string, width: TraceHashWidth, signal: AbortSignal) => {
+    const hashes = parseTracePath(text, width)
+    signal.throwIfAborted()
+    return this.runRadioCommand(radioKey, async (link) => {
+      if (this.snapshot.transport !== 'usb') throw new Error('Connect over USB to trace a multi-hop path.')
+      const version = this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0
+      if (!contactPingWidth(version, width)) throw new Error('This firmware does not support that trace hash width.')
+      const abort = new AbortController()
+      const stopWatching = this.subscribe(() => {
+        if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') {
+          abort.abort(new Error('The radio disconnected while waiting for the trace.'))
+        }
+      })
+      const request = AbortSignal.any([signal, abort.signal])
+      try {
+        const contacts = await this.readContacts(link)
+        request.throwIfAborted()
+        for (const hash of hashes) {
+          if (contacts.filter(({ publicKey }) => publicKey.startsWith(hash)).length > 1) {
+            throw new Error(`Trace hash ${hash} matches more than one saved radio.`)
+          }
+          if (radioKey.startsWith(hash)) throw new Error(`Trace hash ${hash} matches the connected radio.`)
+        }
+        return await sendPathTrace(link, hashes, width, this.subscribeToPushes, request)
       } finally {
         stopWatching()
       }

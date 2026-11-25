@@ -9,6 +9,7 @@ import {
 import type { Coordinates, MapNode, NodeRole, NodeSource } from './nodes.ts'
 import { distanceBetween } from './terrain.ts'
 import type { CoverageLayer, ProfileResult } from './terrain.ts'
+import type { MapPath } from '../paths/model.ts'
 import './map.css'
 
 const emptyCoordinate: CoordinateText = { lat: '', lon: '' }
@@ -45,11 +46,17 @@ function formatPosition(position: Coordinates) {
 
 export default function MapWorkspace({
   radioNodes = emptyNodes, radioPosition = null, showTerrain = false, contactFocus = null, discoveryRequest = 0, onSharePosition,
+  displayPath = null, clearPath, traceSelection = emptyNodes, changeTraceSelection, reviewTrace,
 }: {
   radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null; showTerrain?: boolean
   contactFocus?: { position: Coordinates; terrain: boolean } | null
   discoveryRequest?: number
   onSharePosition?: (position: Coordinates) => void
+  displayPath?: MapPath | null
+  clearPath?: () => void
+  traceSelection?: readonly MapNode[]
+  changeTraceSelection?: (nodes: MapNode[]) => void
+  reviewTrace?: () => void
 }) {
   const [localNodes, setLocalNodes] = useState(savedNodes)
   const [publicNodes, setPublicNodes] = useState<MapNode[]>([])
@@ -76,8 +83,13 @@ export default function MapWorkspace({
   const [coverage, setCoverage] = useState<CoverageLayer[]>([])
   const [appliedContactFocus, setAppliedContactFocus] = useState<typeof contactFocus>(null)
   const [appliedDiscoveryRequest, setAppliedDiscoveryRequest] = useState(0)
+  const [shownPath, setShownPath] = useState<typeof displayPath>(null)
   const mapPanel = useRef<HTMLDivElement>(null)
   const self = myLocation ?? (mapPosition(radioPosition) ? radioPosition : null)
+  const routeLayer = useMemo(() => displayPath ?? (traceSelection.length ? {
+    title: 'Selected trace repeaters',
+    points: traceSelection.map(({ name, position }) => ({ label: name, position })),
+  } : null), [displayPath, traceSelection])
 
   useEffect(() => {
     if (showTerrain) document.getElementById('tools')?.scrollIntoView()
@@ -127,6 +139,10 @@ export default function MapWorkspace({
     setRole('all')
     setFavoritesOnly(false)
     setResultPage(0)
+  }
+  if (displayPath !== shownPath) {
+    setShownPath(displayPath)
+    if (displayPath) setFocus(displayPath.points.flatMap(({ position }) => mapPosition(position) ? [position] : []))
   }
   const pickFromMap = useCallback((position: Coordinates) => {
     if (picking === 'share') {
@@ -253,6 +269,7 @@ export default function MapWorkspace({
             profile={profile}
             picking={picking !== null}
             layers={coverage}
+            displayPath={routeLayer}
             onSelect={chooseNode}
             onPick={pickFromMap}
             onTileError={reportTileError}
@@ -260,6 +277,22 @@ export default function MapWorkspace({
         </div>
         <div className="map-panel">
           <h3>Nodes</h3>
+          {displayPath && <section className="map-node-detail" aria-label="Displayed route">
+            <h4>{displayPath.title}</h4>
+            <ol>{displayPath.points.map(({ label, position }, index) => <li key={index}>
+              {label}{!mapPosition(position) && ' · Position unavailable'}
+            </li>)}</ol>
+            {clearPath && <button type="button" onClick={clearPath}>Clear displayed path</button>}
+          </section>}
+          {traceSelection.length > 0 && changeTraceSelection && <section className="map-node-detail" aria-label="Selected trace repeaters">
+            <h4>Selected trace repeaters</h4>
+            <ol>{traceSelection.map((node, index) => <li key={index}>{node.name}</li>)}</ol>
+            <div className="map-actions">
+              {reviewTrace && <button type="button" onClick={reviewTrace}>Review map trace</button>}
+              <button type="button" onClick={() => changeTraceSelection(traceSelection.slice(0, -1))}>Remove last repeater</button>
+              <button type="button" onClick={() => changeTraceSelection([])}>Clear trace selection</button>
+            </div>
+          </section>}
           <div className="map-filters">
             <label>Search name or key
               <input type="search" value={search} onChange={(event) => {
@@ -298,6 +331,8 @@ export default function MapWorkspace({
               {onSharePosition && mapPosition(selected.position) && <button type="button"
                 onClick={() => onSharePosition(selected.position!)}>Use location in Chats</button>}
               {selected.role === 2 && mapPosition(selected.position) && <>
+                {changeTraceSelection && <button type="button" disabled={traceSelection.length >= 63}
+                  onClick={() => changeTraceSelection([...traceSelection, selected])}>Add repeater to trace</button>}
                 <button type="button" onClick={() => putCoordinate('start', selected.position!)}>Use as start</button>
                 <button type="button" onClick={() => putCoordinate('end', selected.position!)}>Use as end</button>
               </>}
