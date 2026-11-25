@@ -70,3 +70,31 @@ test('does not attribute an ambiguous sender or enable sending to colliding cont
   assert.equal(items.find((item) => item.id === 'channel:0').title, 'Public')
   assert.equal(items.find((item) => item.id === 'unsupported').messages[0].rawHex, '5501')
 })
+
+test('blocked channel names hide receipts without hiding direct or unattributed messages', () => {
+  const channelReceipt = {
+    kind: 'channel-text', receiptId: 'channel', channelIndex: 0, textType: 0,
+    senderTimestamp: 123, text: 'Alice: hello', pathLength: 0, snrDb: null,
+  }
+  const channel = {
+    id: 'channel', conversationId: 'channel:0', sender: '', timestamp: 123000,
+    text: channelReceipt.text, receipt: channelReceipt,
+  }
+  const unattributed = {
+    ...channel, id: 'unknown', text: 'no prefix',
+    receipt: { ...channelReceipt, receiptId: 'unknown', text: 'no prefix' },
+  }
+  const direct = { ...received, text: 'Alice: direct message' }
+  const data = {
+    contacts: [], channels: [{ index: 0, name: 'Public' }],
+    messages: [channel, unattributed, direct], drafts: [], preferences: null, blockedChannelSenders: ['Alice'],
+  }
+  const items = conversations(data)
+  const conversation = items.find((item) => item.id === 'channel:0')
+  assert.deepEqual(conversation.messages.map(({ id }) => id), ['unknown'])
+  assert.match(conversation.description, /blocked names are hidden/)
+  assert.equal(items.find((item) => item.id.startsWith('direct:')).messages.length, 1)
+  assert.deepEqual(conversations({ ...data, blockedChannelSenders: [] })
+    .find((item) => item.id === 'channel:0').messages.map(({ id }) => id), ['channel', 'unknown'])
+  assert.equal(data.messages.length, 3)
+})

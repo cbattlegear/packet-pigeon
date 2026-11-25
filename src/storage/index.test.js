@@ -75,6 +75,37 @@ test('repeated and concurrent updates preserve new messages and independent loca
   otherTab.close()
 })
 
+test('blocked sender edits survive sync and concurrent local changes without crossing radios', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const otherTab = await openRadioStorage(factory)
+  await storage.update(firstRadio, { blockedChannelSender: { name: 'Alice', blocked: true } })
+  await Promise.all([
+    storage.update(firstRadio, {
+      channels: [{ index: 0, name: 'Public' }], messages: [message],
+      preferences: { selectedConversationId: 'channel:0' },
+    }),
+    otherTab.update(firstRadio, { blockedChannelSender: { name: 'Bob', blocked: true } }),
+  ])
+  await storage.update(secondRadio, { blockedChannelSender: { name: 'Elsewhere', blocked: true } })
+  await storage.update(firstRadio, { blockedChannelSender: { name: 'Alice', blocked: true } })
+  const first = await storage.read(firstRadio)
+  assert.deepEqual(new Set(first.blockedChannelSenders), new Set(['Alice', 'Bob']))
+  assert.deepEqual(first.channels, [{ index: 0, name: 'Public' }])
+  assert.deepEqual(first.messages, [message])
+  assert.equal(first.preferences.selectedConversationId, 'channel:0')
+  assert.deepEqual((await storage.read(secondRadio)).blockedChannelSenders, ['Elsewhere'])
+
+  await assert.rejects(storage.update(firstRadio, {
+    channels: [], blockedChannelSender: { name: 'invalid\nname', blocked: true },
+  }), { code: 'update' })
+  assert.deepEqual((await storage.read(firstRadio)).channels, [{ index: 0, name: 'Public' }])
+  await storage.update(firstRadio, { blockedChannelSender: { name: 'Alice', blocked: false } })
+  assert.deepEqual((await storage.read(firstRadio)).blockedChannelSenders, ['Bob'])
+  storage.close()
+  otherTab.close()
+})
+
 test('an aborted write rejects, preserves the previous cache and can be retried', async (t) => {
   const storage = await openRadioStorage(new IDBFactory())
   await storage.update(firstRadio, { messages: [message] })

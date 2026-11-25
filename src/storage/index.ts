@@ -1,4 +1,5 @@
 import type { AdvertPath } from '../radio/discovery-commands.ts'
+import { validSenderName } from '../channels/senders.ts'
 
 declare const radioKeyBrand: unique symbol
 export type RadioKey = string & { readonly [radioKeyBrand]: true }
@@ -94,6 +95,7 @@ export type LocalPreferences = {
 }
 
 export type RadioData = {
+  blockedChannelSenders?: string[]
   contacts: StoredContact[]
   channels: StoredChannel[]
   messages: StoredMessage[]
@@ -107,6 +109,7 @@ export type RadioData = {
 }
 
 export type RadioUpdate = {
+  blockedChannelSender?: { name: string; blocked: boolean }
   contacts?: readonly StoredContact[]
   channels?: readonly StoredChannel[]
   messages?: readonly StoredMessage[]
@@ -194,6 +197,15 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
     const favorite = contactPreference.favorite ?? previous?.favorite ?? false
     next.contactPreferences = existing.filter((entry) => entry.publicKey !== publicKey)
     if (customName || favorite) next.contactPreferences.push({ publicKey, customName, favorite })
+  }
+  if (update.blockedChannelSender) {
+    const { name, blocked } = update.blockedChannelSender
+    if (!validSenderName(name) || typeof blocked !== 'boolean') {
+      throw new RadioStorageError('update', 'Invalid channel sender name.')
+    }
+    const senders = (current.blockedChannelSenders ?? []).filter((entry) => entry !== name)
+    if (blocked) senders.push(name)
+    next.blockedChannelSenders = senders
   }
   if (discovery) {
     const records = new Map((current.discoveries ?? []).map((record) => [record.publicKey, record]))
