@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { createCipheriv, createHash, createHmac } from 'node:crypto'
 import { test } from 'node:test'
+import { correlateChannelObservations } from '../chats/model.ts'
 import { createChannelObserver } from './channel-observation.ts'
 import { decodeRxPacket } from './rx-packet.ts'
 
@@ -52,7 +53,7 @@ test('preserves exact UTF-8 text and rejects malformed or unsupported plaintext'
   const unicode = '  café 🕊  '
   const result = await observe(packet(encrypt(Buffer.from(unicode), 2)))
   assert.equal(result.timestamp, 42)
-  assert.equal(result.textType, 2)
+  assert.equal(result.textType, 0)
   assert.equal(result.text, unicode)
   assert.equal((await observe(packet(encrypt(Buffer.from('12345678901'))))).text, '12345678901')
   assert.equal(await observe(packet(encrypt(Buffer.from([0xc3, 0x28])))), null)
@@ -60,6 +61,27 @@ test('preserves exact UTF-8 text and rejects malformed or unsupported plaintext'
   const key = bytes(secretHex)
   await assert.rejects(createChannelObserver(key, ['']), /Region names/)
   assert(key.every((byte) => byte === 0))
+})
+
+test('attempt bits correlate with queued and outgoing plain channel messages', async () => {
+  const observe = await createChannelObserver(bytes(secretHex), [])
+  const receipt = {
+    id: 'received', conversationId: 'channel:1', text: 'Alice: hello',
+    receipt: { kind: 'channel-text', channelIndex: 1, senderTimestamp: 42, textType: 0, text: 'Alice: hello' },
+  }
+  const outgoing = {
+    id: 'sent', conversationId: 'channel:1', text: 'hello',
+    channelOutgoing: { senderName: 'Alice', wireTimestamp: 42 },
+  }
+  for (const flags of [0, 1, 2, 3]) {
+    const observation = await observe(packet(encrypt(Buffer.from('Alice: hello'), flags)))
+    assert.equal(observation.textType, 0)
+    const captured = [{ ...observation, id: flags, receivedAt: 0 }]
+    assert.equal(correlateChannelObservations(1, [receipt], captured).get('received').entries.length, 1)
+    assert.equal(correlateChannelObservations(1, [outgoing], captured).get('sent').entries.length, 1)
+    assert.equal(correlateChannelObservations(1, [receipt, outgoing], captured).get('sent').matchingMessages, 2)
+  }
+  assert.equal(await observe(packet(encrypt(Buffer.from('Alice: hello'), 4))), null)
 })
 
 test('region codes retain all matching known names and distinguish unknown and unscoped', async () => {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createHash, createHmac } from 'node:crypto'
+import { createCipheriv, createHash, createHmac } from 'node:crypto'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
 import { createServer } from 'vite'
@@ -70,14 +70,25 @@ test('observes channel packets without merging ambiguous receipts or exposing ke
   await start.click()
   await page.getByText('Observing channel packets.', { exact: true }).waitFor()
   const payload = Buffer.from('11a0e6215565cf0555d9e4a5e4824dc70018a6021e8232bb0509500bdf22a90e97978f', 'hex')
+  const secret = Buffer.from('8b3387e9c5cdea6ac9e5edbaa115cd72', 'hex')
+  const text = Buffer.from('Alice: Hello mesh!')
+  const plaintext = Buffer.alloc(Math.ceil((5 + text.length) / 16) * 16)
+  plaintext.writeUInt32LE(1703123456)
+  plaintext[4] = 2
+  text.copy(plaintext, 5)
+  const cipher = createCipheriv('aes-128-ecb', secret, null)
+  cipher.setAutoPadding(false)
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()])
+  const retryMac = createHmac('sha256', secret).update(ciphertext).digest().subarray(0, 2)
+  const retryPayload = Buffer.concat([payload.subarray(0, 1), retryMac, ciphertext])
   const key = createHash('sha256').update('#north').digest().subarray(0, 16)
-  const mac = createHmac('sha256', key).update(Buffer.concat([Buffer.of(5), payload])).digest()
+  const mac = createHmac('sha256', key).update(Buffer.concat([Buffer.of(5), retryPayload])).digest()
   const raw = mac.readUInt16LE()
   const code = raw === 0 ? 1 : raw === 65535 ? 65534 : raw
-  await page.evaluate(({ payload, code }) => {
+  await page.evaluate(({ payload, retryPayload, code }) => {
     window.fixtureRx([0x88, 4, 200, 0x15, 1, 0xaa, ...payload])
-    window.fixtureRx([0x88, 8, 201, 0x17, code & 255, code >> 8, 0, 0, 2, 0xbb, 0xcc, ...payload])
-  }, { payload: [...payload], code })
+    window.fixtureRx([0x88, 8, 201, 0x17, code & 255, code >> 8, 0, 0, 2, 0xbb, 0xcc, ...retryPayload])
+  }, { payload: [...payload], retryPayload: [...retryPayload], code })
   const first = page.locator('[data-receipt-id="one"]')
   await first.getByText('2 matching RX observations (possible repeats)').click()
   await first.getByText(/match 2 saved messages and cannot be assigned uniquely/).waitFor()

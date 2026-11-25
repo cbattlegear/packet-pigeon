@@ -60,7 +60,9 @@ export async function createChannelObserver(secret: Uint8Array, regionNames: rea
       padded.set(paddingCipher.subarray(0, 16), ciphertext.length)
       const plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-CBC', iv: new Uint8Array(16) }, aes, padded))
       for (let index = 16; index < plain.length; index++) plain[index] ^= ciphertext[index - 16]
-      if (plain.length < 5 || plain[4] >> 2 !== 0) return null
+      if (plain.length < 5) return null
+      const textType = plain[4] >> 2
+      if (textType !== 0) return null
       const end = plain.indexOf(0, 5)
       let text: string
       try { text = decoder.decode(plain.subarray(5, end < 0 ? undefined : end)) }
@@ -86,7 +88,7 @@ export async function createChannelObserver(secret: Uint8Array, regionNames: rea
       }
       return {
         timestamp: new DataView(plain.buffer, plain.byteOffset, plain.byteLength).getUint32(0, true),
-        textType: plain[4], text, routeCode: header.routeCode,
+        textType, text, routeCode: header.routeCode,
         pathHashes: path.hashes, hashWidth: path.hashWidth, snrDb: packet.snrDb, rssiDbm: packet.rssiDbm, region,
       }
     }
