@@ -1,6 +1,7 @@
 import { readCoordinates, roles } from '../map/nodes.ts'
 import type { NodeRole } from '../map/nodes.ts'
 import type { ContactPreference, StoredContact, StoredMessage } from '../storage/index.ts'
+import { decodeContactPath, pathUnknown } from '../radio/contact-path.ts'
 
 export type ContactSort = 'name' | 'heard' | 'message'
 export type ContactEntry = StoredContact & {
@@ -25,14 +26,11 @@ export function contactPosition(details: StoredContact['details']) {
 }
 
 export function contactRoute(details: StoredContact['details']) {
-  if (!details || details.pathLength === 0xff) return 'No saved route'
-  const count = details.pathLength & 63
-  const width = (details.pathLength >> 6) + 1
-  if (count === 0) return 'Zero hop'
-  const bytes = count * width
-  const hex = details.pathHex.slice(0, bytes * 2)
-  if (bytes > 64 || hex.length !== bytes * 2 || !/^[0-9a-f]+$/i.test(hex)) return 'Route unavailable'
-  return `${count} ${count === 1 ? 'hop' : 'hops'} · ${hex.match(new RegExp(`.{${width * 2}}`, 'g'))!.join(' → ')}`
+  if (!details || details.pathLength === pathUnknown) return 'No saved route'
+  const path = decodeContactPath(details.pathLength, details.pathHex)
+  if (!path) return 'Route unavailable'
+  const count = path.hops.length
+  return count === 0 ? 'Zero hop' : `${count} ${count === 1 ? 'hop' : 'hops'} · ${path.hops.join(' → ')}`
 }
 
 export function contactEntries(

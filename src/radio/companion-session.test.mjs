@@ -6,6 +6,7 @@ import { setImmediate } from 'node:timers/promises'
 import { IDBFactory } from 'fake-indexeddb'
 import { CompanionSession, getWebSerialSupport } from './index.ts'
 import { SerialFrameDecoder } from './web-serial.ts'
+import { SerialLink } from './serial-link.ts'
 import { SessionCache } from '../integration/session-cache.ts'
 import { MessageSync } from '../integration/message-sync.ts'
 import { DirectMessages } from '../integration/direct-messages.ts'
@@ -602,6 +603,134 @@ test('applies the setup preset and hash width to the chosen radio, preserving re
   assert.deepEqual(port.commands.at(-1), [61, 0, 1])
   await assert.rejects(session.setSetupPathWidth(key, 1), /rejected the command/)
   assert.equal(session.getSnapshot().device.capabilities.pathHashMode, 1)
+  await session.disconnect()
+})
+
+test('edits saved routes and permissions with a fresh contact record, preserving other radio fields', async () => {
+  const contact = contactInfo()
+  contact[34] = 0xe1
+  const original = contact.slice()
+  const record = new DataView(contact.buffer)
+  const oldTimestamp = record.getUint32(144, true)
+  const oldSyncCursor = oldTimestamp + 3
+  let clock = oldSyncCursor
+  let clockReads = 0
+  let freezeClock = false
+  function handleCommand(command, serial) {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: {
+        const since = command.length === 5 ? new DataView(Uint8Array.from(command).buffer).getUint32(1, true) : 0
+        serial.emit(2, 1, 0, 0, 0)
+        if (record.getUint32(144, true) > since) serial.emit(...contact)
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      }
+      case 30: assert.deepEqual(command.slice(1), Array(32).fill(0xbc)); serial.emit(...contact); break
+      case 5: {
+        clockReads++
+        if (!freezeClock && clockReads % 4 === 0) clock++
+        const time = Uint8Array.of(9, 0, 0, 0, 0)
+        new DataView(time.buffer).setUint32(1, clock, true)
+        serial.emit(...time)
+        break
+      }
+      case 9:
+        assert.equal(command.length, 144)
+        assert.equal(clockReads % 4, 0)
+        assert.ok(clockReads > 0, 'the edit waited for an actual radio clock tick')
+        contact.set(command.slice(1), 1)
+        record.setUint32(144, clock, true)
+        serial.emit(0)
+        break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  }
+  const port = new FixturePort(handleCommand)
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const session = sessionWith(port)
+  await session.connect()
+  await session.saveContactPath(key, target, 2, '0102 aabb')
+  assert.equal(contact[35], 0x42)
+  assert.deepEqual([...contact.slice(36, 42)], [1, 2, 0xaa, 0xbb, 0, 0])
+  assert.deepEqual(contact.slice(0, 35), original.slice(0, 35))
+  assert.deepEqual(contact.slice(100, 144), original.slice(100, 144))
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldSyncCursor + 1)
+  await session.saveContactPermissions(key, target, { telemetry: true, location: false, remoteCli: true })
+  assert.equal(contact[34], 0xf3)
+  assert.equal(session.getSnapshot().contacts[0].flags, 0xf3)
+  assert.equal(session.getSnapshot().contacts[0].pathLength, 0x42)
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldSyncCursor + 2)
+  await session.resetContactPath(key, target)
+  assert.equal(session.getSnapshot().contacts[0].pathLength, 0xff)
+  assert.equal(contact[34], 0xf3)
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldSyncCursor + 3)
+  assert.deepEqual(port.commands.slice(3).map(([code]) => code).filter((code) => code !== 5),
+    [30, 9, 30, 30, 9, 30, 30, 9, 30])
+  freezeClock = true
+  await assert.rejects(session.saveContactPath(key, target, 1, 'ab'), /clock did not advance/)
+  assert.equal(port.commands.filter(([code]) => code === 9).length, 3)
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldSyncCursor + 3)
+  await session.disconnect()
+
+  const secondClient = new SerialLink(new FixturePort(handleCommand), 1000, () => {}, assert.fail)
+  const incremental = Uint8Array.of(4, 0, 0, 0, 0)
+  new DataView(incremental.buffer).setUint32(1, oldSyncCursor, true)
+  const unseen = []
+  try {
+    await secondClient.request(incremental, (frame) => {
+      if (frame[0] === 4) return { value: undefined }
+      if (frame[0] === 3) unseen.push(frame)
+    })
+    assert.deepEqual(unseen, [contact])
+  } finally {
+    await secondClient.close()
+  }
+})
+
+test('refuses ambiguous pings, correlates the trace response and cancels without a retry', async () => {
+  const first = contactInfo()
+  first[33] = 2
+  const second = first.slice()
+  second[2] = 0x09
+  let answerPing = true
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 2, 0, 0, 0); serial.emit(...first); serial.emit(...second); serial.emit(4, 0, 0, 0, 0); break
+      case 36: {
+        const prefix = command.slice(10)
+        assert.deepEqual(prefix, [0xbc, 0xbc])
+        const tag = command.slice(1, 5)
+        if (answerPing) {
+          serial.emit(0x89, 0, 2, 1, ...tag, 0, 0, 0, 0, prefix[0], 0x00, 99, 99)
+          serial.emit(0x89, 0, 2, 1, ...tag, 0, 0, 0, 0, ...prefix, 0xfa, 28)
+        }
+        serial.emit(6, 0, ...tag, 100, 0, 0, 0)
+        break
+      }
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  await session.connect()
+  await assert.rejects(session.pingContact(key, target, 1, new AbortController().signal), /more than one known radio/)
+  assert.equal(port.commands.filter(([code]) => code === 36).length, 0)
+  const reply = await session.pingContact(key, target, 2, new AbortController().signal)
+  assert.equal(reply.outboundSnrDb, -1.5)
+  assert.equal(reply.returnSnrDb, 7)
+  answerPing = false
+  const controller = new AbortController()
+  const waiting = session.pingContact(key, target, 2, controller.signal)
+  await waitFor(() => port.commands.filter(([code]) => code === 36).length === 2)
+  controller.abort(new Error('Stopped waiting for the ping.'))
+  await assert.rejects(waiting, /Stopped waiting/)
+  assert.equal(port.commands.filter(([code]) => code === 36).length, 2)
   await session.disconnect()
 })
 

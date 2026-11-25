@@ -296,6 +296,23 @@ changes and how many removals succeeded if a batch stops early. Use **Export
 selected** for a JSON copy or **Copy public key** from a contact's details.
 Exports include public keys and any advertised positions.
 
+Open **Saved route and repeater hops** to inspect each known hash match.
+With USB connected, enter hex hops or append saved repeaters. An empty
+route sends directly with zero hops. Clearing the saved route allows the
+firmware to use flood routing. Newer firmware supports two- and three-byte
+contact hashes. The app warns when a route hash matches multiple saved nodes.
+
+Use **Contact permissions** over USB to set base, location, and environment
+telemetry for a contact where the global radio policy uses contact flags.
+Supported firmware also offers remote CLI access, which lets that contact
+run commands on your radio. Enabling it requires confirmation.
+
+**Zero-hop ping** sends one confirmed ping to a directly audible repeater or
+repeat-enabled room server and shows the round-trip time and signal levels.
+The app blocks known ambiguous prefixes and offers wider ping hashes on
+supported firmware. The width used for a ping is independent of the saved path.
+Stopping a ping stops waiting for a reply. The app never retries automatically.
+
 ## Channels
 
 Browse and search synced channel names online or from a selected cached radio.

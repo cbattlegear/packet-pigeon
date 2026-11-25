@@ -7,8 +7,12 @@ import { expectResponse, SerialLink } from './serial-link.ts'
 import type { CompanionLinkPort } from './serial-link.ts'
 import { browserSerialEnvironment, choosePort } from './web-serial.ts'
 import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
-import { addContactCommand, contactPublicKey, removeContactCommand, writeContactCommand } from './contact-commands.ts'
-import type { NewContact } from './contact-commands.ts'
+import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contactPublicKey,
+  readContactForEdit, readContactFrame, removeContactCommand, writeContactCommand } from './contact-commands.ts'
+import type { ContactPermissions, NewContact } from './contact-commands.ts'
+import type { ContactPathWidth } from './contact-path.ts'
+import { contactPingWidth, sendContactPing } from './contact-ping.ts'
+import type { PingHashWidth } from './contact-ping.ts'
 import { decodeDirectSent, directMessageCommand, resetPathCommand } from './direct-message.ts'
 import type { DirectSendReceipt } from './direct-message.ts'
 import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort } from './web-bluetooth.ts'
@@ -474,6 +478,74 @@ export class CompanionSession {
     await this.changeContacts(radioKey, async (link) => {
       await writeContactCommand(link, removeContactCommand(key))
       return this.snapshot.contacts.filter((contact) => contact.publicKey !== key)
+    })
+  }
+
+  private async editContact(radioKey: string, contactKey: string, edit: (frame: Uint8Array) => Uint8Array) {
+    const key = contactPublicKey(contactKey)
+    let clockAdvanced = false
+    await this.changeContacts(radioKey, async (link) => {
+      if (this.snapshot.transport !== 'usb') throw new Error('Connect over USB to edit radio paths or permissions.')
+      const { frame, since } = await readContactForEdit(link, key)
+      if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') throw new Error('The radio disconnected before the edit.')
+      await writeContactCommand(link, edit(frame))
+      const changed = decodeContact(await readContactFrame(link, key))
+      clockAdvanced = changed.lastModifiedAt > since
+      return this.snapshot.contacts.some(({ publicKey }) => publicKey === key)
+        ? this.snapshot.contacts.map((contact) => contact.publicKey === key ? changed : contact)
+        : [...this.snapshot.contacts, changed]
+    })
+    if (!clockAdvanced) throw new Error('The radio saved the contact, but its clock changed during the edit. Check the radio clock before retrying.')
+  }
+
+  readonly saveContactPath = (radioKey: string, contactKey: string, width: ContactPathWidth, text: string) =>
+    this.editContact(radioKey, contactKey, (frame) => {
+      if (width > 1 && (this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0) < 10) {
+        throw new Error('This firmware supports only one-byte contact path hashes.')
+      }
+      return contactPathUpdate(frame, { width, text })
+    })
+
+  readonly resetContactPath = (radioKey: string, contactKey: string) =>
+    this.editContact(radioKey, contactKey, (frame) => contactPathUpdate(frame, null))
+
+  readonly saveContactPermissions = (radioKey: string, contactKey: string, permissions: ContactPermissions) =>
+    this.editContact(radioKey, contactKey, (frame) => {
+      const version = this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0
+      if (version < 5 || (permissions.remoteCli !== undefined && version < 14)) {
+        throw new Error('This firmware does not support these contact permissions.')
+      }
+      return contactPermissionsUpdate(frame, permissions)
+    })
+
+  readonly pingContact = async (radioKey: string, contactKey: string, width: PingHashWidth, signal: AbortSignal) => {
+    const key = contactPublicKey(contactKey)
+    signal.throwIfAborted()
+    return this.runRadioCommand(radioKey, async (link) => {
+      const version = this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0
+      if (!contactPingWidth(version, width)) throw new Error('This firmware does not support that ping hash width.')
+      const abort = new AbortController()
+      const stopWatching = this.subscribe(() => {
+        if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') {
+          abort.abort(new Error('The radio disconnected while waiting for the ping.'))
+        }
+      })
+      const request = AbortSignal.any([signal, abort.signal])
+      try {
+        const contacts = await this.readContacts(link)
+        request.throwIfAborted()
+        const matches = contacts.filter(({ publicKey }) => publicKey.startsWith(key.slice(0, width * 2)))
+        const target = matches.find(({ publicKey }) => publicKey === key)
+        if (!target || (target.type !== 2 && target.type !== 3)) {
+          throw new Error('Ping requires a saved repeater or room server contact.')
+        }
+        if (matches.length > 1 || radioKey.startsWith(key.slice(0, width * 2))) {
+          throw new Error('This prefix matches more than one known radio. Choose a wider ping hash.')
+        }
+        return await sendContactPing(link, key, width, this.subscribeToPushes, request)
+      } finally {
+        stopWatching()
+      }
     })
   }
 

@@ -1,20 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { storedContact } from '../integration/contact-record.ts'
 import { mapPosition, roles } from '../map/nodes.ts'
 import type { Coordinates, NodeRole } from '../map/nodes.ts'
 import { distanceBetween } from '../map/terrain.ts'
-import type { CompanionSession, CompanionSnapshot } from '../radio/index.ts'
+import type { CompanionSnapshot } from '../radio/index.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { ContactPreferenceEdit, RadioData, RadioKey, StoredContact } from '../storage/index.ts'
 import { contactEntries, contactPosition, contactRole, contactRoute, roleLabel, visibleContacts } from './model.ts'
 import type { ContactEntry, ContactSort } from './model.ts'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
+import { ContactRadioActions } from './ContactRadioActions.tsx'
+import type { ContactRadioSession } from './ContactRadioActions.tsx'
 import './contacts.css'
 
 type ContactsProps = {
   snapshot: CompanionSnapshot
-  session: Pick<CompanionSession, 'addContact' | 'removeContact'>
+  session: ContactRadioSession
   cacheSaving: boolean
   messageSyncing: boolean
   messageSending: boolean
@@ -131,6 +133,9 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
           entries={entries}
           session={session}
           canWrite={liveKey === radioKey && snapshot.phase === 'ready'}
+          firmware={lastSessionKey === radioKey ? snapshot.device?.capabilities.firmwareProtocolVersion ?? 0 : 0}
+          usb={snapshot.transport === 'usb'}
+          radioBusy={messageSyncing || messageSending}
           savePreference={savePreference}
           onMap={onMap}
           onShare={onShare}
@@ -146,12 +151,15 @@ type BrowserProps = {
   entries: ContactEntry[]
   session: ContactsProps['session']
   canWrite: boolean
+  firmware: number
+  usb: boolean
+  radioBusy: boolean
   savePreference: (radioKey: RadioKey, change: ContactPreferenceEdit) => Promise<void>
   onMap: ContactsProps['onMap']
   onShare?: ContactsProps['onShare']
 }
 
-function ContactBrowser({ radioKey, entries, session, canWrite, savePreference, onMap, onShare }: BrowserProps) {
+function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, radioBusy, savePreference, onMap, onShare }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
   const [sort, setSort] = useState<ContactSort>('name')
@@ -305,7 +313,10 @@ function ContactBrowser({ radioKey, entries, session, canWrite, savePreference, 
         </ul>
         {detail ? (
           <ContactDetails contact={detail} busy={busy} canWrite={canWrite} location={location} locate={locate}
-            onMap={onMap} onShare={onShare} copyKey={copyKey} edit={edit} remove={() => void remove([detail])} />
+            onMap={onMap} onShare={onShare} copyKey={copyKey} edit={edit} remove={() => void remove([detail])}
+            radioControls={detail.details && <ContactRadioActions key={detail.publicKey} session={session}
+              contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} usb={usb}
+              firmware={firmware} busy={busy || radioBusy} />} />
         ) : <p className="contact-note">{visited.length ? 'Select a contact to see details.' : 'No contacts match.'}</p>}
       </div>
       {canWrite ? (
@@ -332,12 +343,13 @@ function contactLabel(contact: ContactEntry) {
 }
 
 function ContactDetails({
-  contact, busy, canWrite, location, locate, onMap, onShare, copyKey, edit, remove,
+  contact, busy, canWrite, location, locate, onMap, onShare, copyKey, edit, remove, radioControls,
 }: {
   contact: ContactEntry; busy: boolean; canWrite: boolean; location: Coordinates | null
   locate: () => void; onMap: ContactsProps['onMap']; copyKey: (key: string) => Promise<void>
   onShare?: ContactsProps['onShare']
   edit: (change: ContactPreferenceEdit, success: string) => Promise<void>; remove: () => void
+  radioControls: ReactNode
 }) {
   const position = contactPosition(contact.details)
   const shareLink = contactShareLink(contact.name, contact.publicKey, contact.details?.type)
@@ -379,6 +391,7 @@ function ContactDetails({
         </>}
         <button type="button" disabled={busy || !canWrite} onClick={remove}>Remove contact</button>
       </div>
+      {radioControls}
     </section>
   )
 }
