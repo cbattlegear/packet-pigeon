@@ -1,80 +1,82 @@
-import { useLayoutEffect, useState } from 'react'
-import {
-  appearanceOptions,
-  languageOptions,
-  parseAppPreferences,
-  preferenceKey,
-  resolveAppLanguage,
-} from './appPreferences.ts'
+import { appearanceOptions, clockOptions, languageOptions } from './appPreferences.ts'
 import type { AppPreferences } from './appPreferences.ts'
 import './preferences.css'
 
-const strings = {
-  heading: 'Settings',
-  appearanceLabel: 'Appearance',
-  appearance: { system: 'Follow system', light: 'Light', dark: 'Dark' },
-  languageLabel: 'App language',
-  language: { system: 'Use browser preference', en: 'English' },
-  languageHelp: 'English is currently available.',
-  storageError: 'Settings changed for this visit. The browser could not save them.',
+const appearanceLabels = { system: 'Follow system', light: 'Light', dark: 'Dark' }
+const languageLabels = { system: 'Use browser preference', en: 'English' }
+const clockLabels = { system: 'Use language preference', '12-hour': '12-hour', '24-hour': '24-hour' }
+const chatOptions = [
+  ['saveDrafts', 'Save draft edits between visits'],
+  ['oldestUnread', 'Open conversations at the oldest unread message'],
+  ['composerAutofocus', 'Focus the composer when opening a conversation'],
+  ['chatPreviews', 'Show conversation previews'],
+  ['pathMetadata', 'Show message path details'],
+  ['regionMetadata', 'Show message regions when available'],
+] as const
+
+type Props = {
+  preferences: AppPreferences
+  saveFailed: boolean
+  update: <K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) => void
+  wake: { supported: boolean; status: string }
 }
 
-function loadPreferences() {
-  try {
-    return parseAppPreferences(localStorage.getItem(preferenceKey))
-  } catch {
-    return parseAppPreferences(null)
-  }
-}
-
-export function PreferencesPanel() {
-  const [preferences, setPreferences] = useState(loadPreferences)
-  const [saveFailed, setSaveFailed] = useState(false)
-
-  useLayoutEffect(() => {
-    document.documentElement.dataset.appearance = preferences.appearance
-    document.documentElement.lang = resolveAppLanguage(preferences.language, navigator.languages)
-  }, [preferences.appearance, preferences.language])
-
-  function update<K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) {
-    const next = { ...preferences, [key]: value }
-    setPreferences(next)
-    try {
-      localStorage.setItem(preferenceKey, JSON.stringify(next))
-      setSaveFailed(false)
-    } catch {
-      setSaveFailed(true)
-    }
-  }
-
+export function PreferencesPanel({ preferences, saveFailed, update, wake }: Props) {
   return (
-    <section className="preferences" id="settings" aria-labelledby="settings-heading">
-      <h2 id="settings-heading">{strings.heading}</h2>
-      <div className="preference-field">
-        <label htmlFor="appearance">{strings.appearanceLabel}</label>
-        <select id="appearance" value={preferences.appearance} onChange={(event) => {
-          const option = appearanceOptions.find((value) => value === event.currentTarget.value)
-          if (option) update('appearance', option)
-        }}>
-          {appearanceOptions.map((option) => (
-            <option key={option} value={option}>{strings.appearance[option]}</option>
-          ))}
-        </select>
-      </div>
-      <div className="preference-field">
-        <label htmlFor="language">{strings.languageLabel}</label>
-        <select id="language" value={preferences.language} aria-describedby="language-help"
-          onChange={(event) => {
+    <section className="preferences" aria-label="App preferences">
+      <fieldset>
+        <legend>Appearance and language</legend>
+        <div className="preference-field">
+          <label htmlFor="appearance">Appearance</label>
+          <select id="appearance" value={preferences.appearance} onChange={(event) => {
+            const option = appearanceOptions.find((value) => value === event.currentTarget.value)
+            if (option) update('appearance', option)
+          }}>
+            {appearanceOptions.map((option) => <option key={option} value={option}>{appearanceLabels[option]}</option>)}
+          </select>
+        </div>
+        <div className="preference-field">
+          <label htmlFor="language">App language</label>
+          <select id="language" value={preferences.language} aria-describedby="language-help" onChange={(event) => {
             const option = languageOptions.find((value) => value === event.currentTarget.value)
             if (option) update('language', option)
           }}>
-          {languageOptions.map((option) => (
-            <option key={option} value={option}>{strings.language[option]}</option>
-          ))}
-        </select>
-        <p id="language-help">{strings.languageHelp}</p>
-      </div>
-      <p role="status">{saveFailed ? strings.storageError : ''}</p>
+            {languageOptions.map((option) => <option key={option} value={option}>{languageLabels[option]}</option>)}
+          </select>
+          <p id="language-help">English is currently available.</p>
+        </div>
+        <div className="preference-field">
+          <label htmlFor="clock">Clock format</label>
+          <select id="clock" value={preferences.clock} onChange={(event) => {
+            const option = clockOptions.find((value) => value === event.currentTarget.value)
+            if (option) update('clock', option)
+          }}>
+            {clockOptions.map((option) => <option key={option} value={option}>{clockLabels[option]}</option>)}
+          </select>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend>Messaging</legend>
+        {chatOptions.map(([key, title]) => (
+          <label className="preference-check" key={key}>
+            <input type="checkbox" checked={preferences[key]} onChange={(event) => update(key, event.currentTarget.checked)} />
+            {title}
+          </label>
+        ))}
+        <p>Draft edits stay available during this visit. Previously saved drafts remain in the radio cache.</p>
+      </fieldset>
+      <fieldset>
+        <legend>Display</legend>
+        <label className="preference-check">
+          <input type="checkbox" checked={preferences.keepScreenOn} aria-describedby="wake-help"
+            disabled={!wake.supported} onChange={(event) => update('keepScreenOn', event.currentTarget.checked)} />
+          Keep screen on
+        </label>
+        <p id="wake-help" role="status">{wake.supported
+          ? wake.status || 'Applies while the Packet Pigeon tab is visible.'
+          : 'Screen wake lock is unavailable in this browser.'}</p>
+      </fieldset>
+      <p role="status">{saveFailed ? 'Settings changed for this visit. The browser could not save them.' : ''}</p>
     </section>
   )
 }

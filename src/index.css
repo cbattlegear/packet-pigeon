@@ -14,6 +14,14 @@
   --accent: light-dark(#17636c, #87d8df);
   --on-accent: light-dark(#ffffff, #182127);
   --hover-surface: light-dark(#e9f2f3, #2c4149);
+  --accent-hover: light-dark(#124e56, #afe3e8);
+  --accent-text: light-dark(#124e56, #b5e4e8);
+  --selection: light-dark(#e6f0f1, #2c4149);
+  --message-background: light-dark(#eef6f6, #29434a);
+  --error: light-dark(#a02b2b, #ffb2a7);
+  --notice-text: light-dark(#702b20, #f5c3bb);
+  --notice-background: light-dark(#fff2ef, #3c2d2c);
+  --notice-border: light-dark(#dcbab4, #7d554d);
 }
 
 :root[data-appearance='light'] {
