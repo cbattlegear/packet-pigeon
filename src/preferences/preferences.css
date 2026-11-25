@@ -1,0 +1,30 @@
+.preferences {
+  margin-top: 40px;
+  scroll-margin-top: 24px;
+}
+
+.preference-field {
+  display: grid;
+  gap: 6px;
+  max-width: 18rem;
+  margin-top: 16px;
+}
+
+.preference-field select {
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.preferences p {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.preferences p[role='status']:not(:empty) {
+  margin-top: 12px;
+}

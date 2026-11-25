@@ -1,4 +1,5 @@
 import './App.css'
+import { PreferencesPanel } from './preferences/PreferencesPanel.tsx'
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
 
       <nav className="sidebar" aria-label="Main navigation">
         <a href="#workspace">Workspace</a>
+        <a href="#settings">Settings</a>
         <a href="#about">About this starter</a>
       </nav>
 
@@ -32,6 +34,8 @@ function App() {
             Connection and session features will be added incrementally.
           </p>
         </section>
+
+        <PreferencesPanel />
 
         <section className="about-starter" id="about" aria-labelledby="about-heading">
           <h2 id="about-heading">About this starter</h2>

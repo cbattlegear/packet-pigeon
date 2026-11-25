@@ -43,7 +43,7 @@
   height: 44px;
   flex-shrink: 0;
   border-radius: 8px;
-  color: var(--surface);
+  color: var(--on-accent);
   background: var(--accent);
   font-weight: 700;
 }
@@ -74,7 +74,7 @@
 }
 
 .sidebar a:hover {
-  background: #e9f2f3;
+  background: var(--hover-surface);
   text-decoration: underline;
 }
 
