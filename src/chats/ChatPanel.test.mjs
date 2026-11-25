@@ -28,6 +28,7 @@ test('enables manual Bluetooth sync and preserves offline receipt retry', async 
     const bluetooth = render('ready', 'bluetooth')
     assert.doesNotMatch(button(bluetooth, 'Sync messages'), /\bdisabled\b/)
     assert.match(bluetooth, /Bluetooth may truncate or drop messages/)
+    assert.match(bluetooth, /The radio removes each message from its queue before replying, so missing content cannot be recovered from the radio\./)
     assert.doesNotMatch(button(render('ready', 'usb'), 'Sync messages'), /\bdisabled\b/)
     assert.doesNotMatch(button(render('ready', 'bluetooth', { pending: true }), 'Retry saving and sync'), /\bdisabled\b/)
     assert.match(button(render('ready', 'bluetooth', { syncing: true }), 'Syncing messages…'), /\bdisabled\b/)
