@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { conversations, possibleRepeats } from './model.ts'
+import { conversations, messageVisibility, possibleRepeats } from './model.ts'
 
 const details = {
   type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
@@ -29,6 +29,24 @@ test('joins a uniquely identified sender with its contact and preserves repeated
   assert.equal(items[0].recipient, first)
   assert.deepEqual(items[0].messages.map((message) => message.id), ['one', 'two'])
   assert.deepEqual([...possibleRepeats(items[0].messages)], ['two'])
+})
+
+test('possible repeats are hidden only on request and remain recoverable', () => {
+  const repeated = { ...received, id: 'two', receipt: { ...receipt, receiptId: 'two', pathLength: 3 } }
+  const distinct = {
+    ...received, id: 'three', timestamp: 124000,
+    receipt: { ...receipt, receiptId: 'three', senderTimestamp: 124 },
+  }
+  const otherSender = {
+    ...received, id: 'four', receipt: { ...receipt, receiptId: 'four', senderKeyPrefix: '0708090a0b0c' },
+  }
+  const messages = [received, repeated, distinct, otherSender]
+  const shown = messageVisibility(messages, false)
+  assert.deepEqual(shown.visible.map(({ id }) => id), ['one', 'two', 'three', 'four'])
+  assert.deepEqual([...shown.repeats], ['two'])
+  assert.deepEqual(messageVisibility(messages, true).visible.map(({ id }) => id), ['one', 'three', 'four'])
+  assert.deepEqual(messageVisibility(messages, false).visible.map(({ id }) => id), ['one', 'two', 'three', 'four'])
+  assert.deepEqual(messages.map(({ id }) => id), ['one', 'two', 'three', 'four'])
 })
 
 test('does not attribute an ambiguous sender or enable sending to colliding contacts', () => {

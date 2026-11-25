@@ -85,6 +85,17 @@ test('invalid message text is reported without sending or clearing the draft', a
   assert.equal(source.sends.length, 0)
 })
 
+test('a 158-byte message remains intact across all direct and flood attempts', async () => {
+  const { source, direct } = await fixture()
+  const text = 'é'.repeat(79)
+  assert.equal(await direct.send(key, recipient, text, { directAttempts: 4, floodAttempts: 4 }), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  assert.deepEqual(source.sends.map(({ attempt }) => attempt), [0, 1, 2, 3, 4, 5, 6, 7])
+  assert.ok(source.sends.every((send) => send.text === text))
+  assert.equal(source.resets, 1)
+  assert.equal(direct.getSnapshot().data.messages[0].outgoing.status, 'failed')
+})
+
 test('retries through direct and flood attempts, then retries the same message with an early ACK', async () => {
   const { source, direct } = await fixture()
   const states = new Set()

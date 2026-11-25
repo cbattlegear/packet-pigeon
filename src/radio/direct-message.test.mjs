@@ -12,8 +12,12 @@ test('encodes direct packets and enforces the UTF-8 byte limit', () => {
   const command = directMessageCommand(recipient, 0x12345678, 4, 'Hi 🕊')
   assert.deepEqual([...command.slice(0, 13)], [2, 0, 4, 0x78, 0x56, 0x34, 0x12, ...Array(6).fill(0xbc)])
   assert.equal(new TextDecoder().decode(command.slice(13)), 'Hi 🕊')
-  assert.equal(directTextBytes('é'.repeat(75)).length, 150)
-  for (const invalid of ['', 'é'.repeat(76), 'x\0y', '\ud800']) {
+  const maximum = 'é'.repeat(79)
+  assert.equal(directTextBytes(maximum).length, 158)
+  for (let attempt = 0; attempt < 8; attempt++) {
+    assert.equal(directMessageCommand(recipient, 1, attempt, maximum).length, 171)
+  }
+  for (const invalid of ['', 'x'.repeat(159), 'é'.repeat(80), 'x\0y', '\ud800']) {
     assert.throws(() => directTextBytes(invalid), /UTF-8/)
   }
   assert.throws(() => directMessageCommand(recipient, 1, 8, 'Hi'), /attempt/)

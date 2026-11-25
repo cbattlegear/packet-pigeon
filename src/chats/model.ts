@@ -83,3 +83,11 @@ export function possibleRepeats(messages: readonly StoredMessage[]) {
   }
   return repeats
 }
+
+export function messageVisibility(messages: readonly StoredMessage[], hidePossibleRepeats: boolean) {
+  const repeats = possibleRepeats(messages)
+  return {
+    repeats,
+    visible: hidePossibleRepeats ? messages.filter((message) => !repeats.has(message.id)) : messages,
+  }
+}
