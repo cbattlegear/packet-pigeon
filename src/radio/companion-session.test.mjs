@@ -7,6 +7,8 @@ import { CompanionSession, getWebSerialSupport } from './index.ts'
 import { SerialFrameDecoder } from './web-serial.ts'
 import { SessionCache } from '../integration/session-cache.ts'
 import { MessageSync } from '../integration/message-sync.ts'
+import { DirectMessages } from '../integration/direct-messages.ts'
+import { expectedDirectAck } from './direct-message.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 
 const encode = (text) => new TextEncoder().encode(text)
@@ -208,6 +210,7 @@ test('contact writes and queued message requests do not interrupt one another', 
       default: assert.fail(`Unexpected command ${code}`)
     }
   })
+
   const session = sessionWith(port)
   const radioKey = 'ab'.repeat(32)
   const contact = { publicKey: 'cb'.repeat(32), name: 'Relay', type: 2 }
@@ -234,6 +237,176 @@ test('contact writes and queued message requests do not interrupt one another', 
   assert.deepEqual(session.getSnapshot().contacts, [])
   await sync.sync()
   assert.equal(sync.getSnapshot().error, null)
+  await session.disconnect()
+})
+
+test('direct commands refresh and validate recipients without interrupting receipt ownership', async () => {
+  let duplicate = false
+  let finishSend
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: {
+        serial.emit(2, duplicate ? 2 : 1, 0, 0, 0)
+        serial.emit(...contactInfo())
+        if (duplicate) {
+          const other = contactInfo()
+          other[7] = 0xcc
+          serial.emit(...other)
+        }
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      }
+      case 2:
+        finishSend = () => serial.emit(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0)
+        break
+      case 13: serial.emit(0); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const session = sessionWith(port)
+  const radioKey = 'ab'.repeat(32)
+  const contactKey = 'bc'.repeat(32)
+  await session.connect()
+  const lease = session.reserveQueuedMessage(radioKey)
+  await assert.rejects(session.sendDirect(radioKey, contactKey, 123, 0, 'Hello'), /pending receipt/)
+  lease.release()
+
+  duplicate = true
+  await assert.rejects(session.sendDirect(radioKey, contactKey, 123, 0, 'Hello'), /ambiguous/)
+  assert.equal(port.commands.some(([code]) => code === 2), false)
+  duplicate = false
+  const sending = session.sendDirect(radioKey, contactKey, 123, 0, 'Hello')
+  await waitFor(() => typeof finishSend === 'function')
+  assert.throws(() => session.reserveQueuedMessage(radioKey), /direct-message command/)
+  await assert.rejects(session.removeContact(radioKey, contactKey), /direct-message command/)
+  finishSend()
+  assert.deepEqual(await sending, { route: 'direct', expectedAck: '01020304', timeoutMs: 1000 })
+  assert.deepEqual(port.commands.at(-1), [2, 0, 0, 123, 0, 0, 0, ...Array(6).fill(0xbc), ...encode('Hello')])
+
+  await session.resetDirectPath(radioKey, contactKey)
+  assert.deepEqual(port.commands.at(-1), [13, ...Array(32).fill(0xbc)])
+  await session.disconnect()
+})
+
+test('cancellation during the contact refresh prevents a send or route reset', async () => {
+  let reads = 0
+  let finishRead
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, 1, 0, 0, 0)
+        serial.emit(...contactInfo())
+        if (++reads === 1) serial.emit(4, 0, 0, 0, 0)
+        else finishRead = () => serial.emit(4, 0, 0, 0, 0)
+        break
+      default: assert.fail(`Cancelled command ${code} reached the radio`)
+    }
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  for (const action of ['send', 'reset']) {
+    finishRead = undefined
+    const controller = new AbortController()
+    const promise = action === 'send'
+      ? session.sendDirect('ab'.repeat(32), 'bc'.repeat(32), 123, 0, 'Hello', controller.signal)
+      : session.resetDirectPath('ab'.repeat(32), 'bc'.repeat(32), controller.signal)
+    await waitFor(() => typeof finishRead === 'function')
+    controller.abort()
+    finishRead()
+    await assert.rejects(promise, /cancelled before transmission/)
+  }
+  assert.equal(port.commands.some(([code]) => code === 2 || code === 13), false)
+  await session.disconnect()
+})
+
+test('a mocked USB send persists and delivers an acknowledgement arriving before the send response', async () => {
+  const radioKey = 'ab'.repeat(32)
+  const contactKey = 'bc'.repeat(32)
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, 1, 0, 0, 0)
+        serial.emit(...contactInfo())
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      case 2: {
+        const timestamp = new DataView(Uint8Array.from(command).buffer).getUint32(3, true)
+        const text = new TextDecoder().decode(Uint8Array.from(command.slice(13)))
+        return expectedDirectAck(radioKey, timestamp, command[2], text).then((code) => {
+          const bytes = [...Buffer.from(code, 'hex')]
+          serial.emit(0x82, ...bytes, 12, 0, 0, 0)
+          serial.emit(6, 0, ...bytes, 0xe8, 3, 0, 0)
+        })
+      }
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const factory = new IDBFactory()
+  const open = () => openRadioStorage(factory)
+  const session = sessionWith(port)
+  new SessionCache(session, open)
+  const direct = new DirectMessages(session, open, () => 10)
+  await session.connect()
+  await direct.load(radioKey)
+  const key = radioKeyFromPublicKey(radioKey)
+  assert.equal(await direct.send(key, contactKey, 'Fixture only', { directAttempts: 1, floodAttempts: 0 }), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  const storage = await open()
+  const data = await storage.read(key)
+  assert.equal(data.messages[0].outgoing.status, 'delivered')
+  assert.equal(data.messages[0].outgoing.roundTripMs, 12)
+  assert.deepEqual(data.drafts, [])
+  assert.equal(port.commands.filter(([code]) => code === 2).length, 1)
+  assert.equal(port.commands.some(([code]) => code === 10), false)
+  storage.close()
+  await session.disconnect()
+})
+
+test('a late ACK during the next contact refresh prevents a duplicate transmission', async () => {
+  const radioKey = 'ab'.repeat(32)
+  let reads = 0
+  let finishRead
+  let ackCode
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, 1, 0, 0, 0)
+        serial.emit(...contactInfo())
+        if (++reads === 3) finishRead = () => serial.emit(4, 0, 0, 0, 0)
+        else serial.emit(4, 0, 0, 0, 0)
+        break
+      case 2: {
+        const timestamp = new DataView(Uint8Array.from(command).buffer).getUint32(3, true)
+        const text = new TextDecoder().decode(Uint8Array.from(command.slice(13)))
+        return expectedDirectAck(radioKey, timestamp, command[2], text).then((code) => {
+          ackCode = [...Buffer.from(code, 'hex')]
+          serial.emit(6, 0, ...ackCode, 1, 0, 0, 0)
+        })
+      }
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const factory = new IDBFactory()
+  const open = () => openRadioStorage(factory)
+  const session = sessionWith(port)
+  const direct = new DirectMessages(session, open, () => 5)
+  await session.connect()
+  await direct.load(radioKey)
+  await direct.send(radioKeyFromPublicKey(radioKey), 'bc'.repeat(32), 'Only once', { directAttempts: 2, floodAttempts: 0 })
+  await waitFor(() => typeof finishRead === 'function')
+  port.emit(0x82, ...ackCode, 12, 0, 0, 0)
+  await waitFor(() => direct.getSnapshot().data?.messages[0]?.outgoing?.status === 'delivered')
+  finishRead()
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  assert.equal(port.commands.filter(([code]) => code === 2).length, 1)
   await session.disconnect()
 })
 

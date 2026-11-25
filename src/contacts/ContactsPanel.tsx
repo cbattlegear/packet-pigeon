@@ -16,6 +16,7 @@ type ContactsProps = {
   session: Pick<CompanionSession, 'addContact' | 'removeContact'>
   cacheSaving: boolean
   messageSyncing: boolean
+  messageSending: boolean
   onMap: (position: Coordinates, terrain: boolean) => void
 }
 
@@ -54,7 +55,7 @@ function exportContacts(contacts: readonly ContactEntry[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
-export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, onMap }: ContactsProps) {
+export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap }: ContactsProps) {
   const live = snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [offlineChoice, setOfflineChoice] = useState<RadioKey | '' | null>(null)
@@ -90,7 +91,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
     }
     void read()
     return () => { active = false }
-  }, [radioKey, cacheSaving, messageSyncing, refresh])
+  }, [radioKey, cacheSaving, messageSyncing, messageSending, refresh])
 
   async function savePreference(key: RadioKey, change: ContactPreferenceEdit) {
     const storage = await openRadioStorage()

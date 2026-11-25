@@ -99,3 +99,74 @@ test('an aborted write rejects, preserves the previous cache and can be retried'
   storage.close()
   await assert.rejects(storage.read(firstRadio), { code: 'read' })
 })
+
+test('allocates distinct timestamps, preserves changed drafts and never downgrades delivery', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  const options = { directAttempts: 1, floodAttempts: 0 }
+  const conversationId = `direct:${secondRadio}`
+  await storage.update(firstRadio, { draft: { conversationId, text: 'Newer draft' } })
+  const first = await storage.changeDirect(firstRadio, {
+    kind: 'begin', id: 'one', recipient: secondRadio, text: 'Hello', options, now: 100_000,
+  })
+  const second = await storage.changeDirect(firstRadio, {
+    kind: 'begin', id: 'two', recipient: secondRadio, text: 'Hello', options, now: 100_000,
+  })
+  assert.equal(first.message.outgoing.wireTimestamp, 100)
+  assert.equal(second.message.outgoing.wireTimestamp, 101)
+  assert.deepEqual(second.data.drafts, [{ conversationId, text: 'Newer draft' }])
+
+  const attempt = { id: 'one', wireTimestamp: 100, attempt: 1, code: 'aabbccdd' }
+  await storage.changeDirect(firstRadio, { kind: 'attempt', ...attempt })
+  await assert.rejects(storage.changeDirect(firstRadio, {
+    kind: 'attempt', id: 'two', wireTimestamp: 101, attempt: 1, code: 'aabbccdd',
+  }), /collides/)
+  await storage.changeDirect(firstRadio, { kind: 'accepted', ...attempt, route: 'direct' })
+  await storage.changeDirect(firstRadio, { kind: 'ack', code: 'aabbccdd', roundTripMs: 30 })
+  await storage.changeDirect(firstRadio, { kind: 'failed', id: 'one', wireTimestamp: 100, error: 'late failure' })
+  const delivered = (await storage.read(firstRadio)).messages.find((entry) => entry.id === 'one')
+  assert.equal(delivered.outgoing.status, 'delivered')
+  assert.equal(delivered.outgoing.roundTripMs, 30)
+  assert.equal(delivered.outgoing.error, null)
+  storage.close()
+})
+
+test('does not attribute provisional or ambiguous acknowledgement codes', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  const options = { directAttempts: 1, floodAttempts: 0 }
+  const begin = await storage.changeDirect(firstRadio, {
+    kind: 'begin', id: 'one', recipient: secondRadio, text: 'Hello', options, now: 100_000,
+  })
+  await storage.changeDirect(firstRadio, {
+    kind: 'attempt', id: 'one', wireTimestamp: 100, attempt: 1, code: '01020304',
+  })
+  const provisional = await storage.changeDirect(firstRadio, { kind: 'ack', code: '01020304', roundTripMs: 1 })
+  assert.equal(provisional.message, null)
+  assert.equal(provisional.data.messages[0].outgoing.status, 'sending')
+
+  await storage.update(firstRadio, {
+    messages: [{
+      ...begin.message, id: 'other',
+      outgoing: { ...begin.message.outgoing, acknowledgements: [{ code: '01020304', confirmed: true }] },
+    }],
+  })
+  const ambiguous = await storage.changeDirect(firstRadio, { kind: 'ack', code: '01020304', roundTripMs: 1 })
+  assert.equal(ambiguous.ambiguous, true)
+  assert.deepEqual(ambiguous.data.messages.map((entry) => entry.outgoing.status), ['sending', 'sending'])
+  storage.close()
+})
+
+test('a late send response retains an interrupted failure while enabling late ACK matching', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  await storage.changeDirect(firstRadio, {
+    kind: 'begin', id: 'one', recipient: secondRadio, text: 'Hello',
+    options: { directAttempts: 1, floodAttempts: 0 }, now: 100_000,
+  })
+  const attempt = { id: 'one', wireTimestamp: 100, attempt: 1, code: 'aabbccdd' }
+  await storage.changeDirect(firstRadio, { kind: 'attempt', ...attempt })
+  await storage.changeDirect(firstRadio, { kind: 'failed', id: 'one', wireTimestamp: 100, error: 'Interrupted' })
+  const accepted = await storage.changeDirect(firstRadio, { kind: 'accepted', ...attempt, route: 'direct' })
+  assert.equal(accepted.message.outgoing.status, 'failed')
+  const acknowledged = await storage.changeDirect(firstRadio, { kind: 'ack', code: 'aabbccdd', roundTripMs: 1 })
+  assert.equal(acknowledged.message.outgoing.status, 'delivered')
+  storage.close()
+})
