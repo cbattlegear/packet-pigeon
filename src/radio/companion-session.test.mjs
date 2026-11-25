@@ -172,6 +172,7 @@ function scopeFixture(options = {}) {
     return options.wrapStorage ? options.wrapStorage(wrapped) : wrapped
   }
   const session = sessionWith(port, options.timeoutMs ?? 1000, {
+    locks: options.locks ?? fixtureLocks(),
     environment: { secureContext: true, serial: {
       requestPort: async () => options.selectPort?.() ?? port, getPorts: async () => [],
     } },
@@ -383,6 +384,95 @@ test('failed reconnect resets retain the marker and block sync and sends until r
   })
 })
 
+test('scope marker clears retain cross-tab ownership during disconnect and failure', async (t) => {
+  for (const operation of ['send', 'recovery']) {
+    for (const termination of ['disconnect', 'failure']) {
+      for (const clearResult of ['commit', 'reject']) await t.test(`${operation}, ${termination}, ${clearResult}`, async () => {
+        const factory = new IDBFactory()
+        const locks = fixtureLocks()
+        let releaseClear
+        let notifyClear
+        const clearGate = new Promise((resolve) => { releaseClear = resolve })
+        const clearStarted = new Promise((resolve) => { notifyClear = resolve })
+        let notifySend
+        let releaseSend
+        const sendStarted = new Promise((resolve) => { notifySend = resolve })
+        const first = scopeFixture({
+          factory, locks,
+          wrapStorage: (storage) => ({
+            ...storage,
+            update: async (radio, update) => {
+              if (update.scopeRecovery === false) {
+                notifyClear()
+                await clearGate
+                if (clearResult === 'reject') throw new Error('Delayed marker clear failed')
+              }
+              return storage.update(radio, update)
+            },
+          }),
+        })
+        const second = scopeFixture({
+          factory, locks,
+          onSend: (_command, port) => { releaseSend = () => port.emit(0); notifySend() },
+        })
+        let firstWork
+        let closing
+        let secondSend
+        try {
+          if (operation === 'recovery') {
+            const storage = await openRadioStorage(factory)
+            await storage.update(radioKeyFromPublicKey(first.key), { scopeRecovery: true })
+            storage.close()
+            firstWork = first.session.connect()
+          } else {
+            await first.session.connect()
+            firstWork = first.send().then(() => null, (error) => error)
+          }
+          await clearStarted
+          assert.equal(await first.marker(), true)
+          if (termination === 'disconnect') closing = first.session.disconnect()
+          else first.port.dispatchEvent(new Event('disconnect'))
+          await waitFor(() => first.port.closed)
+          assert.equal(first.session.getSnapshot().phase, 'closing')
+          if (termination === 'failure') assert.equal(first.session.getSnapshot().error?.code, 'scope-recovery')
+
+          await second.session.connect()
+          assert.equal(second.session.getSnapshot().error?.code, 'ownership')
+          assert.equal(second.port.commands.length, 0)
+
+          releaseClear()
+          if (closing) await closing
+          else await waitFor(() => first.session.getSnapshot().phase === 'error')
+          const outcome = await firstWork
+          if (operation === 'send') {
+            if (clearResult === 'reject') assert.equal(outcome.code, 'scope-recovery')
+            else assert.match(outcome.message, /disconnected/)
+          }
+          assert.equal(await first.marker(), clearResult === 'reject')
+
+          await second.session.connect()
+          assert.equal(second.session.getSnapshot().phase, 'ready')
+          if (clearResult === 'reject') assert.deepEqual(second.port.commands.slice(0, 3).map(([code]) => code), [22, 1, 54])
+          secondSend = second.send()
+          await sendStarted
+          assert.equal(await second.marker(), true)
+          await setImmediate()
+          assert.equal(await second.marker(), true)
+          releaseSend()
+          await secondSend
+          assert.equal(await second.marker(), false)
+        } finally {
+          releaseClear()
+          releaseSend?.()
+          await Promise.allSettled([firstWork, closing, secondSend].filter(Boolean))
+          await first.session.disconnect()
+          await second.session.disconnect()
+        }
+      })
+    }
+  }
+})
+
 test('reconnect waits for old delayed marker writes before recovery or another scoped send', async (t) => {
   for (const delayedValue of [true, false]) await t.test(`delayed ${delayedValue}`, async () => {
     let waiting = false
@@ -399,23 +489,31 @@ test('reconnect waits for old delayed marker writes before recovery or another s
         },
       }),
     })
-    await fixture.session.connect()
-    const stopped = assert.rejects(fixture.send(), delayedValue ? { code: 'scope-recovery' } : /disconnected/)
-    await waitFor(() => waiting)
-    await fixture.session.disconnect()
-    const reconnect = scopeFixture({ factory: fixture.factory })
-    selected = reconnect.port
-    const connecting = fixture.session.connect()
-    await waitFor(() => reconnect.port.commands.some(([code]) => code === 1))
-    assert.equal(reconnect.port.commands.some(([code]) => code === 54 || code === 4), false)
-    release()
-    await stopped
-    await connecting
-    assert.equal(fixture.session.getSnapshot().phase, 'ready')
-    assert.equal(await fixture.marker(), false)
-    await fixture.send()
-    assert.equal(await fixture.marker(), false)
-    await fixture.session.disconnect()
+    let stopped
+    let closing
+    try {
+      await fixture.session.connect()
+      stopped = assert.rejects(fixture.send(), delayedValue ? { code: 'scope-recovery' } : /disconnected/)
+      await waitFor(() => waiting)
+      closing = fixture.session.disconnect()
+      await waitFor(() => fixture.port.closed)
+      assert.equal(fixture.session.getSnapshot().phase, 'closing')
+      const reconnect = scopeFixture({ factory: fixture.factory })
+      selected = reconnect.port
+      await fixture.session.connect()
+      assert.equal(reconnect.port.commands.length, 0)
+      release()
+      await Promise.all([stopped, closing])
+      await fixture.session.connect()
+      assert.equal(fixture.session.getSnapshot().phase, 'ready')
+      assert.equal(await fixture.marker(), false)
+      await fixture.send()
+      assert.equal(await fixture.marker(), false)
+    } finally {
+      release()
+      await Promise.allSettled([stopped, closing].filter(Boolean))
+      await fixture.session.disconnect()
+    }
   })
 })
 

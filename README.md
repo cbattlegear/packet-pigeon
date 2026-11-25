@@ -319,6 +319,8 @@ Storage or reset failure closes the session with an explicit recovery error;
 check browser storage and reconnect to retry. Interrupted sends are not
 automatically retransmitted. Even a successfully reset but interrupted send
 can remain uncertain; radio acceptance is not delivery.
+The owning tab retains its radio lock until in-flight scope recovery work
+settles, even after disconnect or failure; other tabs cannot connect meanwhile.
 
 **Residual risk:** an override can remain active after a crash/disconnect.
 Other applications, browser profiles or origins do not consult this browser's

@@ -144,7 +144,8 @@ export class CompanionSession {
   private fail(attempt: Attempt, error: CompanionError) {
     if (this.attempt !== attempt) return
     if (attempt.recovering) return
-    if (attempt.scopePending) error = scopeRecoveryError(error)
+    const scopePending = attempt.scopePending
+    if (scopePending) error = scopeRecoveryError(error)
     this.attempt = undefined
     if (attempt.link) {
       this.cleanup = attempt.link.close()
@@ -154,6 +155,7 @@ export class CompanionSession {
       this.update({ phase: 'reconnecting', error, progress: null })
       void this.reconnect(generation)
     } else {
+      if (scopePending) this.update({ phase: 'closing', error, progress: null })
       this.failure = this.finishFailure(error, this.generation)
     }
   }
@@ -198,6 +200,8 @@ export class CompanionSession {
     if (this.receiptHolds.size) {
       await new Promise<void>((resolve) => this.receiptWaiters.add(resolve))
     }
+    // A delayed marker write must finish before another tab can own the radio.
+    await this.scopeTail
     this.releaseOwnership?.()
     this.releaseOwnership = undefined
     await this.ownership
@@ -564,6 +568,7 @@ export class CompanionSession {
       }
       if (version < 8) return send()
       await this.serialScope(async () => {
+        if (this.attempt !== attempt) throw new CompanionError('disconnected', 'The radio disconnected before applying the sending scope.')
         let recovered = false
         try {
           attempt.scopePending = true
@@ -608,6 +613,7 @@ export class CompanionSession {
 
   private async recoverScope(attempt: Attempt, link: SerialLink, device: CompanionDevice) {
     await this.serialScope(async () => {
+      if (this.attempt !== attempt) return
       try {
         const storage = await this.openScopeStorage()
         let pending: boolean | undefined
@@ -749,6 +755,7 @@ export class CompanionSession {
     }
     this.expectedKey = device.publicKey
     this.update({ device })
+    if (this.attempt !== attempt) return
     await this.recoverScope(attempt, link, device)
     if (this.attempt !== attempt) return
     this.update({ device, phase: 'syncing', progress: { stage: 'contacts', completed: 0, total: null } })
