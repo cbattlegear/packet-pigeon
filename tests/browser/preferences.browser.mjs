@@ -230,7 +230,23 @@ test('channel retention confirms deletion and pauses when a slot changes names',
     finally { storage.close() }
   }, radio)
   assert.deepEqual(saved, ['recent', 'replacement'])
-  await replacement.selectOption('forever')
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { await storage.update(radioKeyFromPublicKey(radio), { channels: [{ index: 0, name: 'Public' }] }) }
+    finally { storage.close() }
+  }, radio)
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  assert.equal(await retention.inputValue(), 'paused')
+  const afterReturn = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).messages.map(({ id }) => id) }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(afterReturn, ['recent', 'replacement'])
+  await retention.selectOption('forever')
   await page.getByText('Retention saved. Cleanup runs when the app starts.').waitFor()
   const cleared = await page.evaluate(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
@@ -311,7 +327,8 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
       channels: [{ index: 0, name: 'Public' }],
     }
     const session = {
-      async changeChannel(key, index, _oldName, name) {
+      async changeChannel(key, index, _oldName, name, afterRename) {
+        await afterRename?.()
         const storage = await openRadioStorage()
         try { await storage.update(key, { channels: [{ index, name }] }) }
         finally { storage.close() }

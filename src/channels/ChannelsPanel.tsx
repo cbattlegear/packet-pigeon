@@ -96,21 +96,28 @@ export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, 
     if (nextName === null && !window.confirm(`Delete "${channel.name}" from the radio? Existing cached messages are not deleted and may still be associated with this slot.`)) return
     setBusy(true); setError(''); setStatus(''); setSecret('')
     try {
-      await session.changeChannel(liveKey, channel.index, channel.name, nextName)
-      if (nextName !== null && nextName.trim() !== channel.name) {
+      let retentionError: unknown
+      let retentionFailed = false
+      const renamed = nextName?.trim()
+      const saveRename = renamed && renamed !== channel.name ? async () => {
         try {
           const storage = await openRadioStorage()
           try {
             await storage.update(liveKey, { channelRetentionRename: {
-              index: channel.index, from: channel.name, to: nextName.trim(),
+              index: channel.index, from: channel.name, to: renamed,
             } })
             const data = await storage.read(liveKey)
             setCached((current) => current?.key === liveKey ? { key: liveKey, data } : current)
           } finally { storage.close() }
         } catch (reason) {
-          setError(`The channel was renamed on the radio, but its local retention setting could not be updated: ${reason instanceof Error ? reason.message : 'Storage error.'}`)
-          return
+          retentionFailed = true
+          retentionError = reason
         }
+      } : undefined
+      await session.changeChannel(liveKey, channel.index, channel.name, nextName, saveRename)
+      if (retentionFailed) {
+        setError(`The channel was renamed on the radio, but its local retention setting could not be updated: ${retentionError instanceof Error ? retentionError.message : 'Storage error.'}`)
+        return
       }
       setStatus(nextName === null ? 'Channel deleted from the radio.' : 'Channel renamed on the radio.')
     } catch (reason) {
@@ -218,7 +225,7 @@ export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, 
       <ul className="channel-list">{visible.map((channel) => {
         const senders = observedChannelSenders(cachedData?.messages ?? [], channel.index)
         const retention = retentionSettings.find((entry) => entry.index === channel.index)
-        const paused = retention && retention.channelName !== channel.name
+        const paused = retention && (retention.paused || retention.channelName !== channel.name)
         const retentionValue = paused ? 'paused' : retention ? String(retention.days) : 'forever'
         const channelCached = cachedData?.channels.some((entry) => entry.index === channel.index && entry.name === channel.name)
         return <li key={channel.index}>

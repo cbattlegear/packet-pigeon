@@ -224,7 +224,8 @@ deleted from this browser's cache, along with their read markers. Age uses the
 sender-provided timestamp, which can be wrong or manipulated; undated entries
 and entries with a zero timestamp are kept. The setting is per radio and
 channel slot, and is preserved on local renames. If a slot's name changes
-outside the app, cleanup pauses until a new setting is chosen; a replacement
+outside the app, cleanup stays paused until a new setting is chosen, even if
+the old name returns; a replacement
 with the same slot and name cannot be distinguished. A synced deletion clears
 the setting. Retention does not change the radio or delete direct messages.
 

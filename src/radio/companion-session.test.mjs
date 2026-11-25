@@ -149,12 +149,19 @@ test('channel management rechecks slots, preserves keys on rename, and refuses f
   assert.equal(Buffer.from(slots[1].slice(32)).toString('hex'), '9cd8fcf22a47333b591d96a2b848b73f')
   await assert.rejects(session.createChannel(key, { kind: 'join', name: 'Other', secret: '23'.repeat(16) }), /No empty channel slot/)
   await assert.rejects(session.changeChannel(key, 1, '#test', '#other'), /cannot be renamed/)
-  await session.changeChannel(key, 0, 'Public', 'General')
+  await session.changeChannel(key, 0, 'Public', 'General', async () => {
+    assert.equal(new TextDecoder().decode(slots[0].slice(0, 7)), 'General')
+    assert.equal(session.getSnapshot().channels[0].name, 'Public')
+  })
   assert.deepEqual([...slots[0].slice(32)], [...publicSecret])
   await assert.rejects(session.changeChannel(key, 0, 'Public', null), /changed on the radio/)
+  await assert.rejects(session.changeChannel(key, 0, 'General', 'Updated', async () => {
+    throw new Error('Storage unavailable')
+  }), /Storage unavailable/)
+  assert.equal(session.getSnapshot().channels[0].name, 'Updated')
   rejectWrite = true
-  await assert.rejects(session.changeChannel(key, 0, 'General', null), /device error 5/)
-  assert.equal(session.getSnapshot().channels[0].name, 'General')
+  await assert.rejects(session.changeChannel(key, 0, 'Updated', null), /device error 5/)
+  assert.equal(session.getSnapshot().channels[0].name, 'Updated')
   rejectWrite = false
   await session.changeChannel(key, 1, '#test', null)
   assert.ok(slots[1].every((byte) => byte === 0))

@@ -113,6 +113,6 @@ test('persists changed channel lists without replacing messages or local prefere
   assert.deepEqual(data.channels, [{ index: 0, name: 'Renamed' }, { index: 1, name: '#topic' }])
   assert.equal(data.messages[0].text, 'saved')
   assert.equal(data.preferences.selectedConversationId, 'channel:0')
-  assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Public', days: 30 }])
+  assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Public', days: 30, paused: true }])
   storage.close()
 })

@@ -25,7 +25,7 @@ export type StoredChannel = {
 }
 
 export type ChannelRetentionDays = 1 | 7 | 30 | 90
-export type ChannelRetention = { index: number; channelName: string; days: ChannelRetentionDays }
+export type ChannelRetention = { index: number; channelName: string; days: ChannelRetentionDays; paused?: boolean }
 
 export type ContactPreference = { publicKey: string; customName: string | null; favorite: boolean }
 export type ContactPreferenceEdit = { publicKey: string; customName?: string | null; favorite?: boolean }
@@ -176,8 +176,9 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   if (channels) {
     next.channels = channels.map(({ index, name }) => ({ index, name }))
     if (next.channelRetention) {
-      const slots = new Set(next.channels.map(({ index }) => index))
-      next.channelRetention = next.channelRetention.filter(({ index }) => slots.has(index))
+      const slots = new Map(next.channels.map(({ index, name }) => [index, name]))
+      next.channelRetention = next.channelRetention.filter(({ index }) => slots.has(index)).map((entry) =>
+        slots.get(entry.index) !== entry.channelName ? { ...entry, paused: true } : entry)
     }
   }
   if (update.channelRetention) {
@@ -197,7 +198,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
     }
     if (next.channelRetention) {
       next.channelRetention = next.channelRetention.map((entry) =>
-        entry.index === index && entry.channelName === from ? { ...entry, channelName: to } : entry)
+        entry.index === index && entry.channelName === from && !entry.paused ? { ...entry, channelName: to } : entry)
     }
   }
   if (messages?.length) {
@@ -283,10 +284,11 @@ export function validChannelRetentionSettings(value: unknown): value is ChannelR
   const seen = new Set<number>()
   for (const raw of value as unknown[]) {
     if (!raw || typeof raw !== 'object') return false
-    const setting = raw as { index?: unknown; channelName?: unknown; days?: unknown }
+    const setting = raw as { index?: unknown; channelName?: unknown; days?: unknown; paused?: unknown }
     if (typeof setting.index !== 'number' || !validChannelIndex(setting.index)
       || typeof setting.channelName !== 'string' || !setting.channelName
-      || !validRetentionDays(setting.days) || seen.has(setting.index)) return false
+      || !validRetentionDays(setting.days) || (setting.paused !== undefined && typeof setting.paused !== 'boolean')
+      || seen.has(setting.index)) return false
     seen.add(setting.index)
   }
   return true
@@ -300,7 +302,7 @@ function pruneChannelMessages(data: RadioData, now: number, radio: string) {
   const slots = new Map(data.channels.map(({ index, name }) => [index, name]))
   const policies = new Map<number, ChannelRetentionDays>()
   for (const setting of data.channelRetention) {
-    if (slots.get(setting.index) === setting.channelName) policies.set(setting.index, setting.days)
+    if (!setting.paused && slots.get(setting.index) === setting.channelName) policies.set(setting.index, setting.days)
   }
   const removed = new Set<string>()
   const messages = data.messages.filter((message) => {

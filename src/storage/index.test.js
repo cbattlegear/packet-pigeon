@@ -186,14 +186,22 @@ test('retention follows local renames but pauses on an unexpected slot name and 
   const old = { ...message, timestamp: now - 2 * 86_400_000 }
   await storage.update(firstRadio, { channels: [{ index: 0, name: 'Public' }], messages: [old] })
   await storage.update(firstRadio, { channelRetention: { index: 0, channelName: 'Public', days: 1 } })
-  await Promise.all([
-    storage.update(firstRadio, { channels: [{ index: 0, name: 'Renamed' }] }),
-    otherTab.update(firstRadio, { channelRetentionRename: { index: 0, from: 'Public', to: 'Renamed' } }),
-  ])
+  await otherTab.update(firstRadio, { channelRetentionRename: { index: 0, from: 'Public', to: 'Renamed' } })
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Renamed' }] })
   assert.deepEqual((await storage.read(firstRadio)).channelRetention, [{ index: 0, channelName: 'Renamed', days: 1 }])
   await storage.update(firstRadio, { channels: [{ index: 0, name: 'Replacement' }] })
   assert.equal(await storage.pruneChannelMessages(now), 0)
   assert.deepEqual((await storage.read(firstRadio)).messages, [old])
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Renamed' }] })
+  assert.deepEqual((await storage.read(firstRadio)).channelRetention,
+    [{ index: 0, channelName: 'Renamed', days: 1, paused: true }])
+  assert.equal(await storage.pruneChannelMessages(now), 0)
+  assert.deepEqual((await storage.read(firstRadio)).messages, [old])
+  await otherTab.update(firstRadio, { channelRetentionRename: { index: 0, from: 'Renamed', to: 'Other' } })
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Other' }] })
+  assert.equal(await storage.pruneChannelMessages(now), 0)
+  assert.deepEqual((await storage.read(firstRadio)).messages, [old])
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Replacement' }] })
   await assert.rejects(storage.update(firstRadio, {
     channelRetention: { index: 0, channelName: 'Renamed', days: 1 },
   }), { code: 'update' })
@@ -201,6 +209,8 @@ test('retention follows local renames but pauses on an unexpected slot name and 
     channelRetention: { index: 0, channelName: 'Replacement', days: 2 },
   }), { code: 'update' })
   await storage.update(firstRadio, { channelRetention: { index: 0, channelName: 'Replacement', days: 7 } })
+  assert.deepEqual((await storage.read(firstRadio)).channelRetention,
+    [{ index: 0, channelName: 'Replacement', days: 7 }])
   await storage.update(firstRadio, { channels: [] })
   assert.deepEqual((await storage.read(firstRadio)).channelRetention, [])
   assert.equal(await storage.pruneChannelMessages(now), 0)
@@ -228,7 +238,7 @@ test('invalid saved retention aborts cleanup without deleting another radio’s 
     const store = transaction.objectStore('radios')
     const request = store.get(secondRadio)
     request.onsuccess = () => {
-      request.result.channelRetention = [{ index: 0, channelName: 'Public', days: 2 }]
+      request.result.channelRetention = [{ index: 0, channelName: 'Public', days: 1, paused: 'yes' }]
       store.put(request.result, secondRadio)
     }
     transaction.oncomplete = resolve
