@@ -5,8 +5,8 @@ with React, TypeScript, Vite, and npm.
 
 The current app is a client-only shell with keyboard-accessible navigation and
 user-initiated USB companion connection. It syncs contacts and channels into a
-per-radio local cache; browsing that cache is not yet available. Message sync
-is paused so queued messages remain on the radio.
+per-radio local cache. The map can show synced contacts from the current
+session. Message sync is paused so queued messages remain on the radio.
 The app does not send mesh packets.
 
 ## Getting started
@@ -121,3 +121,38 @@ Keep work small and split by behavior, rather than creating empty layers up fron
 Add a router or other dependencies only when a concrete feature needs them.
 Agree on ownership before parallel changes to shared shell files, global styles,
 or package manifests. CI and license selection are outside this starter's scope.
+
+## Map and terrain planning
+
+Use **Map** to pan, zoom, and search nodes by name or public key. The base map
+starts with public-domain [Natural Earth land data](https://www.naturalearthdata.com/downloads/110m-physical-vectors/110m-land/).
+Selecting OpenStreetMap requests tiles for the viewed area.
+**Show my location** requests browser permission and keeps that position in
+the current visit. The Local contacts view includes the current USB session's
+synced contacts. Imported local contacts and discovered nodes stay on this
+browser. A local JSON import replaces the previous imported list.
+
+Local JSON can contain an array of nodes or an object with a `nodes` array. Each
+node uses a 64-character hex `publicKey`, a `name`, and a numeric `role`
+(1 companion, 2 repeater, 3 room server, 4 sensor). Optional fields include
+`position` with numeric `lat` and `lon`, `favorite`, and `source` set to
+`"discovery"`. MeshCore's `public_key`, `adv_name`, `type`, `adv_lat`, and
+`adv_lon` fields also work.
+
+The official MeshCore node API restricts cross-origin reads. Open the official
+live map for current data, or save its linked JSON snapshot and import it for
+in-app search. Node publishing and removal use the official MeshCore workflows.
+Imported snapshots stay in the current visit and can be reopened offline from
+the saved file.
+
+Use **Tools** to enter coordinates, pick points on the map, or use a
+repeater from the node list. Calculating sends sample coordinates to Open-Meteo,
+which serves Copernicus DEM elevation data. Coverage classifies sampled points
+in twelve directions and is a geometric estimate. It includes Earth curvature
+and omits buildings, vegetation, interference, and Fresnel clearance. Consult
+[Open-Meteo's usage terms](https://open-meteo.com/en/docs/elevation-api) for
+commercial deployments. Use the coverage export
+to keep layers between visits. Coverage files include site coordinates.
+
+Run the map and terrain checks with
+`node --test tests/node-map.test.mjs tests/terrain.test.mjs`.

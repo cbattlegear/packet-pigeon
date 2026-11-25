@@ -1,11 +1,13 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { CompanionSession, getWebSerialSupport } from './radio/index.ts'
 import { SessionCache } from './integration/session-cache.ts'
+import { mapRadioContacts } from './map/nodes.ts'
 import './App.css'
 import { OfflineStatus } from './offline/OfflineStatus.tsx'
 
 const session = new CompanionSession()
 const cache = new SessionCache(session)
+const MapWorkspace = lazy(() => import('./map/MapWorkspace.tsx'))
 
 const sections = ['Chats', 'Contacts', 'Channels', 'Map', 'Tools', 'Settings'] as const
 type Section = (typeof sections)[number]
@@ -15,11 +17,13 @@ function sectionFromHash(): Section {
   return sections.find((section) => section.toLowerCase() === hash) ?? 'Chats'
 }
 
-const sectionDescriptions: Record<Exclude<Section, 'Chats'>, string> = {
+function isMapSection(section: Section): section is 'Map' | 'Tools' {
+  return section === 'Map' || section === 'Tools'
+}
+
+const sectionDescriptions: Record<Exclude<Section, 'Chats' | 'Map' | 'Tools'>, string> = {
   Contacts: 'Contacts will appear here when that feature is available.',
   Channels: 'Channels will appear here when that feature is available.',
-  Map: 'The map will appear here when that feature is available.',
-  Tools: 'Tools will appear here when they are available.',
   Settings: 'Settings will appear here when they are available.',
 }
 
@@ -44,9 +48,14 @@ function StateMessage({ kind, title, description }: StateMessageProps) {
 }
 
 function App() {
-  const [activeSection, setActiveSection] = useState<Section>(sectionFromHash)
+  const [{ activeSection, hasOpenedMap }, setNavigation] = useState(() => {
+    const activeSection = sectionFromHash()
+    return { activeSection, hasOpenedMap: isMapSection(activeSection) }
+  })
+  const mapVisible = isMapSection(activeSection)
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
+  const radioNodes = useMemo(() => mapRadioContacts(snapshot.contacts), [snapshot.contacts])
   const support = getWebSerialSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
   const canDisconnect = ['opening', 'handshake', 'syncing', 'ready'].includes(snapshot.phase)
@@ -66,7 +75,13 @@ function App() {
     : snapshot.phase === 'syncing' ? 'Syncing' : snapshot.phase === 'ready' ? 'Idle' : 'Not syncing'
 
   useEffect(() => {
-    const updateSection = () => setActiveSection(sectionFromHash())
+    const updateSection = () => {
+      const activeSection = sectionFromHash()
+      setNavigation((previous) => ({
+        activeSection,
+        hasOpenedMap: previous.hasOpenedMap || isMapSection(activeSection),
+      }))
+    }
     window.addEventListener('hashchange', updateSection)
     return () => window.removeEventListener('hashchange', updateSection)
   }, [])
@@ -177,7 +192,7 @@ function App() {
               />
             </section>
           </div>
-        ) : (
+        ) : !mapVisible && (
           <section className="section-pane" aria-labelledby="section-heading">
             <div className="pane-heading">
               <h1 id="section-heading">{activeSection}</h1>
@@ -189,6 +204,18 @@ function App() {
               description={sectionDescriptions[activeSection]}
             />
           </section>
+        )}
+        {hasOpenedMap && (
+          <div hidden={!mapVisible}>
+            <div className="section-pane">
+              <div className="pane-heading">
+                <h1>{activeSection === 'Tools' ? 'Tools' : 'Map'}</h1>
+              </div>
+              <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
+                <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'} />
+              </Suspense>
+            </div>
+          </div>
         )}
       </main>
 

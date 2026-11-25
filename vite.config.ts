@@ -5,5 +5,6 @@ import { offlineShell } from './build/offline.ts'
 // https://vite.dev/config/
 export default defineConfig({
   base: './',
+  build: { license: { fileName: 'third-party-licenses.md' } },
   plugins: [react(), offlineShell()],
 })
