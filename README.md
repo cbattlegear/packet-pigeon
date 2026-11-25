@@ -7,7 +7,8 @@ The current app is a client-only shell with keyboard-accessible navigation and
 user-initiated USB or Bluetooth companion connections. It syncs contacts and channels into a
 per-radio local cache. Contacts supports offline browsing, and the map can
 show synced contacts from the current session. Chats supports direct messages,
-drafts, delivery tracking, and manually syncing received queue entries over USB.
+drafts, delivery tracking, and manually syncing received queue entries over USB
+or Bluetooth.
 
 ## Getting started
 
@@ -104,10 +105,17 @@ reconnect schedule as USB. Reconnection reuses the authorized Bluetooth device
 and checks its radio public key before syncing. **Disconnect** cancels recovery
 and releases the connection. Pairing, GATT data exchange and disconnect recovery
 are covered by simulated transport tests. Physical BLE hardware has not been tested.
-Use USB to sync queued messages. BLE firmware can split or drop responses that
-exceed the negotiated MTU. Web Bluetooth does not expose that MTU, and queued
-text responses have no total length to verify completeness. Bluetooth can
-display messages already saved to the cache.
+
+Use **Sync messages** in Chats to sync the incoming queue manually over Bluetooth.
+As with USB, each received response is saved before requesting the next. Each
+Bluetooth notification is treated as a complete companion frame. BLE firmware
+can split or drop responses that exceed the negotiated MTU, which Web Bluetooth
+does not expose. Queued text responses have no total length, so incomplete text
+can appear complete and cannot be reliably detected; fragments can also be
+mistaken for other frames. Responses recognized as malformed or unsupported are
+saved as raw bytes and stop sync; a dropped response can time out. The radio has
+already dequeued the receipt, so missing bytes cannot be recovered. Use USB for
+safer message sync; interruptions can still lose a USB receipt.
 
 ## Direct messages
 
@@ -151,9 +159,9 @@ Browser data clearing or eviction can remove saved history.
 
 Direct-message commands and acknowledgement handling have been tested with
 mocked USB and Bluetooth transports, not physical hardware. Some Bluetooth
-firmware may fragment notifications or reject larger writes; failures are
-reported rather than treated as delivery. USB remains necessary to sync the
-incoming queue.
+firmware may fragment notifications or reject larger writes. A rejected write
+is reported rather than treated as delivery. See the Bluetooth session notes
+for incoming queue limitations.
 
 ## Contacts
 
