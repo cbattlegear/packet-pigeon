@@ -36,15 +36,56 @@ class FixturePort extends EventTarget {
     this.closed = true
   }
 
+  getInfo() {
+    return { usbVendorId: 1, usbProductId: 2 }
+  }
+
   emit(...payload) {
     this.incoming.enqueue(response(...payload))
   }
 }
 
-function sessionWith(port, timeoutMs = 1000) {
+function fixtureLocks() {
+  let owned = false
+  return {
+    async request(_name, _options, callback) {
+      if (owned) return callback(null)
+      owned = true
+      try { await callback({}) } finally { owned = false }
+    },
+  }
+}
+
+function sessionWith(port, timeoutMs = 1000, options = {}) {
   return new CompanionSession({
-    environment: { secureContext: true, serial: { requestPort: async () => port } },
+    environment: { secureContext: true, serial: { requestPort: async () => port, getPorts: async () => [] } },
     timeoutMs,
+    locks: fixtureLocks(),
+    ...options,
+  })
+}
+
+async function waitFor(predicate) {
+  for (let i = 0; i < 500; i++) {
+    if (predicate()) return
+    await new Promise((resolve) => setTimeout(resolve, 2))
+  }
+  throw new Error('Timed out waiting for session state')
+}
+
+function workingPort(key = 0xab) {
+  return new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: {
+        const info = selfInfo()
+        info.fill(key, 4, 36)
+        serial.emit(...info)
+        break
+      }
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
   })
 }
 
@@ -235,4 +276,186 @@ test('disconnect waits for an in-flight port open and releases it before reconne
   await Promise.all([connection, disconnection])
   assert.equal(session.getSnapshot().phase, 'idle')
   assert.equal(port.closed, true)
+})
+
+test('reconnects an authorized replugged port only after checking its radio key', async () => {
+  const first = workingPort()
+  const replugged = workingPort()
+  let ports = []
+  const session = sessionWith(first, 1000, {
+    environment: { secureContext: true, serial: { requestPort: async () => first, getPorts: async () => ports } },
+    retryDelays: [5, 5, 5, 5, 5],
+  })
+  await session.connect()
+  first.dispatchEvent(new Event('disconnect'))
+  assert.equal(session.getSnapshot().phase, 'reconnecting')
+  ports = [replugged]
+  await waitFor(() => session.getSnapshot().phase === 'ready')
+  assert.deepEqual(replugged.commands.map(([code]) => code), [22, 1, 4])
+  assert.equal(replugged.commands.some(([code]) => code === 10), false)
+  await session.disconnect()
+})
+
+test('rejects a different radio before contacts are requested', async () => {
+  const first = workingPort()
+  const wrong = workingPort(0xcd)
+  const session = sessionWith(first, 1000, {
+    environment: { secureContext: true, serial: { requestPort: async () => first, getPorts: async () => [wrong] } },
+    retryDelays: [1],
+  })
+  await session.connect()
+  first.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => session.getSnapshot().phase === 'error')
+  assert.equal(session.getSnapshot().error.code, 'identity')
+  assert.deepEqual(wrong.commands.map(([code]) => code), [22, 1])
+  assert.equal(wrong.closed, true)
+})
+
+test('does not open ambiguous matching ports and stops after bounded missing-port retries', async () => {
+  const first = workingPort()
+  const others = [workingPort(), workingPort()]
+  let ports = others
+  const session = sessionWith(first, 1000, {
+    environment: { secureContext: true, serial: { requestPort: async () => first, getPorts: async () => ports } },
+    retryDelays: [1, 1],
+  })
+  await session.connect()
+  first.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => session.getSnapshot().phase === 'error')
+  assert.equal(session.getSnapshot().error.code, 'identity')
+  assert.deepEqual(others.map((port) => port.commands.length), [0, 0])
+
+  const next = workingPort()
+  ports = []
+  const missing = sessionWith(next, 1000, {
+    environment: { secureContext: true, serial: { requestPort: async () => next, getPorts: async () => ports } },
+    retryDelays: [1, 1],
+  })
+  await missing.connect()
+  next.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => missing.getSnapshot().phase === 'error')
+  assert.equal(missing.getSnapshot().error.code, 'reconnect-failed')
+})
+
+test('manual disconnect cancels retries and releases cross-tab ownership', async () => {
+  const locks = fixtureLocks()
+  const first = workingPort()
+  const second = workingPort()
+  let scans = 0
+  const session = sessionWith(first, 1000, {
+    locks,
+    environment: { secureContext: true, serial: { requestPort: async () => first, getPorts: async () => { scans++; return [] } } },
+    retryDelays: [50],
+  })
+  const other = sessionWith(second, 1000, { locks })
+  await session.connect()
+  await other.connect()
+  await waitFor(() => other.getSnapshot().phase === 'error')
+  assert.equal(other.getSnapshot().error.code, 'ownership')
+  assert.equal(second.commands.length, 0)
+  first.dispatchEvent(new Event('disconnect'))
+  await session.disconnect()
+  await new Promise((resolve) => setTimeout(resolve, 70))
+  assert.equal(scans, 0)
+  assert.equal(session.getSnapshot().phase, 'idle')
+  await other.connect()
+  assert.equal(other.getSnapshot().phase, 'ready')
+  await other.disconnect()
+})
+
+test('a failed reconnect attempt consumes the retry budget without overlapping attempts', async () => {
+  const first = workingPort()
+  const stalled = new FixturePort(() => {})
+  let scans = 0
+  const session = sessionWith(first, 15, {
+    environment: { secureContext: true, serial: {
+      requestPort: async () => first,
+      getPorts: async () => { scans++; return [stalled] },
+    } },
+    retryDelays: [1, 1],
+  })
+  await session.connect()
+  first.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => session.getSnapshot().phase === 'error')
+  assert.equal(session.getSnapshot().error.code, 'reconnect-failed')
+  assert.equal(scans, 2)
+  assert.equal(stalled.closed, true)
+})
+
+test('disconnect during ownership acquisition cannot leave the lock held', async () => {
+  const underlying = fixtureLocks()
+  let allow
+  const gate = new Promise((resolve) => { allow = resolve })
+  const locks = { request: async (...args) => { await gate; return underlying.request(...args) } }
+  const port = workingPort()
+  const session = sessionWith(port, 1000, { locks })
+  const connecting = session.connect()
+  await setImmediate()
+  const disconnecting = session.disconnect()
+  allow()
+  await Promise.all([connecting, disconnecting])
+  assert.equal(session.getSnapshot().phase, 'idle')
+  const other = sessionWith(workingPort(), 1000, { locks: underlying })
+  await other.connect()
+  assert.equal(other.getSnapshot().phase, 'ready')
+  await other.disconnect()
+})
+
+test('completed reconnection syncs are saved once per attempt', async () => {
+  const first = workingPort()
+  const second = workingPort()
+  const updates = []
+  const session = sessionWith(first, 1000, {
+    environment: { secureContext: true, serial: { requestPort: async () => first, getPorts: async () => [second] } },
+    retryDelays: [1],
+  })
+  const cache = new SessionCache(session, async () => ({
+    update: async (key, update) => { updates.push({ key, update }) },
+    close: () => {},
+  }))
+  await session.connect()
+  await waitFor(() => updates.length === 2 && !cache.getSnapshot().saving)
+  first.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => session.getSnapshot().phase === 'ready' && updates.length === 4 && !cache.getSnapshot().saving)
+  assert.deepEqual(updates.map(({ key }) => key), Array(4).fill('ab'.repeat(32)))
+  assert.deepEqual(updates.map(({ update }) => Object.keys(update)[0]), ['contacts', 'channels', 'contacts', 'channels'])
+  await session.disconnect()
+})
+
+test('a port close failure keeps ownership and requires a reload', async () => {
+  const locks = fixtureLocks()
+  const first = workingPort()
+  first.close = async () => { throw new Error('close failed') }
+  const session = sessionWith(first, 1000, { locks, retryDelays: [1] })
+  await session.connect()
+  first.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => session.getSnapshot().phase === 'error')
+  assert.match(session.getSnapshot().error.message, /Reload/)
+  const other = sessionWith(workingPort(), 1000, { locks })
+  await other.connect()
+  assert.equal(other.getSnapshot().error.code, 'ownership')
+})
+
+test('ownership and port enumeration failures give actionable errors', async () => {
+  const first = workingPort()
+  const unavailable = sessionWith(first, 1000, {
+    locks: { request: async () => { throw new Error('Locks unavailable') } },
+  })
+  await unavailable.connect()
+  assert.equal(unavailable.getSnapshot().error.code, 'ownership')
+  assert.equal(first.commands.length, 0)
+
+  const second = workingPort()
+  const session = sessionWith(second, 1000, {
+    environment: { secureContext: true, serial: {
+      requestPort: async () => second,
+      getPorts: async () => { throw new Error('Permission revoked') },
+    } },
+    retryDelays: [1],
+  })
+  await session.connect()
+  second.dispatchEvent(new Event('disconnect'))
+  await waitFor(() => session.getSnapshot().phase === 'error')
+  assert.equal(session.getSnapshot().error.code, 'reconnect-failed')
+  assert.match(session.getSnapshot().error.message, /permissions/)
 })

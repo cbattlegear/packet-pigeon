@@ -5,11 +5,15 @@ export interface CompanionSerialPort extends EventTarget {
   readonly writable: WritableStream<Uint8Array> | null
   open(options: { baudRate: number }): Promise<void>
   close(): Promise<void>
+  getInfo?(): { usbVendorId?: number; usbProductId?: number }
 }
 
 export interface WebSerialEnvironment {
   readonly secureContext: boolean
-  readonly serial?: { requestPort(): Promise<CompanionSerialPort> }
+  readonly serial?: {
+    requestPort(): Promise<CompanionSerialPort>
+    getPorts?(): Promise<CompanionSerialPort[]>
+  }
 }
 
 export function browserSerialEnvironment(): WebSerialEnvironment {

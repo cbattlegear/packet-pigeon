@@ -49,7 +49,7 @@ function App() {
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
   const support = getWebSerialSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
-  const canDisconnect = ['opening', 'handshake', 'syncing', 'ready'].includes(snapshot.phase)
+  const canDisconnect = ['opening', 'handshake', 'syncing', 'ready', 'reconnecting'].includes(snapshot.phase)
   const connection = {
     idle: 'Disconnected',
     choosing: 'Choosing port',
@@ -57,6 +57,7 @@ function App() {
     handshake: 'Identifying radio',
     syncing: 'Connected',
     ready: 'Connected',
+    reconnecting: 'Reconnecting',
     closing: 'Disconnecting',
     error: 'Error',
   }[snapshot.phase]
