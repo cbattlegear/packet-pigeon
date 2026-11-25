@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
+import { defaultPreferences } from '../preferences/appPreferences.ts'
 
 test('enables manual Bluetooth sync and preserves offline receipt retry', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
@@ -17,6 +18,9 @@ test('enables manual Bluetooth sync and preserves offline receipt retry', async 
         direct: {},
         status: { key: null },
         cacheSaving: false,
+        active: true,
+        preferences: defaultPreferences,
+        locale: 'en',
       }))
     )
     const button = (html, label) => {

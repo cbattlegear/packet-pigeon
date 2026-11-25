@@ -38,6 +38,9 @@ Run direct-message fixtures with
 `node --test src/radio/direct-message.test.mjs src/integration/direct-messages.test.js src/chats/model.test.js`.
 These checks use mocks and do not need a radio.
 
+With Google Chrome installed, run `npm run test:browser` to exercise the chat
+reopening and wake-lock behavior in the browser.
+
 ## USB companion session
 
 In a secure context with Web Serial available, use **Connect USB** to choose a
@@ -125,8 +128,8 @@ Choose a companion or room contact in **Chats**, write a message, and select
 retry metadata on all eight attempts and fits older companion frame sizes.
 A disconnected send reports an error and keeps its draft; it is not queued
 for automatic transmission.
-Drafts and messages are stored in the browser's per-radio cache, including when
-the radio is offline.
+Messages and, by default, drafts are stored in the browser's per-radio cache,
+including when the radio is offline.
 
 The app saves the outgoing message and each expected acknowledgement before
 transmitting. It shows sending, sent, delivered, and failed states. Delivered
@@ -156,6 +159,24 @@ is unsaved can lose its delivery state; a packet may already have been sent.
 Possible repeated receipts are labeled and can be hidden, but are retained
 separately because MeshCore does not provide a guaranteed unique message ID.
 Browser data clearing or eviction can remove saved history.
+
+## App preferences
+
+**Settings** saves the appearance, app language and chat clock format for this
+browser. Appearance can follow the operating system. English is the current
+interface language and the fallback when the browser prefers an unavailable
+language.
+
+Messaging options control conversation previews, path and region details,
+composer focus and where a conversation opens. When oldest-unread navigation
+is enabled, a newly opened conversation starts at its earliest unread receipt.
+Receipts are marked read in the per-radio cache as they come into view. Region
+details appear only when the stored message carries a region.
+
+Turn off **Save draft edits between visits** to keep new edits in the current
+tab's memory. Previously saved drafts remain in the radio cache. **Keep screen
+on** uses the browser's Screen Wake Lock API while the tab is visible and
+depends on browser and device support.
 
 Direct-message commands and acknowledgement handling have been tested with
 mocked USB and Bluetooth transports, not physical hardware. Some Bluetooth

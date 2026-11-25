@@ -85,6 +85,23 @@ test('invalid message text is reported without sending or clearing the draft', a
   assert.equal(source.sends.length, 0)
 })
 
+test('draft edits kept for this visit survive switching caches without writing to storage', async () => {
+  const { source, direct, openStorage } = await fixture()
+  const conversationId = `direct:${recipient}`
+  await direct.saveDraft(key, conversationId, 'Previously saved')
+  await direct.saveDraft(key, conversationId, 'Only in this tab', false)
+  source.phase('idle')
+  assert.equal(await direct.send(key, recipient, 'Updated in this tab', options, false), false)
+  await direct.load('cc'.repeat(32))
+  await direct.load(key)
+  assert.equal(direct.draft(key, conversationId), 'Updated in this tab')
+  const storage = await openStorage()
+  const data = await storage.read(key)
+  assert.equal(data.drafts[0].text, 'Previously saved')
+  assert.equal(data.messages.length, 0)
+  storage.close()
+})
+
 test('a 158-byte message remains intact across all direct and flood attempts', async () => {
   const { source, direct } = await fixture()
   const text = 'é'.repeat(79)

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { conversations, messageVisibility, possibleRepeats } from './model.ts'
+import { conversations, messageVisibility, oldestUnreadReceipt, possibleRepeats, unreadReceipts } from './model.ts'
 
 const details = {
   type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
@@ -92,9 +92,22 @@ test('blocked channel names hide receipts without hiding direct or unattributed 
   const items = conversations(data)
   const conversation = items.find((item) => item.id === 'channel:0')
   assert.deepEqual(conversation.messages.map(({ id }) => id), ['unknown'])
+  assert.deepEqual(unreadReceipts(conversation.messages, new Set(['unknown'])), [])
   assert.match(conversation.description, /blocked names are hidden/)
   assert.equal(items.find((item) => item.id.startsWith('direct:')).messages.length, 1)
-  assert.deepEqual(conversations({ ...data, blockedChannelSenders: [] })
-    .find((item) => item.id === 'channel:0').messages.map(({ id }) => id), ['channel', 'unknown'])
+  const restored = conversations({ ...data, blockedChannelSenders: [] })
+    .find((item) => item.id === 'channel:0')
+  assert.deepEqual(restored.messages.map(({ id }) => id), ['channel', 'unknown'])
+  assert.deepEqual(unreadReceipts(restored.messages, new Set(['unknown'])).map(({ id }) => id), ['channel'])
   assert.equal(data.messages.length, 3)
+})
+
+test('the oldest unread receipt uses the sender timestamp and skips outgoing and read entries', () => {
+  const undated = { ...received, id: 'undated', timestamp: null }
+  const oldest = { ...received, id: 'oldest', timestamp: 100000 }
+  const sent = { ...received, id: 'sent', timestamp: 99000, outgoing: {} }
+  const read = { ...received, id: 'read', timestamp: 98000 }
+  const unread = unreadReceipts([undated, received, oldest, sent, read], new Set([read.id]))
+  assert.deepEqual(unread.map(({ id }) => id), [undated.id, received.id, oldest.id])
+  assert.equal(oldestUnreadReceipt(unread), oldest)
 })

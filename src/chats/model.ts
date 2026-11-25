@@ -91,6 +91,18 @@ export function possibleRepeats(messages: readonly StoredMessage[]) {
   return repeats
 }
 
+export function unreadReceipts(messages: readonly StoredMessage[], read: ReadonlySet<string>) {
+  return messages.filter((message) => !message.outgoing && !read.has(message.id))
+}
+
+export function oldestUnreadReceipt(messages: readonly StoredMessage[]) {
+  const time = (message: StoredMessage) =>
+    message.timestamp !== null && Number.isFinite(message.timestamp) ? message.timestamp : Infinity
+  return messages.reduce<StoredMessage | undefined>((oldest, message) => (
+    !oldest || time(message) < time(oldest) ? message : oldest
+  ), undefined)
+}
+
 export function messageVisibility(messages: readonly StoredMessage[], hidePossibleRepeats: boolean) {
   const repeats = possibleRepeats(messages)
   return {
