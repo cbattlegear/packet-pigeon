@@ -1,0 +1,110 @@
+.rx-inspector {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  padding: 20px 28px;
+}
+
+.rx-controls,
+.rx-details {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.rx-actions,
+.rx-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.rx-filters,
+.rx-details {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.rx-filters label {
+  display: grid;
+  gap: 4px;
+}
+
+.rx-inspector :is(button, select) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.rx-inspector button[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--selection);
+}
+
+.rx-table-wrap {
+  overflow: auto;
+  max-height: 60vh;
+}
+
+.rx-table-wrap table {
+  width: 100%;
+  min-width: 42rem;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.rx-table-wrap caption {
+  padding-bottom: 8px;
+  text-align: left;
+}
+
+.rx-table-wrap :is(th, td) {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rx-table-wrap th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+
+.rx-details dl {
+  display: grid;
+  grid-template-columns: minmax(8rem, max-content) minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0;
+}
+
+.rx-details dl > div {
+  display: contents;
+}
+
+.rx-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.rx-details .rx-raw {
+  display: block;
+  margin: 8px 0;
+  overflow-wrap: anywhere;
+}
+
+.rx-inspector [role='alert'] {
+  color: var(--error);
+}
+
+@media (max-width: 600px) {
+  .rx-inspector {
+    padding: 16px;
+  }
+}
