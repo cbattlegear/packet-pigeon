@@ -106,8 +106,8 @@ test('sender blocks preserve chat preferences and unread receipts until restored
   await page.getByRole('link', { name: 'Chats' }).click()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
   const conversation = page.getByRole('region', { name: 'Conversation with Public' })
-  await conversation.getByText('Bob: hello').waitFor()
-  assert.equal(await conversation.getByText('Alice: hello').count(), 0)
+  await conversation.getByText('Bob', { exact: true }).waitFor()
+  assert.equal(await conversation.getByText('Alice', { exact: true }).count(), 0)
   assert.equal(await page.getByRole('navigation', { name: 'Conversations' }).getByText('Bob: hello').count(), 0)
   const readWhileBlocked = await page.evaluate(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
@@ -122,7 +122,7 @@ test('sender blocks preserve chat preferences and unread receipts until restored
   await page.getByRole('button', { name: 'Unblock sender name Alice' }).click()
   await page.getByText('Sender name unblocked on this radio.').waitFor()
   await page.getByRole('link', { name: 'Chats' }).click()
-  await conversation.getByText('Alice: hello').waitFor()
+  await conversation.getByText('Alice', { exact: true }).waitFor()
   await page.waitForFunction(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()
@@ -365,6 +365,138 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
     finally { storage.close() }
   }, radio)
   assert.deepEqual(saved, [{ index: 0, channelName: 'Renamed', days: 30 }])
+})
+
+test('channel chat sends, replies by name, and keeps local message actions scoped to the radio', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1260, height: 900 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  const radio = '34'.repeat(32)
+  await page.goto(`${url}#chats`)
+  await page.evaluate(async (radio) => {
+    const { default: React } = await import('/node_modules/.vite/deps/react.js')
+    const { default: { createRoot } } = await import('/node_modules/.vite/deps/react-dom_client.js')
+    const { ChatPanel } = await import('/src/chats/ChatPanel.tsx')
+    const { DirectMessages } = await import('/src/integration/direct-messages.ts')
+    const { defaultPreferences } = await import('/src/preferences/appPreferences.ts')
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const key = radioKeyFromPublicKey(radio)
+    const storage = await openRadioStorage()
+    const messages = ['Bob', 'Alice'].map((name, index) => {
+      const text = `${name}: hello from ${name}`
+      return {
+        id: name, conversationId: 'channel:0', sender: '', timestamp: Date.now() - 1000, text,
+        receipt: {
+          kind: 'channel-text', receiptId: name, channelIndex: 0, textType: 0, senderTimestamp: index + 1,
+          text, pathLength: 2, snrDb: -3.5,
+        },
+      }
+    })
+    try {
+      await storage.update(key, {
+        channels: [{ index: 0, name: 'Public' }, { index: 1, name: 'Quiet' }],
+        messages, markRead: ['Bob'], channelRetention: { index: 0, channelName: 'Public', days: 30 },
+      })
+    } finally { storage.close() }
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true, value: { writeText: async (text) => { window.copiedChannelText = text } },
+    })
+    const snapshot = {
+      phase: 'ready', transport: 'usb', device: { publicKey: radio, name: 'Pigeon' },
+      channels: [{ index: 0, name: 'Public' }, { index: 1, name: 'Quiet' }],
+    }
+    window.channelSends = []
+    const session = {
+      getSnapshot: () => snapshot,
+      subscribe: () => () => {},
+      subscribeToPushes: () => () => {},
+      sendChannel: async (...args) => { window.channelSends.push(args) },
+    }
+    const direct = new DirectMessages(session)
+    await direct.load(key)
+    document.getElementById('root').hidden = true
+    const element = document.createElement('div')
+    element.id = 'channel-chat-fixture'
+    document.body.append(element)
+    function Fixture() {
+      const status = React.useSyncExternalStore(direct.subscribe, direct.getSnapshot)
+      return React.createElement(ChatPanel, {
+        snapshot, direct, status, messageSync: {}, messageStatus: { syncing: false, pending: false },
+        cacheSaving: false, active: true, preferences: defaultPreferences, locale: 'en',
+      })
+    }
+    createRoot(element).render(React.createElement(Fixture))
+  }, radio)
+  const fixture = page.locator('#channel-chat-fixture')
+  const nav = fixture.getByRole('navigation', { name: 'Conversations' })
+  await nav.getByRole('button', { name: /Quiet/ }).waitFor()
+  await nav.getByRole('button', { name: /Public/ }).click()
+  const conversation = fixture.getByRole('region', { name: 'Conversation with Public' })
+  await conversation.getByText('Bob', { exact: true }).waitFor()
+  await conversation.getByText('2 path hops · SNR -3.5 dB').first().waitFor()
+  await conversation.getByRole('button', { name: 'Copy message: Bob: hello from Bob' }).click()
+  assert.equal(await page.evaluate(() => window.copiedChannelText), 'Bob: hello from Bob')
+  await conversation.getByRole('button', { name: 'Reply to Bob' }).click()
+  const input = conversation.getByRole('textbox', { name: 'Message', exact: true })
+  assert.equal(await input.inputValue(), '@[Bob] ')
+  await input.fill('a'.repeat(153))
+  assert.equal(await conversation.getByRole('button', { name: 'Send message' }).isDisabled(), true)
+  await input.fill('a'.repeat(145))
+  await conversation.getByRole('button', { name: 'Share or use quick message' }).click()
+  const sharing = page.getByRole('dialog', { name: 'Add to message' })
+  await sharing.getByRole('textbox', { name: 'New quick message' }).fill('1234567')
+  await sharing.getByRole('button', { name: 'Save quick message' }).click()
+  await sharing.getByRole('button', { name: '1234567', exact: true }).click()
+  await sharing.getByRole('alert').getByText(/must fit in 152 UTF-8 bytes/).waitFor()
+  assert.equal(await input.inputValue(), 'a'.repeat(145))
+  await sharing.getByRole('button', { name: 'Close' }).click()
+  await input.fill('a'.repeat(144))
+  await conversation.getByRole('button', { name: 'Share or use quick message' }).click()
+  await sharing.getByRole('button', { name: '1234567', exact: true }).click()
+  assert.equal(await input.inputValue(), `${'a'.repeat(144)}\n1234567`)
+  await conversation.getByText('152/152 UTF-8 bytes').waitFor()
+  await input.fill('@[Bob] Hello')
+  await conversation.getByText('12/152 UTF-8 bytes').waitFor()
+  await conversation.getByRole('button', { name: 'Send message' }).click()
+  await conversation.getByText('Accepted by radio').waitFor()
+  assert.equal(await page.evaluate(() => window.channelSends[0][5]), '@[Bob] Hello')
+  await input.fill('Keep this draft')
+  let prompt = page.waitForEvent('dialog')
+  const resending = conversation.getByRole('button', { name: 'Resend channel message: @[Bob] Hello' }).click()
+  let dialog = await prompt
+  assert.match(dialog.message(), /may already have reached others/)
+  await dialog.accept()
+  await resending
+  await page.waitForFunction(() => window.channelSends.length === 2)
+  assert.equal(await input.inputValue(), 'Keep this draft')
+  prompt = page.waitForEvent('dialog')
+  const blocking = conversation.getByRole('button', { name: 'Block sender name Alice' }).click()
+  dialog = await prompt
+  await dialog.accept()
+  await blocking
+  assert.equal(await conversation.getByText('Alice', { exact: true }).count(), 0)
+  prompt = page.waitForEvent('dialog')
+  const deleting = conversation.getByRole('button', { name: 'Delete channel message: Bob: hello from Bob' }).click()
+  dialog = await prompt
+  await dialog.accept()
+  await deleting
+  await page.waitForFunction(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return !(await storage.read(radioKeyFromPublicKey(radio))).messages.some(({ id }) => id === 'Bob') }
+    finally { storage.close() }
+  }, radio)
+  const data = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return await storage.read(radioKeyFromPublicKey(radio)) }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(data.blockedChannelSenders, ['Alice'])
+  assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Public', days: 30 }])
+  assert.ok(!data.readMessages.includes('Bob'))
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 1)
 })
 
 test('restores an enabled wake lock after visibility changes during a pending request and release', async (t) => {

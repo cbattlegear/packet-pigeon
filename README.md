@@ -8,7 +8,7 @@ user-initiated USB or Bluetooth companion connections. It syncs contacts and cha
 per-radio local cache. Contacts supports offline browsing, and the map can
 show synced contacts from the current session. Chats supports direct messages,
 drafts, delivery tracking, and manually syncing received queue entries over USB
-or Bluetooth.
+or Bluetooth. Channel chats also support sending and local message actions.
 
 ## Getting started
 
@@ -36,6 +36,7 @@ integration fixture with `node --test src/integration/session-cache.test.js`.
 Run message sync fixtures with `node --test src/integration/message-sync.test.js`.
 Run direct-message fixtures with
 `node --test src/radio/direct-message.test.mjs src/integration/direct-messages.test.js src/chats/model.test.js`.
+Run channel-message framing fixtures with `node --test src/radio/channel-message.test.mjs`.
 These checks use mocks and do not need a radio.
 
 With Google Chrome installed, run `npm run test:browser` for the browser
@@ -159,6 +160,29 @@ is unsaved can lose its delivery state; a packet may already have been sent.
 Possible repeated receipts are labeled and can be hidden, but are retained
 separately because MeshCore does not provide a guaranteed unique message ID.
 Browser data clearing or eviction can remove saved history.
+
+## Channel messages
+
+Select a channel in **Chats** to send a broadcast or browse its cached
+messages. The radio adds its sender name and `: ` before the message, so the
+available text is 160 UTF-8 bytes minus the encoded name and separator. The
+composer uses the name reported at connection; reconnect if it is changed
+elsewhere. It shows the limit when connected; NUL and invalid text are
+rejected. The radio's slot name is checked again before sending, but a
+different channel with the same name cannot be distinguished. A disconnected
+send is not queued.
+
+Outgoing messages are saved before submission. **Accepted by radio** only means
+the companion accepted the command, not that anyone heard or read the message.
+After a disconnect or interrupted send, the status may be uncertain. Resending
+is explicit and can create duplicates. If the result cannot be saved, keep the
+page open and retry saving the message changes; this does not retransmit.
+
+Incoming sender names are unverified and can be impersonated. Reply inserts a
+name mention; copy, local deletion and blocking a sender name do not affect
+other devices. A possible-repeat filter retains the individual receipts, which
+may represent distinct messages. Heard-repeat counts, multiple-path
+attribution and region-scoped channel sending are not available.
 
 ## App preferences
 

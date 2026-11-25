@@ -1,15 +1,19 @@
 import type { CompanionPush, CompanionSession } from '../radio/companion-session.ts'
 import { decodeDirectAck, directTextBytes, expectedDirectAck } from '../radio/direct-message.ts'
+import { channelTextBytes } from '../radio/channel-message.ts'
 import { messageAcknowledged } from '../radio/protocol.ts'
 import {
   openRadioStorage, radioKeyFromPublicKey, RadioStorageError, validateDirectOptions,
 } from '../storage/index.ts'
 import type {
-  DirectChange, DirectChangeResult, DirectSendOptions, RadioData, RadioKey, StoredMessage,
+  ChannelMessageChange, DirectChange, DirectChangeResult, DirectSendOptions, RadioData, RadioKey, StoredMessage,
 } from '../storage/index.ts'
 
-type Source = Pick<CompanionSession, 'getSnapshot' | 'subscribe' | 'subscribeToPushes' | 'sendDirect' | 'resetDirectPath'>
-type PendingChange = { key: RadioKey; change: DirectChange }
+type Source = Pick<CompanionSession, 'getSnapshot' | 'subscribe' | 'subscribeToPushes' | 'sendDirect' | 'resetDirectPath' | 'sendChannel'>
+type PendingChange = { key: RadioKey } & (
+  | { type: 'direct'; change: DirectChange }
+  | { type: 'channel'; change: ChannelMessageChange }
+)
 type PendingDraft = { key: RadioKey; conversationId: string; text: string; version: number }
 type ActiveSend = {
   key: RadioKey
@@ -108,7 +112,7 @@ export class DirectMessages {
   private async apply(key: RadioKey, change: DirectChange, retainOnFailure: boolean) {
     return this.serial(async () => {
       if (this.pendingChanges.length) {
-        if (retainOnFailure) this.pendingChanges.push({ key, change })
+        if (retainOnFailure) this.pendingChanges.push({ key, type: 'direct', change })
         this.update({ pending: this.pendingCount(), error: 'Unsaved message updates need attention. Keep this page open and retry saving.' })
         throw new Error('Retry saving the pending message updates first.')
       }
@@ -120,13 +124,41 @@ export class DirectMessages {
         return result
       } catch (error) {
         if (retainOnFailure && storageFailure(error)) {
-          this.pendingChanges.push({ key, change })
+          this.pendingChanges.push({ key, type: 'direct', change })
           this.update({
             pending: this.pendingCount(),
             error: `Could not save a message update: ${messageOf(error)} Keep this page open and retry saving.`,
           })
           this.active?.controller.abort()
           this.active?.wake?.()
+        }
+        throw error
+      } finally {
+        storage?.close()
+      }
+    })
+  }
+
+  private async applyChannel(key: RadioKey, change: ChannelMessageChange, retainOnFailure: boolean) {
+    return this.serial(async () => {
+      if (this.pendingChanges.length) {
+        if (retainOnFailure) this.pendingChanges.push({ key, type: 'channel', change })
+        this.update({ pending: this.pendingCount(), error: 'Unsaved message updates need attention. Keep this page open and retry saving.' })
+        throw new Error('Retry saving the pending message updates first.')
+      }
+      let storage: Awaited<ReturnType<typeof openRadioStorage>> | undefined
+      try {
+        storage = await this.openStorage()
+        const result = await storage.changeChannelMessage(key, change)
+        this.show(key, result)
+        return result
+      } catch (error) {
+        if (retainOnFailure && storageFailure(error)) {
+          this.pendingChanges.push({ key, type: 'channel', change })
+          this.update({
+            pending: this.pendingCount(),
+            error: `Could not save a message update: ${messageOf(error)} Keep this page open and retry saving.`,
+          })
         }
         throw error
       } finally {
@@ -230,10 +262,12 @@ export class DirectMessages {
       try {
         storage = await this.openStorage()
         while (this.pendingChanges.length) {
-          const { key, change } = this.pendingChanges[0]
-          const result = await storage.changeDirect(key, change)
+          const pending = this.pendingChanges[0]
+          const result = pending.type === 'direct'
+            ? await storage.changeDirect(pending.key, pending.change)
+            : await storage.changeChannelMessage(pending.key, pending.change)
           this.pendingChanges.shift()
-          this.show(key, result)
+          this.show(pending.key, result)
           this.update({ pending: this.pendingCount() })
         }
         for (const [name, draft] of this.pendingDrafts) {
@@ -267,6 +301,9 @@ export class DirectMessages {
       const key = radioKeyFromPublicKey(ready)
       void this.apply(key, { kind: 'interrupt', exceptId: this.active?.id }, true).catch((error: unknown) => {
         this.update({ error: `Could not recover interrupted messages: ${messageOf(error)}` })
+      })
+      void this.applyChannel(key, { kind: 'interrupt', exceptId: this.active?.id }, true).catch((error: unknown) => {
+        this.update({ error: `Could not recover interrupted channel messages: ${messageOf(error)}` })
       })
     } else if (!ready) {
       this.readyKey = null
@@ -338,6 +375,80 @@ export class DirectMessages {
       if (active) this.finish(active)
       this.update({ error: messageOf(error) })
       return false
+    }
+  }
+
+  readonly sendChannel = async (
+    key: RadioKey, index: number, channelName: string, text: string, persistDraft = true, resend = false,
+  ) => {
+    let active: ActiveSend | undefined
+    try {
+      active = this.start(key, crypto.randomUUID())
+      const conversationId = `channel:${index}`
+      if (!resend) await this.saveDraft(key, conversationId, text, persistDraft)
+      const snapshot = this.source.getSnapshot()
+      if (!this.isConnected(key) || !snapshot.device) throw new Error('Connect the selected radio before sending. Your draft was kept.')
+      const senderName = snapshot.device.name
+      channelTextBytes(text, senderName)
+      if (this.pendingCount()) throw new Error('Retry saving the pending message changes before sending.')
+      const result = await this.applyChannel(key, {
+        kind: 'begin', id: active.id, index, channelName, senderName, text, now: Date.now(),
+        clearDraft: !resend && persistDraft,
+      }, false)
+      if (!result.message?.channelOutgoing) throw new Error('The outgoing channel message could not be saved.')
+      const draftKey = `${key}:${conversationId}`
+      if (!resend && this.draftEditsThisVisit.get(draftKey) === text) this.draftEditsThisVisit.set(draftKey, '')
+      void this.runChannel(active, index, result.message)
+      return true
+    } catch (error) {
+      if (active) this.finish(active)
+      this.update({ error: messageOf(error) })
+      return false
+    }
+  }
+
+  readonly deleteChannelMessage = async (key: RadioKey, id: string) => {
+    if (this.active?.id === id && this.active.key === key) throw new Error('Wait for sending to finish before deleting this message.')
+    await this.applyChannel(key, { kind: 'remove', id }, false)
+  }
+
+  readonly blockChannelSender = async (key: RadioKey, name: string) => {
+    await this.serial(async () => {
+      const storage = await this.openStorage()
+      try {
+        await storage.update(key, { blockedChannelSender: { name, blocked: true } })
+        const data = await storage.read(key)
+        if (this.status.key === key) this.update({ data })
+      } finally {
+        storage.close()
+      }
+    })
+  }
+
+  private async runChannel(active: ActiveSend, index: number, message: StoredMessage) {
+    try {
+      const outgoing = message.channelOutgoing
+      if (!outgoing) return
+      let change: ChannelMessageChange
+      try {
+        if (!this.isConnected(active.key)) throw new Error('The radio disconnected before sending.')
+        await this.source.sendChannel(
+          active.key, index, outgoing.channelName, outgoing.senderName, outgoing.wireTimestamp, message.text,
+        )
+        change = { kind: 'accepted', id: active.id, wireTimestamp: outgoing.wireTimestamp }
+      } catch (error) {
+        change = {
+          kind: 'uncertain', id: active.id, wireTimestamp: outgoing.wireTimestamp,
+          error: `${messageOf(error)} The packet may have been transmitted.`,
+        }
+      }
+      try {
+        await this.applyChannel(active.key, change, true)
+      } catch (error) {
+        this.update({ error: `Could not save the channel message state: ${messageOf(error)} Keep this page open and retry saving.` })
+      }
+    } finally {
+      this.finish(active)
     }
   }
 

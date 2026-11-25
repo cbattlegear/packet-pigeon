@@ -1,5 +1,6 @@
 import type { AdvertPath } from '../radio/discovery-commands.ts'
 import { validSenderName } from '../channels/senders.ts'
+import { channelTextBytes } from '../radio/channel-message.ts'
 
 declare const radioKeyBrand: unique symbol
 export type RadioKey = string & { readonly [radioKeyBrand]: true }
@@ -53,7 +54,23 @@ export type StoredMessage = {
   /** Exact companion response bytes, including for unsupported receipt types. */
   rawHex?: string
   outgoing?: StoredOutgoing
+  channelOutgoing?: StoredChannelOutgoing
 }
+
+export type StoredChannelOutgoing = {
+  channelName: string
+  senderName: string
+  wireTimestamp: number
+  status: 'sending' | 'accepted' | 'uncertain'
+  error: string | null
+}
+
+export type ChannelMessageChange =
+  | { kind: 'begin'; id: string; index: number; channelName: string; senderName: string; text: string; now: number; clearDraft: boolean }
+  | { kind: 'accepted'; id: string; wireTimestamp: number }
+  | { kind: 'uncertain'; id: string; wireTimestamp: number; error: string }
+  | { kind: 'interrupt'; exceptId?: string }
+  | { kind: 'remove'; id: string }
 
 export type DirectSendOptions = { directAttempts: number; floodAttempts: number }
 export type StoredOutgoing = {
@@ -111,6 +128,7 @@ export type RadioData = {
   discoveries?: StoredDiscovery[]
   directSendOptions?: DirectSendOptions
   lastDirectTimestamp?: number
+  lastChannelTimestamp?: number
   readMessages?: string[]
 }
 
@@ -204,7 +222,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   if (messages?.length) {
     const seen = new Set(current.messages.map(({ id }) => id))
     next.messages = [...current.messages]
-    for (const { id, conversationId, sender, timestamp, text, region, receipt, rawHex, outgoing } of messages) {
+    for (const { id, conversationId, sender, timestamp, text, region, receipt, rawHex, outgoing, channelOutgoing } of messages) {
       if (!id.trim()) {
         throw new RadioStorageError('update', 'A stable message identifier is required.')
       }
@@ -216,6 +234,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
         ...(receipt ? { receipt: copyReceipt(receipt) } : {}),
         ...(rawHex !== undefined ? { rawHex } : {}),
         ...(outgoing ? { outgoing: copyOutgoing(outgoing) } : {}),
+        ...(channelOutgoing ? { channelOutgoing: { ...channelOutgoing } } : {}),
       })
     }
   }
@@ -343,6 +362,82 @@ function copyOutgoing(outgoing: StoredOutgoing): StoredOutgoing {
     options: { ...outgoing.options },
     acknowledgements: outgoing.acknowledgements.map((ack) => ({ ...ack })),
   }
+}
+
+function channelMessageChange(current: RadioData, change: ChannelMessageChange): DirectChangeResult {
+  if (change.kind === 'begin') {
+    if (!change.id.trim() || current.messages.some((entry) => entry.id === change.id)) {
+      throw new RadioStorageError('update', 'A new, unique message identifier is required.')
+    }
+    if (!validChannelIndex(change.index) || !change.channelName
+      || !current.channels.some((channel) => channel.index === change.index && channel.name === change.channelName)) {
+      throw new RadioStorageError('update', 'The channel changed. Refresh the channel list before sending.')
+    }
+    try { channelTextBytes(change.text, change.senderName) }
+    catch (error) {
+      throw new RadioStorageError('update', error instanceof Error ? error.message : 'Invalid channel message.')
+    }
+    if (!Number.isFinite(change.now) || change.now < 0) throw new RadioStorageError('update', 'Invalid message time.')
+    const wireTimestamp = Math.max(Math.floor(change.now / 1000), (current.lastChannelTimestamp ?? 0) + 1)
+    if (wireTimestamp > 0xffffffff) throw new RadioStorageError('update', 'The message timestamp is out of range.')
+    const conversationId = `channel:${change.index}`
+    const message: StoredMessage = {
+      id: change.id, conversationId, sender: 'You', timestamp: change.now, text: change.text,
+      channelOutgoing: {
+        channelName: change.channelName, senderName: change.senderName, wireTimestamp, status: 'sending', error: null,
+      },
+    }
+    return {
+      data: {
+        ...current, lastChannelTimestamp: wireTimestamp, messages: [...current.messages, message],
+        drafts: change.clearDraft
+          ? current.drafts.filter((draft) => draft.conversationId !== conversationId || draft.text !== change.text)
+          : current.drafts,
+      },
+      message,
+    }
+  }
+  if (change.kind === 'interrupt') {
+    const messages = current.messages.map((entry) => {
+      if (!entry.channelOutgoing || entry.id === change.exceptId || entry.channelOutgoing.status !== 'sending') return entry
+      return {
+        ...entry,
+        channelOutgoing: {
+          ...entry.channelOutgoing, status: 'uncertain' as const,
+          error: 'Sending was interrupted. The packet may have been transmitted.',
+        },
+      }
+    })
+    return { data: messages.some((entry, index) => entry !== current.messages[index]) ? { ...current, messages } : current, message: null }
+  }
+  const existing = current.messages.find((entry) => entry.id === change.id)
+  if (!existing || !existing.conversationId.startsWith('channel:')) {
+    throw new RadioStorageError('update', 'The channel message is no longer in the cache.')
+  }
+  if (change.kind === 'remove') {
+    if (existing.channelOutgoing?.status === 'sending') {
+      throw new RadioStorageError('update', 'Wait for sending to finish before deleting this message.')
+    }
+    return {
+      data: {
+        ...current, messages: current.messages.filter((entry) => entry.id !== change.id),
+        ...(current.readMessages ? { readMessages: current.readMessages.filter((id) => id !== change.id) } : {}),
+      },
+      message: null,
+    }
+  }
+  if (!existing.channelOutgoing || existing.channelOutgoing.wireTimestamp !== change.wireTimestamp) {
+    throw new RadioStorageError('update', 'The channel send no longer matches the saved message.')
+  }
+  const message: StoredMessage = {
+    ...existing,
+    channelOutgoing: {
+      ...existing.channelOutgoing,
+      status: change.kind === 'accepted' ? 'accepted' : 'uncertain',
+      error: change.kind === 'accepted' ? null : change.error,
+    },
+  }
+  return { data: { ...current, messages: current.messages.map((entry) => entry.id === change.id ? message : entry) }, message }
 }
 
 function directChange(current: RadioData, change: DirectChange): DirectChangeResult {
@@ -617,6 +712,26 @@ export async function openRadioStorage(factory?: IDBFactory) {
               contacts: [], channels: [], messages: [], drafts: [], preferences: null,
             }
             const result = directChange(current, change)
+            if (result.data !== current) store.put(result.data, normalized)
+            finish(result)
+          } catch (error) {
+            abort(error)
+          }
+        }
+      },
+    ),
+    changeChannelMessage: (key: RadioKey, change: ChannelMessageChange) => runTransaction<DirectChangeResult>(
+      db,
+      'readwrite',
+      (store, finish, abort) => {
+        const normalized = radioKeyFromPublicKey(key)
+        const request = store.get(normalized)
+        request.onsuccess = () => {
+          try {
+            const current: RadioData = request.result ?? {
+              contacts: [], channels: [], messages: [], drafts: [], preferences: null,
+            }
+            const result = channelMessageChange(current, change)
             if (result.data !== current) store.put(result.data, normalized)
             finish(result)
           } catch (error) {

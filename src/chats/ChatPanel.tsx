@@ -6,6 +6,8 @@ import { clockFormatter } from '../preferences/appPreferences.ts'
 import type { AppPreferences } from '../preferences/appPreferences.ts'
 import type { CompanionSnapshot } from '../radio/companion-session.ts'
 import { directTextBytes, maxDirectTextBytes } from '../radio/direct-message.ts'
+import { channelTextBytes, channelTextLimit } from '../radio/channel-message.ts'
+import { channelSender } from '../channels/senders.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredContact, StoredMessage, StoredOutgoing } from '../storage/index.ts'
 import type { Coordinates } from '../map/nodes.ts'
@@ -143,6 +145,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
         </section>
       ) : (
         <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status}
+          senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
           display={{
             active, preferences, read, formatTime, mapPosition, ownContact,
             contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
@@ -158,6 +161,7 @@ type WorkspaceProps = {
   data: RadioData
   direct: DirectMessages
   status: DirectStatus
+  senderName: string | null
   display: ChatDisplay
 }
 
@@ -190,21 +194,22 @@ function ConversationList({ items, selectedId, status, read, showPreviews, onSel
           })}
         </ul>
       ) : <p className="chat-empty-list">Sync contacts or messages to start a conversation.</p>}
-      {status.activeId && <p className="chat-active" role="status">A direct message is in progress.</p>}
+      {status.activeId && <p className="chat-active" role="status">A message is in progress.</p>}
     </nav>
   )
 }
 
-function ConversationPane({ radioKey, data, selected, direct, status, display }: WorkspaceProps & { selected?: Conversation }) {
+function ConversationPane({ radioKey, data, selected, direct, status, senderName, display }: WorkspaceProps & { selected?: Conversation }) {
   if (!selected) {
     return (
       <section className="conversation-pane" aria-label="Conversation">
-        <div className="state-message"><h2>No conversations</h2><p>Sync contacts to send a direct message.</p></div>
+        <div className="state-message"><h2>No conversations</h2><p>Sync contacts or channels to start a conversation.</p></div>
       </section>
     )
   }
   return <ConversationView key={`${radioKey}:${selected.id}`} conversation={selected}
-    radioKey={radioKey} options={data.directSendOptions ?? defaultOptions} direct={direct} status={status} display={display} />
+    radioKey={radioKey} options={data.directSendOptions ?? defaultOptions} direct={direct} status={status}
+    senderName={senderName} display={display} />
 }
 
 type ConversationProps = {
@@ -213,6 +218,7 @@ type ConversationProps = {
   options: DirectSendOptions
   direct: DirectMessages
   status: DirectStatus
+  senderName: string | null
   display: ChatDisplay
 }
 
@@ -231,7 +237,7 @@ function timestamp(value: number | null, format: ChatDisplay['formatTime']) {
   return <time dateTime={date.toISOString()}>{format(date)}</time>
 }
 
-function ConversationView({ conversation, radioKey, options, direct, status, display }: ConversationProps) {
+function ConversationView({ conversation, radioKey, options, direct, status, senderName, display }: ConversationProps) {
   const { active, preferences, read, formatTime, ownContact, contacts, channels, readChannelKey, mapPosition } = display
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
@@ -246,9 +252,16 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
   )
   const unread = useMemo(() => unreadReceipts(visible, read), [visible, read])
   const bytes = new TextEncoder().encode(draft).length
+  const isChannel = conversation.id.startsWith('channel:')
+  let limit: number | null = isChannel ? null : maxDirectTextBytes
   let invalid = ''
-  if (draft) {
-    try { directTextBytes(draft) } catch (error) { invalid = errorText(error) }
+  try {
+    if (isChannel && senderName !== null) {
+      limit = channelTextLimit(senderName)
+      if (draft) channelTextBytes(draft, senderName)
+    } else if (!isChannel && draft) directTextBytes(draft)
+  } catch (error) {
+    invalid = errorText(error)
   }
 
   useLayoutEffect(() => {
@@ -316,11 +329,14 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!conversation.recipient) return
     const text = draft
     setActionError('')
     try {
-      if (await direct.send(radioKey, conversation.recipient, text, options, preferences.saveDrafts)) {
+      const sent = conversation.channel
+        ? await direct.sendChannel(radioKey, conversation.channel.index, conversation.channel.name, text, preferences.saveDrafts)
+        : conversation.recipient
+          ? await direct.send(radioKey, conversation.recipient, text, options, preferences.saveDrafts) : false
+      if (sent) {
         setDraft((current) => current === text ? '' : current)
       }
     } catch (error) {
@@ -337,6 +353,44 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
     }
   }
 
+  async function copy(message: StoredMessage) {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard access is unavailable in this browser.')
+      await navigator.clipboard.writeText(message.text)
+      setActionError('')
+    } catch (error) {
+      setActionError(errorText(error))
+    }
+  }
+
+  async function remove(message: StoredMessage) {
+    if (!window.confirm('Delete this message from this browser? It cannot be removed from the radio or other devices.')) return
+    try {
+      await direct.deleteChannelMessage(radioKey, message.id)
+      setActionError('')
+    } catch (error) { setActionError(errorText(error)) }
+  }
+
+  async function block(name: string) {
+    if (!window.confirm(`Hide messages from the name "${name}" on this radio? Names are not verified and can be impersonated.`)) return
+    try {
+      await direct.blockChannelSender(radioKey, name)
+      setActionError('')
+    } catch (error) { setActionError(errorText(error)) }
+  }
+
+  function reply(name: string) {
+    const text = `@[${name}] ${draft}`
+    updateDraft(text)
+    composer.current?.focus()
+  }
+
+  async function resend(message: StoredMessage) {
+    if (!conversation.channel || !message.channelOutgoing
+      || !window.confirm('Resend this message? The original may already have reached others, and repeat tracking is unavailable.')) return
+    await direct.sendChannel(radioKey, conversation.channel.index, conversation.channel.name, message.text, preferences.saveDrafts, true)
+  }
+
   function updateDraft(text: string) {
     setDraft(text)
     void direct.saveDraft(radioKey, conversation.id, text, preferences.saveDrafts).catch(() => {})
@@ -345,9 +399,10 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
   function insertInDraft(text: string) {
     const next = draft ? `${draft}\n${text}` : text
     try {
-      directTextBytes(next)
+      if (isChannel) channelTextBytes(next, senderName ?? '')
+      else directTextBytes(next)
     } catch {
-      return `The shared item and your draft must fit in ${maxDirectTextBytes} UTF-8 bytes. Shorten the draft or share the link separately.`
+      return `The shared item and your draft must fit in ${limit ?? channelTextLimit('')} UTF-8 bytes${isChannel && senderName === null ? ' (connect to check the radio name)' : ''}. Shorten the draft or share the link separately.`
     }
     updateDraft(next)
     return null
@@ -358,6 +413,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
       <div className="conversation-heading">
         <p>{conversation.title}</p>
         <span>{conversation.description}</span>
+        {isChannel && <span>Heard-repeat and multiple-path tracking are not available. Radio acceptance does not confirm delivery.</span>}
       </div>
       {repeats.size > 0 && (
         <label className="chat-repeat-filter">
@@ -371,14 +427,17 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
           const element = event.currentTarget
           following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60
         }}>
-          {visible.map((message) => (
+          {visible.map((message) => {
+            const sender = channelSender(message)
+            const body = sender ? message.text.slice(sender.length + 2) : message.text
+            return (
             <li key={message.id} data-receipt-id={message.id}
-              className={message.outgoing ? 'chat-message--outgoing' : undefined}>
+              className={message.outgoing || message.channelOutgoing ? 'chat-message--outgoing' : undefined}>
               <div className="chat-message-header">
-                <strong>{message.outgoing ? 'You' : conversation.title}</strong>
+                <strong>{message.outgoing || message.channelOutgoing ? 'You' : isChannel ? sender ?? 'Unknown sender' : conversation.title}</strong>
                 {timestamp(message.timestamp, formatTime)}
               </div>
-              {message.text && <p>{message.text}</p>}
+              {message.text && <p>{body}</p>}
               {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
               {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
               {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
@@ -407,26 +466,55 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
                   )}
                 </div>
               )}
+              {message.channelOutgoing && (
+                <div className="chat-delivery">
+                  <strong className={message.channelOutgoing.status === 'uncertain' ? 'chat-failed' : undefined}>
+                    {message.channelOutgoing.status === 'sending' ? 'Sending' : message.channelOutgoing.status === 'accepted'
+                      ? 'Accepted by radio' : 'Send status uncertain'}
+                  </strong>
+                  {message.channelOutgoing.error && <p>{message.channelOutgoing.error}</p>}
+                  {message.channelOutgoing.status !== 'sending'
+                    && conversation.channel?.name === message.channelOutgoing.channelName && (
+                    <button type="button" disabled={status.activeId !== null || status.pending > 0}
+                      aria-label={`Resend channel message: ${message.text.slice(0, 40)}`}
+                      onClick={() => void resend(message)}>Resend</button>
+                  )}
+                </div>
+              )}
+              {isChannel && (
+                <div className="chat-message-actions" role="group" aria-label="Channel message actions">
+                  {message.text && <button type="button" onClick={() => void copy(message)}
+                    aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
+                  {conversation.channel && sender && !sender.includes('[') && !sender.includes(']') && (
+                    <button type="button" onClick={() => reply(sender)} aria-label={`Reply to ${sender}`}>Reply</button>
+                  )}
+                  {sender && <button type="button" onClick={() => void block(sender)} aria-label={`Block sender name ${sender}`}>Block</button>}
+                  <button type="button" disabled={message.channelOutgoing?.status === 'sending'}
+                    aria-label={`Delete channel message: ${message.text.slice(0, 40)}`} onClick={() => void remove(message)}>Delete</button>
+                </div>
+              )}
               {message.rawHex && <details><summary>Raw receipt</summary><code>{message.rawHex}</code></details>}
             </li>
-          ))}
+          )})}
         </ol>
       ) : <div className="state-message"><h2>No messages yet</h2><p>Messages in this conversation will appear here.</p></div>}
       {readError && <p className="chat-action-error" role="alert">{readError}</p>}
       {actionError && <p className="chat-action-error" role="alert">{actionError}</p>}
-      {conversation.recipient && (
+      {(conversation.recipient || conversation.channel) && (
         <form className="chat-composer" onSubmit={(event) => void send(event)}>
           <label htmlFor="chat-draft">Message</label>
           <textarea id="chat-draft" ref={composer} rows={3} value={draft} aria-describedby="chat-byte-count chat-draft-error"
             onChange={(event) => updateDraft(event.currentTarget.value)} />
           <div className="chat-compose-actions">
-            <span id="chat-byte-count">{bytes}/{maxDirectTextBytes} UTF-8 bytes</span>
+            <span id="chat-byte-count">{limit === null ? `${bytes} UTF-8 bytes; connect to check the limit` : `${bytes}/${limit} UTF-8 bytes`}</span>
             {active && <ComposerTools ownContact={ownContact} contacts={contacts} channels={channels}
               readChannelKey={readChannelKey} mapPosition={mapPosition} insert={insertInDraft} />}
             <button type="submit" disabled={!draft || Boolean(invalid) || status.activeId !== null}>Send message</button>
           </div>
           <p id="chat-draft-error" className="chat-action-error">{invalid}</p>
-          <p>Flood fallback clears this contact’s saved radio route. Sent packets cannot be recalled.</p>
+          <p>{isChannel
+            ? 'The radio adds its sender name. A channel message is a broadcast and cannot be recalled.'
+            : 'Flood fallback clears this contact’s saved radio route. Sent packets cannot be recalled.'}</p>
         </form>
       )}
       {conversation.recipient && <RetrySettings key={radioKey} radioKey={radioKey} current={options} direct={direct} />}
