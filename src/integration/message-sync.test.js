@@ -123,3 +123,20 @@ test('does not request queued receipts while other cache writes need attention',
   assert.equal(source.calls, 0)
   assert.match(sync.getSnapshot().error, /cache writes/)
 })
+
+test('received messages and concurrent contact edits are retained together', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const contact = { publicKey: '010203040506' + 'ab'.repeat(26), name: 'Contact' }
+  await storage.update(key, { contacts: [contact] })
+  const sync = new MessageSync(sourceFor([direct]), () => openRadioStorage(factory))
+  await Promise.all([
+    sync.sync(),
+    storage.update(key, { contactPreference: { publicKey: contact.publicKey, favorite: true } }),
+  ])
+  const data = await storage.read(key)
+  assert.deepEqual(data.contacts, [contact])
+  assert.equal(data.contactPreferences[0].favorite, true)
+  assert.equal(data.messages[0].text, 'hi')
+  storage.close()
+})

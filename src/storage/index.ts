@@ -21,6 +21,9 @@ export type StoredChannel = {
   name: string
 }
 
+export type ContactPreference = { publicKey: string; customName: string | null; favorite: boolean }
+export type ContactPreferenceEdit = { publicKey: string; customName?: string | null; favorite?: boolean }
+
 export type StoredMessage = {
   /** Caller-generated receipt ID, reused when retrying the same write. */
   id: string
@@ -58,6 +61,7 @@ export type RadioData = {
   messages: StoredMessage[]
   drafts: StoredDraft[]
   preferences: LocalPreferences | null
+  contactPreferences?: ContactPreference[]
 }
 
 export type RadioUpdate = {
@@ -66,6 +70,7 @@ export type RadioUpdate = {
   messages?: readonly StoredMessage[]
   draft?: { conversationId: string; text: string | null }
   preferences?: LocalPreferences
+  contactPreference?: ContactPreferenceEdit
 }
 
 type StorageErrorCode = 'identity' | 'update' | 'unavailable' | 'blocked' | 'open' | 'read' | 'write'
@@ -92,7 +97,7 @@ export function radioKeyFromPublicKey(publicKey: string): RadioKey {
 }
 
 function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
-  const { contacts, channels, messages, draft, preferences } = update
+  const { contacts, channels, messages, draft, preferences, contactPreference } = update
   const next = { ...current }
   if (contacts) {
     next.contacts = contacts.map(({ publicKey, name, details }) => ({
@@ -131,6 +136,17 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   }
   if (preferences) {
     next.preferences = { selectedConversationId: preferences.selectedConversationId }
+  }
+  if (contactPreference) {
+    const publicKey = radioKeyFromPublicKey(contactPreference.publicKey)
+    const existing = current.contactPreferences ?? []
+    const previous = existing.find((entry) => entry.publicKey === publicKey)
+    const customName = contactPreference.customName === undefined
+      ? previous?.customName ?? null
+      : contactPreference.customName?.trim().slice(0, 120) || null
+    const favorite = contactPreference.favorite ?? previous?.favorite ?? false
+    next.contactPreferences = existing.filter((entry) => entry.publicKey !== publicKey)
+    if (customName || favorite) next.contactPreferences.push({ publicKey, customName, favorite })
   }
   return next
 }

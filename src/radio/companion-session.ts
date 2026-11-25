@@ -6,6 +6,8 @@ import type { CompanionChannel, CompanionContact, CompanionDevice, CompanionMess
 import { expectResponse, SerialLink } from './serial-link.ts'
 import { browserSerialEnvironment, choosePort } from './web-serial.ts'
 import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
+import { addContactCommand, contactPublicKey, removeContactCommand, writeContactCommand } from './contact-commands.ts'
+import type { NewContact } from './contact-commands.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -73,6 +75,7 @@ export class CompanionSession {
   private cancelDelay?: () => void
   private port?: CompanionSerialPort
   private expectedKey?: string
+  private contactWritePending = false
 
   constructor(options: { environment?: WebSerialEnvironment; timeoutMs?: number; locks?: LockProvider; retryDelays?: readonly number[] } = {}) {
     this.environment = options.environment
@@ -262,6 +265,9 @@ export class CompanionSession {
     if (this.receiptHolds.size) {
       throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
     }
+    if (this.contactWritePending) {
+      throw new CompanionError('protocol', 'Wait for the contact change to finish before syncing messages.')
+    }
     const hold = Symbol()
     this.receiptHolds.add(hold)
     let used = false
@@ -301,6 +307,79 @@ export class CompanionSession {
     }
   }
 
+  private async changeContacts(
+    radioKey: string,
+    write: (link: SerialLink) => Promise<readonly CompanionContact[]>,
+  ) {
+    const attempt = this.attempt
+    if (
+      !attempt?.link || this.snapshot.phase !== 'ready'
+      || this.snapshot.device?.publicKey !== radioKey
+    ) throw new Error('Connect the selected radio and wait for it to finish syncing.')
+    if (this.contactWritePending) throw new Error('A radio contact change is already in progress.')
+    if (this.receiptHolds.size) throw new Error('Finish message sync or save the pending receipt before changing contacts.')
+
+    this.contactWritePending = true
+    try {
+      const contacts = await write(attempt.link)
+      if (this.attempt !== attempt) {
+        throw new Error('The radio disconnected. Reconnect and check its contacts before retrying.')
+      }
+      this.update({ contacts })
+    } finally {
+      this.contactWritePending = false
+    }
+  }
+
+  private async readContacts(link: SerialLink, progress?: (status: SyncProgress) => void) {
+    const contacts: CompanionContact[] = []
+    let total: number | null = null
+    await link.request(Uint8Array.of(Command.contacts), (frame) => {
+      if (total === null) {
+        expectResponse(frame, Response.contactsStart)
+        total = contactCount(frame)
+      } else {
+        expectResponse(frame, Response.contact, Response.contactsEnd)
+        if (frame[0] === Response.contactsEnd) return { value: undefined }
+        contacts.push(decodeContact(frame))
+      }
+      progress?.({ stage: 'contacts', completed: contacts.length, total })
+    })
+    return contacts
+  }
+
+  readonly addContact = async (radioKey: string, input: NewContact) => {
+    const { command, contact } = addContactCommand(input)
+    await this.changeContacts(radioKey, async (link) => {
+      if (contact.publicKey === radioKey) throw new Error('A radio cannot add itself as a contact.')
+      if (this.snapshot.contacts.some(({ publicKey }) => publicKey === contact.publicKey)) {
+        throw new Error('This contact already exists on the radio.')
+      }
+      // The firmware's add command can also overwrite a contact. Recheck the
+      // current device table because it may have changed since initial sync.
+      const contacts = await this.readContacts(link)
+      if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') {
+        throw new Error('The radio disconnected before the contact could be added.')
+      }
+      if (contacts.some(({ publicKey }) => publicKey === contact.publicKey)) {
+        this.update({ contacts })
+        throw new Error('This contact already exists on the radio.')
+      }
+      const capacity = this.snapshot.device?.capabilities.maxContacts ?? 0
+      if (capacity > 0 && contacts.length >= capacity) throw new Error('Radio contact storage is full.')
+      await writeContactCommand(link, command)
+      return [...contacts, contact]
+    })
+  }
+
+  readonly removeContact = async (radioKey: string, publicKey: string) => {
+    const key = contactPublicKey(publicKey)
+    await this.changeContacts(radioKey, async (link) => {
+      await writeContactCommand(link, removeContactCommand(key))
+      return this.snapshot.contacts.filter((contact) => contact.publicKey !== key)
+    })
+  }
+
   private async initialize(attempt: Attempt, link: SerialLink) {
     const capabilities = await link.request(Uint8Array.of(Command.deviceQuery, 3), (frame) => {
       expectResponse(frame, Response.deviceInfo)
@@ -321,19 +400,7 @@ export class CompanionSession {
     this.expectedKey = device.publicKey
     this.update({ device, phase: 'syncing', progress: { stage: 'contacts', completed: 0, total: null } })
 
-    const contacts: CompanionContact[] = []
-    let total: number | null = null
-    await link.request(Uint8Array.of(Command.contacts), (frame) => {
-      if (total === null) {
-        expectResponse(frame, Response.contactsStart)
-        total = contactCount(frame)
-      } else {
-        expectResponse(frame, Response.contact, Response.contactsEnd)
-        if (frame[0] === Response.contactsEnd) return { value: undefined }
-        contacts.push(decodeContact(frame))
-      }
-      this.update({ progress: { stage: 'contacts', completed: contacts.length, total } })
-    })
+    const contacts = await this.readContacts(link, (progress) => this.update({ progress }))
     if (this.attempt !== attempt) return
     const slots = capabilities.maxChannels
     this.update({ contacts, progress: { stage: 'channels', completed: 0, total: slots } })

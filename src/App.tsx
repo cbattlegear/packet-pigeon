@@ -2,7 +2,9 @@ import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } fr
 import { CompanionSession, getWebSerialSupport } from './radio/index.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import { MessageSync } from './integration/message-sync.ts'
+import { ContactsPanel } from './contacts/ContactsPanel.tsx'
 import { mapRadioContacts } from './map/nodes.ts'
+import type { Coordinates } from './map/nodes.ts'
 import './App.css'
 import { OfflineStatus } from './offline/OfflineStatus.tsx'
 
@@ -26,8 +28,7 @@ function isMapSection(section: Section): section is 'Map' | 'Tools' {
   return section === 'Map' || section === 'Tools'
 }
 
-const sectionDescriptions: Record<Exclude<Section, 'Chats' | 'Map' | 'Tools'>, string> = {
-  Contacts: 'Contacts will appear here when that feature is available.',
+const sectionDescriptions: Record<Exclude<Section, 'Chats' | 'Contacts' | 'Map' | 'Tools'>, string> = {
   Channels: 'Channels will appear here when that feature is available.',
   Settings: 'Settings will appear here when they are available.',
 }
@@ -53,10 +54,11 @@ function StateMessage({ kind, title, description }: StateMessageProps) {
 }
 
 function App() {
-  const [{ activeSection, hasOpenedMap }, setNavigation] = useState(() => {
+  const [{ activeSection, hasOpenedMap, hasOpenedContacts }, setNavigation] = useState(() => {
     const activeSection = sectionFromHash()
-    return { activeSection, hasOpenedMap: isMapSection(activeSection) }
+    return { activeSection, hasOpenedMap: isMapSection(activeSection), hasOpenedContacts: activeSection === 'Contacts' }
   })
+  const [contactFocus, setContactFocus] = useState<{ position: Coordinates; terrain: boolean } | null>(null)
   const mapVisible = isMapSection(activeSection)
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
@@ -87,6 +89,7 @@ function App() {
       setNavigation((previous) => ({
         activeSection,
         hasOpenedMap: previous.hasOpenedMap || isMapSection(activeSection),
+        hasOpenedContacts: previous.hasOpenedContacts || activeSection === 'Contacts',
       }))
     }
     window.addEventListener('hashchange', updateSection)
@@ -232,7 +235,7 @@ function App() {
               )}
             </section>
           </div>
-        ) : !mapVisible && (
+        ) : !mapVisible && activeSection !== 'Contacts' && (
           <section className="section-pane" aria-labelledby="section-heading">
             <div className="pane-heading">
               <h1 id="section-heading">{activeSection}</h1>
@@ -245,6 +248,19 @@ function App() {
             />
           </section>
         )}
+        {hasOpenedContacts && (
+          <div hidden={activeSection !== 'Contacts'}>
+            <div className="section-pane">
+              <div className="pane-heading"><h1>Contacts</h1></div>
+              <ContactsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving}
+                messageSyncing={messageStatus.syncing}
+                onMap={(position, terrain) => {
+                  setContactFocus({ position, terrain })
+                  window.location.hash = terrain ? 'tools' : 'map'
+                }} />
+            </div>
+          </div>
+        )}
         {hasOpenedMap && (
           <div hidden={!mapVisible}>
             <div className="section-pane">
@@ -252,7 +268,7 @@ function App() {
                 <h1>{activeSection === 'Tools' ? 'Tools' : 'Map'}</h1>
               </div>
               <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
-                <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'} />
+                <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'} contactFocus={contactFocus} />
               </Suspense>
             </div>
           </div>

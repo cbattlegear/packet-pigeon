@@ -5,9 +5,9 @@ with React, TypeScript, Vite, and npm.
 
 The current app is a client-only shell with keyboard-accessible navigation and
 user-initiated USB companion connection. It syncs contacts and channels into a
-per-radio local cache. The map can show synced contacts from the current
-session. Chats can manually sync and display received queue entries. The app
-does not yet send mesh packets.
+per-radio local cache. Contacts supports offline browsing, and the map can
+show synced contacts from the current session. Chats can manually sync and
+display received queue entries. The app does not yet send mesh packets.
 
 ## Getting started
 
@@ -88,6 +88,19 @@ newer. It uses the firmware's framed serial protocol directly: MeshCore.js was
 used as a reference, but its package entrypoint includes native transports and
 its browser adapter does not provide the request deadlines and error handling
 needed here. The session does not expose channel secrets or transmit over the mesh.
+
+## Contacts
+
+Open **Contacts** after USB sync, or select the full key of a saved radio to
+browse its contacts offline. Search by either name or public key, filter by
+role or favorite, and sort by name, last advert, or latest saved direct message.
+Local names and favorites stay with the selected radio's browser cache.
+
+A connected radio that has finished syncing can add contacts and remove
+individual or selected contacts after confirmation. The app reports rejected
+changes and how many removals succeeded if a batch stops early. Use **Export
+selected** for a JSON copy or **Copy public key** from a contact's details.
+Exports include public keys and any advertised positions.
 
 ## Static hosting and offline browsing
 

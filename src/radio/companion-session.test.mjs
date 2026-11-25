@@ -142,6 +142,101 @@ test('reports support, chooser cancellation and permission failure distinctly', 
   assert.equal(denied.getSnapshot().error.code, 'chooser-failed')
 })
 
+test('writes contacts only to the selected ready radio and keeps rejected writes recoverable', async () => {
+  let addReply = [1, 3]
+  let contactDiscovered = false
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, Number(contactDiscovered), 0, 0, 0)
+        if (contactDiscovered) serial.emit(...contactInfo())
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      case 9: serial.emit(...addReply); break
+      case 15: serial.emit(0); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const session = sessionWith(port)
+  const radioKey = 'ab'.repeat(32)
+  const contact = { publicKey: 'cb'.repeat(32), name: 'Relay 📡', type: 2 }
+  await session.connect()
+  await assert.rejects(session.addContact('cc'.repeat(32), contact), /Connect the selected radio/)
+  await assert.rejects(session.addContact(radioKey, { ...contact, name: '📡'.repeat(8) }), /31 UTF-8/)
+  assert.deepEqual(port.commands.map(([code]) => code), [22, 1, 4])
+
+  await assert.rejects(session.addContact(radioKey, contact), /storage is full/)
+  assert.equal(session.getSnapshot().phase, 'ready')
+  assert.deepEqual(session.getSnapshot().contacts, [])
+  addReply = [0]
+  await session.addContact(radioKey, contact)
+  await assert.rejects(session.addContact(radioKey, contact), /already exists/)
+  const add = port.commands.at(-1)
+  assert.equal(add.length, 144)
+  assert.deepEqual(add.slice(33, 36), [2, 0, 0xff])
+  assert.deepEqual(add.slice(100, 100 + encode(contact.name).length), [...encode(contact.name)])
+  assert.deepEqual(session.getSnapshot().contacts.map(({ publicKey }) => publicKey), [contact.publicKey])
+
+  await session.removeContact(radioKey, contact.publicKey)
+  assert.deepEqual(port.commands.at(-1), [15, ...Array(32).fill(0xcb)])
+  assert.deepEqual(session.getSnapshot().contacts, [])
+  contactDiscovered = true
+  await assert.rejects(session.addContact(radioKey, { ...contact, publicKey: 'bc'.repeat(32) }), /already exists/)
+  assert.equal(port.commands.at(-1)[0], 4)
+  assert.equal(session.getSnapshot().contacts[0].publicKey, 'bc'.repeat(32))
+  await session.disconnect()
+  await assert.rejects(session.removeContact(radioKey, contact.publicKey), /Connect the selected radio/)
+})
+
+test('contact writes and queued message requests do not interrupt one another', async () => {
+  let contactReads = 0
+  let finishContactRead
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, 0, 0, 0, 0)
+        if (++contactReads === 1) serial.emit(4, 0, 0, 0, 0)
+        else finishContactRead = () => serial.emit(4, 0, 0, 0, 0)
+        break
+      case 9:
+      case 15: serial.emit(0); break
+      case 10: serial.emit(10); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const session = sessionWith(port)
+  const radioKey = 'ab'.repeat(32)
+  const contact = { publicKey: 'cb'.repeat(32), name: 'Relay', type: 2 }
+  const sync = new MessageSync(session, () => openRadioStorage(new IDBFactory()))
+  await session.connect()
+  const adding = session.addContact(radioKey, contact)
+  await waitFor(() => typeof finishContactRead === 'function')
+  await sync.sync()
+  assert.match(sync.getSnapshot().error, /contact change/)
+  assert.equal(port.commands.some(([code]) => code === 10), false)
+  finishContactRead()
+  await adding
+  assert.equal(session.getSnapshot().contacts[0].publicKey, contact.publicKey)
+
+  const lease = session.reserveQueuedMessage(radioKey)
+  try {
+    await assert.rejects(session.removeContact(radioKey, contact.publicKey), /message sync/)
+    assert.equal(port.commands.some(([code]) => code === 15), false)
+    assert.equal(await lease.request(() => assert.fail('Queue should be empty')), false)
+  } finally {
+    lease.release()
+  }
+  await session.removeContact(radioKey, contact.publicKey)
+  assert.deepEqual(session.getSnapshot().contacts, [])
+  await sync.sync()
+  assert.equal(sync.getSnapshot().error, null)
+  await session.disconnect()
+})
+
 test('handshakes and syncs advertised slots without dequeuing messages', async () => {
   const pendingMessages = [
     [16, 0xf6, 0, 0, 1, 2, 3, 4, 5, 6, 0xff, 2, 42, 0, 0, 0, 7, 8, 9, 10, ...encode('hello')],
