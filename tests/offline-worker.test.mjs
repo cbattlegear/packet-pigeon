@@ -6,12 +6,13 @@ import { runInNewContext } from 'node:vm'
 const worker = readFileSync(new URL('../dist/sw.js', import.meta.url), 'utf8')
 const scope = 'https://example.test/packet-pigeon/'
 
-function loadWorker({ cacheNames = [], cacheFailure = false } = {}) {
+function loadWorker({ cacheNames = [], cacheFailure = false, precacheFailure = false } = {}) {
   const listeners = new Map()
   const precached = new Map()
   const deleted = []
   const cache = {
     async addAll(requests) {
+      if (precacheFailure) throw new Error('Shell asset unavailable')
       for (const request of requests) precached.set(request.url, request)
     },
     async match(url) {
@@ -85,4 +86,15 @@ test('falls back to the network when reading the shell cache fails', async () =>
   await assert.rejects(dispatch('install'), /Cache unavailable/)
   const response = await dispatch('fetch', request(scope, 'navigate'))
   assert.equal(await response.text(), 'network')
+})
+
+test('discards only the failed new cache when a shell asset is unavailable', async () => {
+  const oldCache = `packet-pigeon-shell:${scope}:previous`
+  const { dispatch, deleted } = loadWorker({
+    cacheNames: ['radio-records', oldCache], precacheFailure: true,
+  })
+  await assert.rejects(dispatch('install'), /Shell asset unavailable/)
+  assert.equal(deleted.length, 1)
+  assert.match(deleted[0], /:[a-f0-9]{64}$/)
+  assert.notEqual(deleted[0], oldCache)
 })

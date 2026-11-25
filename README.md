@@ -39,16 +39,19 @@ content types. Share the directory URL or direct links such as
 For future USB radio connections, use desktop Chrome or Edge over HTTPS or
 localhost.
 
-Open the production build online once so the browser can cache the app shell.
-The service worker caches the built HTML and assets for its deployment directory.
+Open the production build online and wait for **App available offline** in the
+header. The service worker caches the built HTML and assets for its deployment
+directory.
 Keep `sw.js` revalidatable (for example, `Cache-Control: no-cache`). An update
 waits until all tabs using the previous version are closed. If a new cache fails
 to install, the previous version stays active. Cache cleanup is limited to old
-shell builds in the same directory. Radio history belongs in separate browser
-storage and can be read offline when the per-radio persistence work is available.
+shell builds in the same directory. This leaves local history and other
+browser storage available to the app. Use the same origin and subfolder when
+opening the app offline. Deployments on different origins each have their own
+browser storage.
 
 To smoke-test the production cache locally, open the URL from `npm run preview`,
-wait for the service worker to activate, switch the browser offline, and open
+wait for **App available offline**, switch the browser offline, and open
 the same URL in another tab. After building, run
 `node --test tests/offline-worker.test.mjs` to check cache scope and fallback.
 

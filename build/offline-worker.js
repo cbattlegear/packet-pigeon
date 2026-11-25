@@ -9,11 +9,16 @@ const cacheName = cachePrefix + buildId
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(cacheName)
-    await cache.addAll([...assets].map((url) => new Request(url, {
-      cache: 'reload',
-      mode: 'same-origin',
-      redirect: 'error',
-    })))
+    try {
+      await cache.addAll([...assets].map((url) => new Request(url, {
+        cache: 'reload',
+        mode: 'same-origin',
+        redirect: 'error',
+      })))
+    } catch (error) {
+      await caches.delete(cacheName).catch(() => {})
+      throw error
+    }
   })())
 })
 
