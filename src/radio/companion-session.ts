@@ -2,7 +2,7 @@ import {
   Command, CompanionError, Response, contactCount, decodeCapabilities, decodeChannel, decodeContact,
   decodeSelf,
 } from './protocol.ts'
-import type { CompanionChannel, CompanionContact, CompanionDevice, CompanionMessage } from './protocol.ts'
+import type { CompanionChannel, CompanionContact, CompanionDevice, CompanionMessage, RadioParameters } from './protocol.ts'
 import { expectResponse, SerialLink } from './serial-link.ts'
 import type { CompanionLinkPort } from './serial-link.ts'
 import { browserSerialEnvironment, choosePort } from './web-serial.ts'
@@ -16,6 +16,7 @@ import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bl
 import { readAdvertPath, readAutoAddPolicy, writeAutoAddPolicy } from './discovery-commands.ts'
 import type { AutoAddPolicy } from './discovery-commands.ts'
 import { channelName, makeChannelSecret, readChannelSlot, secretHex, writeChannelSlot } from './channel-commands.ts'
+import { writeSetupPathWidth, writeSetupRadioSettings } from './setup-commands.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -515,6 +516,42 @@ export class CompanionSession {
       }
     })
   }
+
+  readonly readChannelShareKey = (radioKey: string, index: number, expectedName: string) =>
+    this.runRadioCommand(radioKey, async (link) => {
+      if (!Number.isInteger(index) || index < 0 || index >= this.snapshot.device!.capabilities.maxChannels) {
+        throw new Error('Invalid channel slot.')
+      }
+      const slot = await readChannelSlot(link, index)
+      if (!slot || !expectedName || slot.channel.name !== expectedName || slot.secret.every((byte) => byte === 0)) {
+        throw new Error('The channel changed on the radio. Reconnect and check before sharing.')
+      }
+      return secretHex(slot.secret)
+    })
+
+  readonly setSetupRadioSettings = (radioKey: string, settings: RadioParameters) =>
+    this.runRadioCommand(radioKey, async (link) => {
+      const device = this.snapshot.device!
+      if (device.capabilities.firmwareProtocolVersion >= 9 && device.capabilities.repeatEnabled === null) {
+        throw new Error('The radio did not report its current repeat setting, so the radio preset cannot be changed safely.')
+      }
+      await writeSetupRadioSettings(link, settings, device.capabilities.repeatEnabled)
+      if (this.snapshot.device === device && this.snapshot.phase === 'ready') {
+        this.update({ device: { ...device, radioParameters: settings } })
+      }
+    })
+
+  readonly setSetupPathWidth = (radioKey: string, width: 1 | 2 | 3) =>
+    this.runRadioCommand(radioKey, async (link) => {
+      const device = this.snapshot.device!
+      if (device.capabilities.pathHashMode === null) {
+        throw new Error('This firmware does not report support for changing the path hash width.')
+      }
+      await writeSetupPathWidth(link, width)
+      if (this.snapshot.device === device && this.snapshot.phase === 'ready') {
+        this.update({ device: { ...device, capabilities: { ...device.capabilities, pathHashMode: width - 1 } } })
+      }
+    })
 
   private async withDirectContact<T>(
     radioKey: string,

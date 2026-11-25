@@ -9,6 +9,7 @@ import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { ContactPreferenceEdit, RadioData, RadioKey, StoredContact } from '../storage/index.ts'
 import { contactEntries, contactPosition, contactRole, contactRoute, roleLabel, visibleContacts } from './model.ts'
 import type { ContactEntry, ContactSort } from './model.ts'
+import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import './contacts.css'
 
 type ContactsProps = {
@@ -18,6 +19,8 @@ type ContactsProps = {
   messageSyncing: boolean
   messageSending: boolean
   onMap: (position: Coordinates, terrain: boolean) => void
+  onImport?: () => void
+  onShare?: (link: string) => void
 }
 
 type CacheView = { keys: RadioKey[]; key: RadioKey | null; data: RadioData | null; error: string | null }
@@ -55,7 +58,7 @@ function exportContacts(contacts: readonly ContactEntry[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
-export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap }: ContactsProps) {
+export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare }: ContactsProps) {
   const live = snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [offlineChoice, setOfflineChoice] = useState<RadioKey | '' | null>(null)
@@ -120,6 +123,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
         <p>{cache.error}</p>
         <button type="button" onClick={() => setRefresh((value) => value + 1)}>Retry loading contacts</button>
       </div>}
+      {onImport && <div className="contact-actions"><button type="button" onClick={onImport}>Import link or QR code</button></div>}
       {radioKey ? (
         <ContactBrowser
           key={radioKey}
@@ -129,6 +133,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
           canWrite={liveKey === radioKey && snapshot.phase === 'ready'}
           savePreference={savePreference}
           onMap={onMap}
+          onShare={onShare}
         />
       ) : <p className="contact-note">{cache.keys.length
         ? 'Select a saved radio to browse its contacts.' : 'Connect a radio to sync its contacts.'}</p>}
@@ -143,9 +148,10 @@ type BrowserProps = {
   canWrite: boolean
   savePreference: (radioKey: RadioKey, change: ContactPreferenceEdit) => Promise<void>
   onMap: ContactsProps['onMap']
+  onShare?: ContactsProps['onShare']
 }
 
-function ContactBrowser({ radioKey, entries, session, canWrite, savePreference, onMap }: BrowserProps) {
+function ContactBrowser({ radioKey, entries, session, canWrite, savePreference, onMap, onShare }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
   const [sort, setSort] = useState<ContactSort>('name')
@@ -299,7 +305,7 @@ function ContactBrowser({ radioKey, entries, session, canWrite, savePreference, 
         </ul>
         {detail ? (
           <ContactDetails contact={detail} busy={busy} canWrite={canWrite} location={location} locate={locate}
-            onMap={onMap} copyKey={copyKey} edit={edit} remove={() => void remove([detail])} />
+            onMap={onMap} onShare={onShare} copyKey={copyKey} edit={edit} remove={() => void remove([detail])} />
         ) : <p className="contact-note">{visited.length ? 'Select a contact to see details.' : 'No contacts match.'}</p>}
       </div>
       {canWrite ? (
@@ -326,13 +332,15 @@ function contactLabel(contact: ContactEntry) {
 }
 
 function ContactDetails({
-  contact, busy, canWrite, location, locate, onMap, copyKey, edit, remove,
+  contact, busy, canWrite, location, locate, onMap, onShare, copyKey, edit, remove,
 }: {
   contact: ContactEntry; busy: boolean; canWrite: boolean; location: Coordinates | null
   locate: () => void; onMap: ContactsProps['onMap']; copyKey: (key: string) => Promise<void>
+  onShare?: ContactsProps['onShare']
   edit: (change: ContactPreferenceEdit, success: string) => Promise<void>; remove: () => void
 }) {
   const position = contactPosition(contact.details)
+  const shareLink = contactShareLink(contact.name, contact.publicKey, contact.details?.type)
   const lastHeard = contact.details?.lastAdvertisedAt
   return (
     <section className="contact-details" aria-labelledby="contact-detail-heading">
@@ -363,6 +371,7 @@ function ContactDetails({
         }, 'Favorite updated.')}>{contact.favorite ? 'Remove favorite' : 'Add favorite'}</button>
         <button type="button" onClick={() => void copyKey(contact.publicKey)}>Copy public key</button>
         <button type="button" onClick={() => exportContacts([contact])}>Export contact</button>
+        {shareLink && onShare && <button type="button" onClick={() => onShare(shareLink)}>Share contact link or QR code</button>}
         {position && <button type="button" onClick={locate}>Show distance</button>}
         {mapPosition(position) && <>
           <button type="button" onClick={() => onMap(position, false)}>Show on map</button>

@@ -144,6 +144,9 @@ test('channel management rechecks slots, preserves keys on rename, and refuses f
   hold.release()
   await assert.rejects(session.createChannel(key, { kind: 'public', name: 'Other', secret: '' }), /key already exists/)
   assert.equal(port.commands.at(-1)[0], 31)
+  assert.equal(await session.readChannelShareKey(key, 0, 'Public'), Buffer.from(publicSecret).toString('hex'))
+  assert.equal('secret' in session.getSnapshot().channels[0], false)
+  await assert.rejects(session.readChannelShareKey(key, 0, 'Wrong name'), /changed on the radio/)
   await session.createChannel(key, { kind: 'hashtag', name: '#test', secret: '' })
   assert.deepEqual(session.getSnapshot().channels.map(({ name }) => name), ['Public', '#test'])
   assert.equal(Buffer.from(slots[1].slice(32)).toString('hex'), '9cd8fcf22a47333b591d96a2b848b73f')
@@ -169,6 +172,36 @@ test('channel management rechecks slots, preserves keys on rename, and refuses f
   await session.createChannel(key, { kind: 'join', name: 'Private', secret: privateSecret })
   await assert.rejects(session.createChannel(key, { kind: 'join', name: 'Other private', secret: privateSecret }), /key already exists/)
   assert.equal(port.commands.at(-1)[0], 31)
+  await session.disconnect()
+})
+
+test('applies the setup preset and hash width to the chosen radio, preserving repeat mode', async () => {
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 11: serial.emit(0); break
+      case 61: serial.emit(command[2] === 0 ? 1 : 0); break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const key = 'ab'.repeat(32)
+  const session = sessionWith(port)
+  await session.connect()
+  const settings = { frequencyMHz: 910.525, bandwidthKHz: 62.5, spreadingFactor: 7, codingRate: 5 }
+  await assert.rejects(session.setSetupRadioSettings('12'.repeat(32), settings), /Connect the selected radio/)
+  await session.setSetupRadioSettings(key, settings)
+  const command = Uint8Array.from(port.commands.at(-1))
+  const data = new DataView(command.buffer)
+  assert.equal(data.getUint32(1, true), 910525)
+  assert.equal(data.getUint32(5, true), 62500)
+  assert.deepEqual([...command.slice(9)], [7, 5, 1])
+  assert.deepEqual(session.getSnapshot().device.radioParameters, settings)
+  await session.setSetupPathWidth(key, 2)
+  assert.deepEqual(port.commands.at(-1), [61, 0, 1])
+  await assert.rejects(session.setSetupPathWidth(key, 1), /rejected the command/)
+  assert.equal(session.getSnapshot().device.capabilities.pathHashMode, 1)
   await session.disconnect()
 })
 
