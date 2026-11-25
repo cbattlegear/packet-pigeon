@@ -120,7 +120,8 @@ function contactInfo() {
 test('channel management rechecks slots, preserves keys on rename, and refuses full or stale slots', async () => {
   const slots = [new Uint8Array(48), new Uint8Array(48)]
   slots[0].set(encode('Public'))
-  slots[0].fill(0x42, 32)
+  const publicSecret = Uint8Array.from(Buffer.from('8b3387e9c5cdea6ac9e5edbaa115cd72', 'hex'))
+  slots[0].set(publicSecret, 32)
   let rejectWrite = false
   const port = new FixturePort((command, serial) => {
     switch (command[0]) {
@@ -141,13 +142,15 @@ test('channel management rechecks slots, preserves keys on rename, and refuses f
   const hold = session.reserveQueuedMessage(key)
   await assert.rejects(session.createChannel(key, { kind: 'public', name: 'Other', secret: '' }), /Finish message sync/)
   hold.release()
+  await assert.rejects(session.createChannel(key, { kind: 'public', name: 'Other', secret: '' }), /key already exists/)
+  assert.equal(port.commands.at(-1)[0], 31)
   await session.createChannel(key, { kind: 'hashtag', name: '#test', secret: '' })
   assert.deepEqual(session.getSnapshot().channels.map(({ name }) => name), ['Public', '#test'])
   assert.equal(Buffer.from(slots[1].slice(32)).toString('hex'), '9cd8fcf22a47333b591d96a2b848b73f')
-  await assert.rejects(session.createChannel(key, { kind: 'public', name: 'Other', secret: '' }), /No empty channel slot/)
+  await assert.rejects(session.createChannel(key, { kind: 'join', name: 'Other', secret: '23'.repeat(16) }), /No empty channel slot/)
   await assert.rejects(session.changeChannel(key, 1, '#test', '#other'), /cannot be renamed/)
   await session.changeChannel(key, 0, 'Public', 'General')
-  assert.deepEqual([...slots[0].slice(32)], Array(16).fill(0x42))
+  assert.deepEqual([...slots[0].slice(32)], [...publicSecret])
   await assert.rejects(session.changeChannel(key, 0, 'Public', null), /changed on the radio/)
   rejectWrite = true
   await assert.rejects(session.changeChannel(key, 0, 'General', null), /device error 5/)
@@ -155,6 +158,10 @@ test('channel management rechecks slots, preserves keys on rename, and refuses f
   rejectWrite = false
   await session.changeChannel(key, 1, '#test', null)
   assert.ok(slots[1].every((byte) => byte === 0))
+  const privateSecret = '12'.repeat(16)
+  await session.createChannel(key, { kind: 'join', name: 'Private', secret: privateSecret })
+  await assert.rejects(session.createChannel(key, { kind: 'join', name: 'Other private', secret: privateSecret }), /key already exists/)
+  assert.equal(port.commands.at(-1)[0], 31)
   await session.disconnect()
 })
 

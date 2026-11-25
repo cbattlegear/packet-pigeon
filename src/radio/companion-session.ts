@@ -468,14 +468,19 @@ export class CompanionSession {
     return this.runRadioCommand(radioKey, async (link) => {
       const count = this.snapshot.device!.capabilities.maxChannels
       let free = -1
+      let duplicateSecret = false
       const channels: CompanionChannel[] = []
       for (let index = 0; index < count; index++) {
         const slot = await readChannelSlot(link, index)
-        if (slot?.channel.name) channels.push(slot.channel)
+        if (slot?.channel.name) {
+          channels.push(slot.channel)
+          if (slot.secret.every((byte, position) => byte === secret[position])) duplicateSecret = true
+        }
         else if (slot && slot.secret.every((byte) => byte === 0) && free < 0) free = index
       }
       this.update({ channels })
       if (channels.some((channel) => channel.name === name)) throw new Error('A channel with this name already exists.')
+      if (duplicateSecret) throw new Error('A channel with this key already exists on the radio. Use its existing slot.')
       if (free < 0) throw new Error('No empty channel slot is available on this radio.')
       await writeChannelSlot(link, free, name, secret)
       this.update({ channels: [...channels, { index: free, name }] })
