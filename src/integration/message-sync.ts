@@ -1,0 +1,137 @@
+import { CompanionError, Response, decodeQueuedMessage } from '../radio/protocol.ts'
+import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
+import type { RadioData, RadioKey, StoredMessage } from '../storage/index.ts'
+
+type MessageSource = {
+  getSnapshot(): { phase: string; device: { publicKey: string } | null }
+  nextQueuedMessage(publicKey: string): Promise<Uint8Array | null>
+}
+
+type PendingReceipt = { key: RadioKey; message: StoredMessage }
+type Status = {
+  syncing: boolean
+  error: string | null
+  pending: boolean
+  key: RadioKey | null
+  data: RadioData | null
+}
+
+const knownResponses: readonly number[] = [
+  Response.directText, Response.directTextV3, Response.channelText,
+  Response.channelTextV3, Response.channelData,
+]
+
+function makeReceipt(frame: Uint8Array, id: string): StoredMessage {
+  const rawHex = Array.from(frame, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  if (knownResponses.includes(frame[0])) {
+    try {
+      const receipt = { ...decodeQueuedMessage(frame), receiptId: id }
+      return {
+        id, rawHex, receipt,
+        conversationId: receipt.kind === 'direct-text'
+          ? `direct:${receipt.senderKeyPrefix}` : `channel:${receipt.channelIndex}`,
+        sender: receipt.kind === 'direct-text' ? receipt.senderKeyPrefix : '',
+        timestamp: receipt.kind === 'channel-data' ? null : receipt.senderTimestamp * 1000,
+        text: receipt.kind === 'channel-data' ? '' : receipt.text,
+      }
+    } catch (error) {
+      if (!(error instanceof CompanionError) || error.code !== 'protocol') throw error
+    }
+  }
+  return { id, rawHex, conversationId: 'unsupported', sender: '', timestamp: null, text: '' }
+}
+
+export class MessageSync {
+  private readonly events = new EventTarget()
+  private readonly source: MessageSource
+  private readonly openStorage: typeof openRadioStorage
+  private readonly cacheReady: () => boolean
+  private pendingReceipt?: PendingReceipt
+  private loadVersion = 0
+  private status: Status = { syncing: false, error: null, pending: false, key: null, data: null }
+
+  constructor(source: MessageSource, openStorage = openRadioStorage, cacheReady = () => true) {
+    this.source = source
+    this.openStorage = openStorage
+    this.cacheReady = cacheReady
+  }
+
+  readonly subscribe = (listener: () => void) => {
+    this.events.addEventListener('change', listener)
+    return () => this.events.removeEventListener('change', listener)
+  }
+
+  readonly getSnapshot = () => this.status
+
+  private update(update: Partial<Status>) {
+    this.status = { ...this.status, ...update }
+    this.events.dispatchEvent(new Event('change'))
+  }
+
+  readonly load = async (publicKey: string) => {
+    const version = ++this.loadVersion
+    try {
+      const key = radioKeyFromPublicKey(publicKey)
+      this.update({ key, data: null })
+      const storage = await this.openStorage()
+      try {
+        const data = await storage.read(key)
+        if (version === this.loadVersion && !this.status.syncing) this.update({ data })
+      } finally {
+        storage.close()
+      }
+    } catch (error) {
+      if (version === this.loadVersion) {
+        this.update({ error: error instanceof Error ? error.message : 'Could not load messages.' })
+      }
+    }
+  }
+
+  readonly sync = async () => {
+    if (this.status.syncing) return
+    ++this.loadVersion
+    this.update({ syncing: true, error: null })
+    let storage: Awaited<ReturnType<typeof openRadioStorage>> | undefined
+    try {
+      storage = await this.openStorage()
+      if (this.pendingReceipt) {
+        await storage.update(this.pendingReceipt.key, { messages: [this.pendingReceipt.message] })
+        this.pendingReceipt = undefined
+        this.update({ pending: false })
+      }
+      const snapshot = this.source.getSnapshot()
+      if (snapshot.phase !== 'ready' || !snapshot.device) {
+        throw new Error('Connect a radio before syncing messages.')
+      }
+      const key = radioKeyFromPublicKey(snapshot.device.publicKey)
+      this.update({ key, data: null })
+      const cached = await storage.read(key)
+      if (this.status.key === key) this.update({ data: cached })
+      while (true) {
+        if (!this.cacheReady()) throw new Error('Resolve pending cache writes before syncing messages.')
+        const id = crypto.randomUUID()
+        const frame = await this.source.nextQueuedMessage(key)
+        if (!frame) break
+        const rawHex = Array.from(frame, (byte) => byte.toString(16).padStart(2, '0')).join('')
+        this.pendingReceipt = {
+          key, message: { id, rawHex, conversationId: 'unsupported', sender: '', timestamp: null, text: '' },
+        }
+        this.update({ pending: true })
+        this.pendingReceipt.message = makeReceipt(frame, id)
+        await storage.update(key, { messages: [this.pendingReceipt.message] })
+        const supported = this.pendingReceipt.message.receipt !== undefined
+        this.pendingReceipt = undefined
+        this.update({ pending: false })
+        const data = await storage.read(key)
+        if (this.status.key === key) this.update({ data })
+        if (!supported) throw new Error('An unrecognized response was saved as raw bytes. Sync stopped; inspect it before trying again.')
+      }
+    } catch (error) {
+      this.update({ error: error instanceof Error ? error.message : 'Could not sync messages.' })
+    } finally {
+      storage?.close()
+      this.update({ syncing: false })
+      if (this.status.key) await this.load(this.status.key)
+    }
+  }
+}

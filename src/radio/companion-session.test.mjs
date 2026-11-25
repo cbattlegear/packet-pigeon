@@ -169,6 +169,7 @@ test('handshakes and syncs advertised slots without dequeuing messages', async (
       default: assert.fail(`Unexpected command ${code}`)
     }
   })
+
   const session = sessionWith(port)
   const pushes = []
   const progress = []
@@ -209,6 +210,25 @@ test('handshakes and syncs advertised slots without dequeuing messages', async (
   await session.disconnect()
   assert.equal(port.closed, true)
   assert.equal(session.getSnapshot().phase, 'idle')
+})
+
+test('only manually requests queued messages from the selected ready radio', async () => {
+  const port = new FixturePort(([code], serial) => {
+    switch (code) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 10: serial.emit(0x55, 1, 2); break
+      default: assert.fail(`Unexpected command ${code}`)
+    }
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  await assert.rejects(session.nextQueuedMessage('cd'.repeat(32)), { code: 'disconnected' })
+  assert.equal(port.commands.some(([code]) => code === 10), false)
+  assert.deepEqual([...await session.nextQueuedMessage('ab'.repeat(32))], [0x55, 1, 2])
+  await session.disconnect()
+  await assert.rejects(session.nextQueuedMessage('ab'.repeat(32)), { code: 'disconnected' })
 })
 
 test('timeout closes the port and prevents any further write', async () => {

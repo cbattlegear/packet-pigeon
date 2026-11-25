@@ -6,8 +6,8 @@ with React, TypeScript, Vite, and npm.
 The current app is a client-only shell with keyboard-accessible navigation and
 user-initiated USB companion connection. It syncs contacts and channels into a
 per-radio local cache. The map can show synced contacts from the current
-session. Message sync is paused so queued messages remain on the radio.
-The app does not send mesh packets.
+session. Chats can manually sync and display received queue entries. The app
+does not yet send mesh packets.
 
 ## Getting started
 
@@ -32,6 +32,7 @@ serves that build locally; it is not a production server. Run browser storage
 tests with `npm run test:storage` and USB companion fixtures with
 `node --test src/radio/companion-session.test.mjs`. Run the session/cache
 integration fixture with `node --test src/integration/session-cache.test.js`.
+Run message sync fixtures with `node --test src/integration/message-sync.test.js`.
 These checks use mocks and do not need a radio.
 
 ## USB companion session
@@ -60,18 +61,24 @@ unplug/replug on every supported browser.
 
 `src/radio` exports `CompanionSession` and `getWebSerialSupport()`;
 `connect()` must be called directly from a user action for the port chooser.
-The session reads contact and channel records but does not request queued
-messages, including when the radio reports messages waiting. Draining is disabled
-until received messages are readable and each receipt is durably saved before
-requesting the next. Failed contact or channel writes remain queued in memory
-for **Retry saving**; closing or reloading the page loses unsaved updates.
+Use **Sync messages** in Chats to request queued receipts. Each receipt,
+including an unsupported or malformed response's raw bytes, is saved before
+requesting another; receipts are shown individually and are not deduplicated
+by their contents. Unrecognized or malformed responses are saved as raw bytes
+and stop the sync for inspection; they can also be device errors rather than
+receipts. If saving fails, syncing stops and the receipt stays in memory
+for retry. Keep the tab open until it has been saved. Failed contact or channel
+writes remain queued in memory for **Retry saving**; closing or reloading the
+page loses unsaved updates.
 
 Earlier development builds may already have dequeued messages: those saved in
-the local cache are retained but are not yet browsable, while unsaved receipts
-lost on page close cannot be recovered from the radio. The firmware dequeues
-before replying, so any future message sync cannot guarantee exactly-once
-delivery, including during interruption. Separate receipts must not be deduped
-by their text or timestamp. The browser-local cache can be evicted.
+the local cache are browsable, while unsaved receipts lost on page close cannot
+be recovered from the radio.
+
+Message sync and recovery have been tested with mocked ports and storage, not
+physical hardware. The firmware dequeues before replying, so interruption
+between dequeue and durable save can lose a receipt; exactly-once delivery is
+not possible. Browser storage eviction can also remove saved receipts.
 
 The implementation targets MeshCore USB companion firmware with protocol v3 or
 newer. It uses the firmware's framed serial protocol directly: MeshCore.js was
@@ -134,8 +141,9 @@ Keep work small and split by behavior, rather than creating empty layers up fron
   and applies any supplied local edits. Failed writes reject without replacing
   the previous cache. Browser data clearing or eviction can remove the cache.
 - **Integration:** `src/integration/session-cache.ts` captures completed lists
-  and any received messages from session snapshots and queues writes
-  under the session's full public key. The UI subscribes to session and cache
+  and messages from session snapshots and queues writes under the session's
+  full public key. `src/integration/message-sync.ts` saves each manually fetched
+  receipt before requesting the next. The UI subscribes to session and cache
   state; coordinate future changes to that boundary between workstreams.
 
 Add a router or other dependencies only when a concrete feature needs them.

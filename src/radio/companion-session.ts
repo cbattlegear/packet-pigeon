@@ -243,6 +243,16 @@ export class CompanionSession {
     }
   }
 
+  readonly nextQueuedMessage = async (publicKey: string): Promise<Uint8Array | null> => {
+    const link = this.attempt?.link
+    if (this.snapshot.phase !== 'ready' || !link || this.snapshot.device?.publicKey !== publicKey) {
+      throw new CompanionError('disconnected', 'Connect the selected radio before syncing messages.')
+    }
+    return link.request(Uint8Array.of(Command.nextMessage), (frame) => {
+      return { value: frame[0] === Response.noMoreMessages && frame.length === 1 ? null : frame.slice() }
+    })
+  }
+
   private async initialize(attempt: Attempt, link: SerialLink) {
     const capabilities = await link.request(Uint8Array.of(Command.deviceQuery, 3), (frame) => {
       expectResponse(frame, Response.deviceInfo)

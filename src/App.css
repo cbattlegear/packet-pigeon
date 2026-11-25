@@ -232,6 +232,37 @@ button:disabled {
   min-width: 0;
 }
 
+.message-controls {
+  display: grid;
+  gap: 12px;
+  padding: 20px 28px;
+}
+
+.message-controls p,
+.received-messages time {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.received-messages {
+  display: grid;
+  gap: 12px;
+  padding: 24px 28px;
+  list-style: none;
+}
+
+.received-messages li {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.received-messages p {
+  white-space: pre-wrap;
+}
+
 .state-message {
   display: flex;
   flex: 1;
