@@ -1,0 +1,80 @@
+.share-dialog {
+  width: min(34rem, calc(100% - 2rem));
+  max-height: calc(100% - 2rem);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: inherit;
+  overflow-wrap: anywhere;
+}
+
+.share-dialog::backdrop {
+  background: #0009;
+}
+
+.share-dialog :is(form, .share-preview, .share-camera) {
+  display: grid;
+  gap: 10px;
+}
+
+.share-dialog > * + *,
+.share-dialog form > * + * {
+  margin-top: 12px;
+}
+
+.share-dialog label:not(.share-checkbox) {
+  display: grid;
+  gap: 4px;
+}
+
+.share-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.share-dialog :is(input, button, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.share-dialog fieldset {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.quick-messages {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.quick-messages li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.share-dialog :is(img, video) {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+}
+
+.share-dialog [role='alert'] {
+  color: var(--error);
+}

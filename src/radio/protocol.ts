@@ -58,12 +58,20 @@ export interface DeviceCapabilities {
   readonly pathHashMode: number | null
 }
 
+export type RadioParameters = {
+  frequencyMHz: number
+  bandwidthKHz: number
+  spreadingFactor: number
+  codingRate: number
+}
+
 export interface CompanionDevice {
   readonly publicKey: string
   readonly name: string
   readonly type: number
   readonly contactMode: number
   readonly capabilities: DeviceCapabilities
+  readonly radioParameters?: RadioParameters
 }
 
 export interface CompanionContact {
@@ -155,13 +163,19 @@ export function decodeCapabilities(frame: Uint8Array): DeviceCapabilities {
 }
 
 export function decodeSelf(frame: Uint8Array, capabilities: DeviceCapabilities): CompanionDevice {
-  view(frame, 58)
+  const data = view(frame, 58)
+  const frequency = data.getUint32(48, true)
+  const bandwidth = data.getUint32(52, true)
   return {
     publicKey: hex(frame.subarray(4, 36)),
     name: text(frame.subarray(58)),
     type: frame[1],
     contactMode: frame[47],
     capabilities,
+    ...(frequency > 0 && bandwidth > 0 ? { radioParameters: {
+      frequencyMHz: frequency / 1_000, bandwidthKHz: bandwidth / 1_000,
+      spreadingFactor: frame[56], codingRate: frame[57],
+    } } : {}),
   }
 }
 

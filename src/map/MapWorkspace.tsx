@@ -44,11 +44,12 @@ function formatPosition(position: Coordinates) {
 }
 
 export default function MapWorkspace({
-  radioNodes = emptyNodes, radioPosition = null, showTerrain = false, contactFocus = null, discoveryRequest = 0,
+  radioNodes = emptyNodes, radioPosition = null, showTerrain = false, contactFocus = null, discoveryRequest = 0, onSharePosition,
 }: {
   radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null; showTerrain?: boolean
   contactFocus?: { position: Coordinates; terrain: boolean } | null
   discoveryRequest?: number
+  onSharePosition?: (position: Coordinates) => void
 }) {
   const [localNodes, setLocalNodes] = useState(savedNodes)
   const [publicNodes, setPublicNodes] = useState<MapNode[]>([])
@@ -68,7 +69,7 @@ export default function MapWorkspace({
   const [useTiles, setUseTiles] = useState(false)
   const [tileError, setTileError] = useState(false)
   const [focus, setFocus] = useState<Coordinates | readonly Coordinates[] | null>(null)
-  const [picking, setPicking] = useState<PointToPick | null>(null)
+  const [picking, setPicking] = useState<PointToPick | 'share' | null>(null)
   const [start, setStart] = useState(emptyCoordinate)
   const [end, setEnd] = useState(emptyCoordinate)
   const [profile, setProfile] = useState<ProfileResult | null>(null)
@@ -128,8 +129,11 @@ export default function MapWorkspace({
     setResultPage(0)
   }
   const pickFromMap = useCallback((position: Coordinates) => {
-    if (picking) putCoordinate(picking, position)
-  }, [picking, putCoordinate])
+    if (picking === 'share') {
+      setPicking(null)
+      onSharePosition?.(position)
+    } else if (picking) putCoordinate(picking, position)
+  }, [picking, putCoordinate, onSharePosition])
 
   function locate() {
     setLocationMessage('')
@@ -225,6 +229,7 @@ export default function MapWorkspace({
         <button type="button" onClick={locate} disabled={locating}>
           {locating ? 'Finding location…' : 'Show my location'}
         </button>
+        {onSharePosition && <button type="button" onClick={() => setPicking('share')}>Pick a location for Chats</button>}
         {myLocation && <button type="button" onClick={() => {
           setMyLocation(null)
           setLocationMessage('')
@@ -237,7 +242,7 @@ export default function MapWorkspace({
       <div className="map-layout">
         <div ref={mapPanel}>
           {picking && <div className="map-notice" role="status">
-            Select the {picking} point on the map.
+            {picking === 'share' ? 'Select a point to make it available in Chats.' : `Select the ${picking} point on the map.`}
             <button type="button" onClick={() => setPicking(null)}>Cancel selection</button>
           </div>}
           <MapCanvas
@@ -290,6 +295,8 @@ export default function MapWorkspace({
               <button type="button" onClick={() => toggleFavorite(selected)}>
                 {selected.favorite ? 'Remove favorite' : 'Add favorite'}
               </button>
+              {onSharePosition && mapPosition(selected.position) && <button type="button"
+                onClick={() => onSharePosition(selected.position!)}>Use location in Chats</button>}
               {selected.role === 2 && mapPosition(selected.position) && <>
                 <button type="button" onClick={() => putCoordinate('start', selected.position!)}>Use as start</button>
                 <button type="button" onClick={() => putCoordinate('end', selected.position!)}>Use as end</button>

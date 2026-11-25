@@ -8,7 +8,7 @@ user-initiated USB or Bluetooth companion connections. It syncs contacts and cha
 per-radio local cache. Contacts supports offline browsing, and the map can
 show synced contacts from the current session. Chats supports direct messages,
 drafts, delivery tracking, and manually syncing received queue entries over USB
-or Bluetooth.
+or Bluetooth. Channel chats also support sending and local message actions.
 
 ## Getting started
 
@@ -36,10 +36,11 @@ integration fixture with `node --test src/integration/session-cache.test.js`.
 Run message sync fixtures with `node --test src/integration/message-sync.test.js`.
 Run direct-message fixtures with
 `node --test src/radio/direct-message.test.mjs src/integration/direct-messages.test.js src/chats/model.test.js`.
+Run channel-message framing fixtures with `node --test src/radio/channel-message.test.mjs`.
 These checks use mocks and do not need a radio.
 
-With Google Chrome installed, run `npm run test:browser` to exercise the chat
-reopening and wake-lock behavior in the browser.
+With Google Chrome installed, run `npm run test:browser` for the browser
+regressions. The tests use cached fixtures and simulated radios.
 
 ## USB companion session
 
@@ -160,6 +161,29 @@ Possible repeated receipts are labeled and can be hidden, but are retained
 separately because MeshCore does not provide a guaranteed unique message ID.
 Browser data clearing or eviction can remove saved history.
 
+## Channel messages
+
+Select a channel in **Chats** to send a broadcast or browse its cached
+messages. The radio adds its sender name and `: ` before the message, so the
+available text is 160 UTF-8 bytes minus the encoded name and separator. The
+composer uses the name reported at connection; reconnect if it is changed
+elsewhere. It shows the limit when connected; NUL and invalid text are
+rejected. The radio's slot name is checked again before sending, but a
+different channel with the same name cannot be distinguished. A disconnected
+send is not queued.
+
+Outgoing messages are saved before submission. **Accepted by radio** only means
+the companion accepted the command, not that anyone heard or read the message.
+After a disconnect or interrupted send, the status may be uncertain. Resending
+is explicit and can create duplicates. If the result cannot be saved, keep the
+page open and retry saving the message changes; this does not retransmit.
+
+Incoming sender names are unverified and can be impersonated. Reply inserts a
+name mention; copy, local deletion and blocking a sender name do not affect
+other devices. A possible-repeat filter retains the individual receipts, which
+may represent distinct messages. Heard-repeat counts, multiple-path
+attribution and region-scoped channel sending are not available.
+
 ## App preferences
 
 **Settings** saves the appearance, app language and chat clock format for this
@@ -177,6 +201,29 @@ Turn off **Save draft edits between visits** to keep new edits in the current
 tab's memory. Previously saved drafts remain in the radio cache. **Keep screen
 on** uses the browser's Screen Wake Lock API while the tab is visible and
 depends on browser and device support.
+
+## Sharing and companion setup
+
+Use **Import link or QR code** in Contacts, Channels or Settings to review a
+MeshCore invitation or companion setup bundle. Paste the link, read the
+clipboard, upload a QR image or scan with the camera. QR processing runs in the
+browser. Contact and channel changes require a connected radio and confirmation.
+Channel invitations carry the channel key. A link can contain a region scope.
+Packet Pigeon asks before joining a scoped channel without that scope.
+
+Contact and channel details offer a share link and downloadable QR code.
+Settings can generate a MeshCore v1 companion setup link for the connected
+radio's current preset and supported path hash width. Setup imports preview the
+selected radio, settings, contacts and channels before applying changes, then
+show the result for each attempted change. Changing the radio preset can affect
+which mesh your radio can reach. Setup exports include radio settings and leave
+identity keys, location, and channel keys out.
+
+Use **Share or use quick message** in Chats to add a contact, channel invitation,
+current browser location, or a point chosen on the map to the draft. The button
+also opens your editable quick messages. Location and channel key sharing
+require explicit confirmation. The composer keeps the original draft if the
+combined text exceeds the radio's message length limit.
 
 Direct-message commands and acknowledgement handling have been tested with
 mocked USB and Bluetooth transports, not physical hardware. Some Bluetooth
