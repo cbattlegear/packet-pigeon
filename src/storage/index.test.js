@@ -134,6 +134,119 @@ test('blocked sender edits survive sync and concurrent local changes without cro
   otherTab.close()
 })
 
+test('channel retention prunes only expired dated entries for the configured radio and slot', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const otherTab = await openRadioStorage(factory)
+  const day = 86_400_000
+  const now = 2_000_000_000_000
+  const channel = (id, index, timestamp) => ({
+    ...message, id, conversationId: `channel:${index}`, timestamp,
+  })
+  const messages = [
+    channel('old', 0, now - 2 * day),
+    channel('boundary', 0, now - day),
+    channel('undated', 0, null),
+    channel('zero', 0, 0),
+    channel('future', 0, now + day),
+    channel('other-old', 1, now - 8 * day),
+    { ...channel('direct', 0, now - 100 * day), conversationId: `direct:${secondRadio}` },
+    { ...channel('unknown', 0, now - 100 * day), conversationId: 'unsupported' },
+  ]
+  const channels = [{ index: 0, name: 'Public' }, { index: 1, name: 'Private' }]
+  await storage.update(firstRadio, {
+    channels, messages, markRead: ['old', 'boundary', 'other-old'],
+    draft: { conversationId: 'channel:0', text: 'Keep me' },
+  })
+  await storage.update(secondRadio, { channels, messages: [messages[0]] })
+  await storage.update(firstRadio, { channelRetention: { index: 0, channelName: 'Public', days: 1 } })
+  await storage.update(firstRadio, { channelRetention: { index: 1, channelName: 'Private', days: 7 } })
+  await Promise.all([
+    storage.update(firstRadio, { channels, preferences: { selectedConversationId: 'channel:0' } }),
+    otherTab.update(firstRadio, { blockedChannelSender: { name: 'Alice', blocked: true } }),
+  ])
+  assert.equal(await storage.pruneChannelMessages(now), 2)
+  const result = await storage.read(firstRadio)
+  assert.deepEqual(result.messages.map(({ id }) => id), ['boundary', 'undated', 'zero', 'future', 'direct', 'unknown'])
+  assert.deepEqual(result.readMessages, ['boundary'])
+  assert.deepEqual(result.drafts, [{ conversationId: 'channel:0', text: 'Keep me' }])
+  assert.deepEqual(result.blockedChannelSenders, ['Alice'])
+  assert.equal(result.preferences.selectedConversationId, 'channel:0')
+  assert.deepEqual((await storage.read(secondRadio)).messages, [messages[0]])
+  assert.equal(await storage.pruneChannelMessages(now), 0)
+  storage.close()
+  otherTab.close()
+})
+
+test('retention follows local renames but pauses on an unexpected slot name and clears on removal', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const otherTab = await openRadioStorage(factory)
+  const now = 2_000_000_000_000
+  const old = { ...message, timestamp: now - 2 * 86_400_000 }
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Public' }], messages: [old] })
+  await storage.update(firstRadio, { channelRetention: { index: 0, channelName: 'Public', days: 1 } })
+  await Promise.all([
+    storage.update(firstRadio, { channels: [{ index: 0, name: 'Renamed' }] }),
+    otherTab.update(firstRadio, { channelRetentionRename: { index: 0, from: 'Public', to: 'Renamed' } }),
+  ])
+  assert.deepEqual((await storage.read(firstRadio)).channelRetention, [{ index: 0, channelName: 'Renamed', days: 1 }])
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Replacement' }] })
+  assert.equal(await storage.pruneChannelMessages(now), 0)
+  assert.deepEqual((await storage.read(firstRadio)).messages, [old])
+  await assert.rejects(storage.update(firstRadio, {
+    channelRetention: { index: 0, channelName: 'Renamed', days: 1 },
+  }), { code: 'update' })
+  await assert.rejects(storage.update(firstRadio, {
+    channelRetention: { index: 0, channelName: 'Replacement', days: 2 },
+  }), { code: 'update' })
+  await storage.update(firstRadio, { channelRetention: { index: 0, channelName: 'Replacement', days: 7 } })
+  await storage.update(firstRadio, { channels: [] })
+  assert.deepEqual((await storage.read(firstRadio)).channelRetention, [])
+  assert.equal(await storage.pruneChannelMessages(now), 0)
+  assert.deepEqual((await storage.read(firstRadio)).messages, [old])
+  storage.close()
+  otherTab.close()
+})
+
+test('invalid saved retention aborts cleanup without deleting another radio’s messages', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const now = 2_000_000_000_000
+  const old = { ...message, timestamp: now - 2 * 86_400_000 }
+  const initial = { channels: [{ index: 0, name: 'Public' }], messages: [old] }
+  await storage.update(firstRadio, initial)
+  await storage.update(secondRadio, initial)
+  await storage.update(firstRadio, { channelRetention: { index: 0, channelName: 'Public', days: 1 } })
+  const raw = await new Promise((resolve, reject) => {
+    const request = factory.open('packet-pigeon', 1)
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error)
+  })
+  await new Promise((resolve, reject) => {
+    const transaction = raw.transaction('radios', 'readwrite')
+    const store = transaction.objectStore('radios')
+    const request = store.get(secondRadio)
+    request.onsuccess = () => {
+      request.result.channelRetention = [{ index: 0, channelName: 'Public', days: 2 }]
+      store.put(request.result, secondRadio)
+    }
+    transaction.oncomplete = resolve
+    transaction.onabort = () => reject(transaction.error)
+  })
+  raw.close()
+  await assert.rejects(storage.pruneChannelMessages(now), {
+    code: 'update', message: new RegExp(`radio ${secondRadio.slice(0, 12)}`),
+  })
+  assert.deepEqual((await storage.read(firstRadio)).messages, [old])
+  assert.deepEqual((await storage.read(secondRadio)).messages, [old])
+  await storage.update(secondRadio, { resetChannelRetention: true })
+  assert.equal(await storage.pruneChannelMessages(now), 1)
+  assert.deepEqual((await storage.read(firstRadio)).messages, [])
+  assert.deepEqual((await storage.read(secondRadio)).messages, [old])
+  storage.close()
+})
+
 test('an aborted write rejects, preserves the previous cache and can be retried', async (t) => {
   const storage = await openRadioStorage(new IDBFactory())
   await storage.update(firstRadio, { messages: [message] })

@@ -98,9 +98,12 @@ test('persists changed channel lists without replacing messages or local prefere
   const cache = new SessionCache(session, () => openRadioStorage(factory))
   const key = radioKeyFromPublicKey('ab'.repeat(32))
   const storage = await openRadioStorage(factory)
-  await storage.update(key, { preferences: { selectedConversationId: 'channel:0' }, messages: [{
-    id: 'm', conversationId: 'channel:0', sender: '', timestamp: 1, text: 'saved',
-  }] })
+  await storage.update(key, {
+    channels: [{ index: 0, name: 'Public' }],
+    channelRetention: { index: 0, channelName: 'Public', days: 30 },
+    preferences: { selectedConversationId: 'channel:0' },
+    messages: [{ id: 'm', conversationId: 'channel:0', sender: '', timestamp: 1, text: 'saved' }],
+  })
   session.emit({ phase: 'handshake' })
   session.emit({ phase: 'ready', device: { publicKey: key }, channels: [{ index: 0, name: 'Public' }] })
   await waitFor(() => !cache.getSnapshot().saving && !cache.getSnapshot().pending)
@@ -110,5 +113,6 @@ test('persists changed channel lists without replacing messages or local prefere
   assert.deepEqual(data.channels, [{ index: 0, name: 'Renamed' }, { index: 1, name: '#topic' }])
   assert.equal(data.messages[0].text, 'saved')
   assert.equal(data.preferences.selectedConversationId, 'channel:0')
+  assert.deepEqual(data.channelRetention, [{ index: 0, channelName: 'Public', days: 30 }])
   storage.close()
 })
