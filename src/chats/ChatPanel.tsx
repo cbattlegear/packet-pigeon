@@ -13,7 +13,7 @@ import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredConta
 import type { Coordinates } from '../map/nodes.ts'
 import { ComposerTools } from '../sharing/ComposerTools.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
-import { conversations, messageVisibility, oldestUnreadReceipt, unreadReceipts } from './model.ts'
+import { conversations, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import './chats.css'
 
@@ -523,9 +523,8 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
 }
 
 function ReceiptPath({ receipt }: { receipt: NonNullable<StoredMessage['receipt']> }) {
-  const hops = receipt.pathLength & 63
   return <p className="chat-meta">
-    {receipt.pathLength === 0xff ? 'Direct receipt' : `${hops} path hop${hops === 1 ? '' : 's'}`}
+    {receiptPathDescription(receipt.pathLength)}
     {receipt.snrDb !== null && ` · SNR ${receipt.snrDb} dB`}
   </p>
 }

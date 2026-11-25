@@ -183,6 +183,9 @@ name mention; copy, local deletion and blocking a sender name do not affect
 other devices. A possible-repeat filter retains the individual receipts, which
 may represent distinct messages. Heard-repeat counts, multiple-path
 attribution and region-scoped channel sending are not available.
+When path details are enabled, received flood messages show their encoded hop
+count and path-hash width. The queued receipt does not include the path hashes
+themselves, so these details do not identify a route or prove a repeat.
 
 ## App preferences
 

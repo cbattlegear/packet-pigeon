@@ -388,7 +388,7 @@ test('channel chat sends, replies by name, and keeps local message actions scope
         id: name, conversationId: 'channel:0', sender: '', timestamp: Date.now() - 1000, text,
         receipt: {
           kind: 'channel-text', receiptId: name, channelIndex: 0, textType: 0, senderTimestamp: index + 1,
-          text, pathLength: 2, snrDb: -3.5,
+          text, pathLength: 0x42, snrDb: -3.5,
         },
       }
     })
@@ -433,7 +433,7 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   await nav.getByRole('button', { name: /Public/ }).click()
   const conversation = fixture.getByRole('region', { name: 'Conversation with Public' })
   await conversation.getByText('Bob', { exact: true }).waitFor()
-  await conversation.getByText('2 path hops · SNR -3.5 dB').first().waitFor()
+  await conversation.getByText('2 path hops · 2-byte path hashes · SNR -3.5 dB').first().waitFor()
   await conversation.getByRole('button', { name: 'Copy message: Bob: hello from Bob' }).click()
   assert.equal(await page.evaluate(() => window.copiedChannelText), 'Bob: hello from Bob')
   await conversation.getByRole('button', { name: 'Reply to Bob' }).click()
@@ -474,7 +474,7 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   dialog = await prompt
   await dialog.accept()
   await blocking
-  assert.equal(await conversation.getByText('Alice', { exact: true }).count(), 0)
+  await conversation.getByText('Alice', { exact: true }).waitFor({ state: 'hidden' })
   prompt = page.waitForEvent('dialog')
   const deleting = conversation.getByRole('button', { name: 'Delete channel message: Bob: hello from Bob' }).click()
   dialog = await prompt
