@@ -1,13 +1,13 @@
 export type ContactType = 1 | 2 | 3 | 4
 
-type ContactShare = {
+export type ContactShare = {
   kind: 'contact'
   name: string
   publicKey: string
   type: ContactType
 }
 
-type ChannelShare = {
+export type ChannelShare = {
   kind: 'channel'
   name: string
   secret: string
@@ -17,19 +17,19 @@ type ChannelShare = {
 export type MeshCoreShare = ContactShare | ChannelShare
 
 function readName(name: string): string {
-  if (!name.trim()) throw new Error('The share link needs a name.')
+  if (!name.trim() || name.includes('\0')) throw new Error('The share link needs a valid name.')
   return name
 }
 
 function readPublicKey(publicKey: string): string {
-  if (!/^[a-f0-9]{64}$/i.test(publicKey)) {
+  if (publicKey.length !== 64 || !/^[a-f0-9]{64}$/i.test(publicKey)) {
     throw new Error('The contact public key must contain 64 hex characters.')
   }
   return publicKey.toLowerCase()
 }
 
 function readChannelSecret(secret: string): string {
-  if (!/^[a-f0-9]{32}$/i.test(secret)) {
+  if (secret.length !== 32 || !/^[a-f0-9]{32}$/i.test(secret)) {
     throw new Error('The channel secret must contain 32 hex characters.')
   }
   return secret.toLowerCase()
@@ -63,10 +63,16 @@ export function formatMeshCoreShare(share: MeshCoreShare): string {
   return `meshcore://${share.kind}/add?${parameters}`
 }
 
+export function contactShareLink(name: string, publicKey: string, type: number | undefined) {
+  if (type !== 1 && type !== 2 && type !== 3 && type !== 4) return null
+  if (publicKey.length !== 64 || !/^[\da-f]+$/i.test(publicKey)) return null
+  return formatMeshCoreShare({ kind: 'contact', name: name.trim() || 'Unnamed contact', publicKey, type })
+}
+
 export function parseMeshCoreShare(input: string): MeshCoreShare {
   const invalidLink = 'Enter a MeshCore contact or channel share link.'
   const text = input.trim()
-  if (/[\r\n\t]/.test(text)) throw new Error(invalidLink)
+  if (text.length > 4096 || /[\r\n\t]/.test(text)) throw new Error(invalidLink)
 
   const url = URL.parse(text)
   if (

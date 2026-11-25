@@ -5,17 +5,20 @@ import { makeChannelSecret, secretHex } from '../radio/channel-commands.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioData, RadioKey, StoredChannel } from '../storage/index.ts'
 import { observedChannelSenders } from './senders.ts'
+import { ShareCode } from '../sharing/ShareDialogs.tsx'
+import { formatMeshCoreShare } from '../sharing/meshcoreLinks.ts'
 import './channels.css'
 
 type Props = {
   snapshot: CompanionSnapshot
-  session: Pick<CompanionSession, 'createChannel' | 'changeChannel'>
+  session: Pick<CompanionSession, 'createChannel' | 'changeChannel' | 'readChannelShareKey'>
   cacheSaving: boolean
   messageSyncing: boolean
   onBlockedSendersChanged: (key: RadioKey) => void
+  onImport?: () => void
 }
 
-export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, onBlockedSendersChanged }: Props) {
+export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, onBlockedSendersChanged, onImport }: Props) {
   const live = snapshot.phase === 'ready' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [choice, setChoice] = useState('')
@@ -24,11 +27,13 @@ export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, 
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [secret, setSecret] = useState('')
+  const [share, setShare] = useState<{ key: RadioKey; link: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('slot')
   const [kind, setKind] = useState<'private' | 'join' | 'public' | 'hashtag'>('private')
   const key = liveKey ?? choice
+  if (share && share.key !== liveKey) setShare(null)
 
   useEffect(() => {
     let active = true
@@ -92,6 +97,20 @@ export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, 
     } finally { setBusy(false) }
   }
 
+  async function shareChannel(channel: StoredChannel) {
+    if (!liveKey || busy || !window.confirm(`Show a link and QR code for "${channel.name}"? They include the channel key and can be used to join.`)) return
+    setBusy(true)
+    setError('')
+    try {
+      const secret = await session.readChannelShareKey(liveKey, channel.index, channel.name)
+      setShare({ key: liveKey, link: formatMeshCoreShare({ kind: 'channel', name: channel.name, secret }) })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not read the channel key.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function setBlocked(name: string, value: boolean) {
     if (!key || !cacheLoaded || busy) return false
     const radioKey = radioKeyFromPublicKey(key)
@@ -113,6 +132,8 @@ export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, 
   }
 
   return <div className="channel-workspace">
+    {share && liveKey === share.key && <ShareCode link={share.link} privateChannel close={() => setShare(null)} />}
+    {onImport && <div><button type="button" onClick={onImport}>Import link or QR code</button></div>}
     {live ? <p>{live.name || 'Connected radio'} · {channels.length} of {live.capabilities.maxChannels} channel slots used</p>
       : <label>Cached radio <select value={choice} onChange={(event) => {
         setChoice(event.currentTarget.value); setSecret(''); setStatus('')
@@ -146,6 +167,8 @@ export function ChannelsPanel({ snapshot, session, cacheSaving, messageSyncing, 
             <label>Rename <input name="name" defaultValue={channel.name} key={channel.name} disabled={!live || busy || channel.name.startsWith('#')} /></label>
             <button type="submit" disabled={!live || busy || channel.name.startsWith('#')}>Save name</button>
             <button type="button" disabled={!live || busy} onClick={() => void change(channel, null)}>Delete</button>
+            <button type="button" disabled={!live || busy}
+              onClick={() => void shareChannel(channel)}>Share link or QR code</button>
           </form>
           <details>
             <summary>Observed sender names</summary>

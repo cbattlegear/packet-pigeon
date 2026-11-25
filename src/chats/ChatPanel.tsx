@@ -7,7 +7,10 @@ import type { AppPreferences } from '../preferences/appPreferences.ts'
 import type { CompanionSnapshot } from '../radio/companion-session.ts'
 import { directTextBytes, maxDirectTextBytes } from '../radio/direct-message.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
-import type { DirectSendOptions, RadioData, RadioKey, StoredMessage, StoredOutgoing } from '../storage/index.ts'
+import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredContact, StoredMessage, StoredOutgoing } from '../storage/index.ts'
+import type { Coordinates } from '../map/nodes.ts'
+import { ComposerTools } from '../sharing/ComposerTools.tsx'
+import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { conversations, messageVisibility, oldestUnreadReceipt, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import './chats.css'
@@ -24,6 +27,8 @@ type Props = {
   active: boolean
   preferences: AppPreferences
   locale: string
+  readChannelKey?: (radioKey: RadioKey, channel: StoredChannel) => Promise<string>
+  mapPosition?: Coordinates | null
 }
 
 type ChatDisplay = {
@@ -31,13 +36,19 @@ type ChatDisplay = {
   preferences: AppPreferences
   read: ReadonlySet<string>
   formatTime: (date: Date) => string
+  ownContact: string | null
+  contacts: readonly StoredContact[]
+  channels: readonly StoredChannel[]
+  readChannelKey?: (channel: StoredChannel) => Promise<string>
+  mapPosition?: Coordinates | null
 }
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : 'The message action failed.'
 }
 
-export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving, active, preferences, locale }: Props) {
+export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving,
+  active, preferences, locale, readChannelKey, mapPosition }: Props) {
   const live = (snapshot.phase === 'ready' || snapshot.phase === 'syncing') && snapshot.device
     ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
   const last = snapshot.device ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
@@ -53,6 +64,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const formatTime = useMemo(() => clockFormatter(locale, preferences.clock).format, [locale, preferences.clock])
   const preferred = selection?.key === radioKey ? selection.id : data?.preferences?.selectedConversationId
   const selected = items.find((item) => item.id === preferred) ?? items[0]
+  const ownContact = snapshot.device && last === radioKey
+    ? contactShareLink(snapshot.device.name, snapshot.device.publicKey, snapshot.device.type) : null
 
   useEffect(() => {
     let active = true
@@ -130,7 +143,11 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
         </section>
       ) : (
         <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status}
-          display={{ active, preferences, read, formatTime }} />
+          display={{
+            active, preferences, read, formatTime, mapPosition, ownContact,
+            contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
+            readChannelKey: canSync && live && readChannelKey ? (channel) => readChannelKey(live, channel) : undefined,
+          }} />
       )}
     </div>
   )
@@ -215,7 +232,7 @@ function timestamp(value: number | null, format: ChatDisplay['formatTime']) {
 }
 
 function ConversationView({ conversation, radioKey, options, direct, status, display }: ConversationProps) {
-  const { active, preferences, read, formatTime } = display
+  const { active, preferences, read, formatTime, ownContact, contacts, channels, readChannelKey, mapPosition } = display
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
   const [readError, setReadError] = useState('')
@@ -320,6 +337,22 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
     }
   }
 
+  function updateDraft(text: string) {
+    setDraft(text)
+    void direct.saveDraft(radioKey, conversation.id, text, preferences.saveDrafts).catch(() => {})
+  }
+
+  function insertInDraft(text: string) {
+    const next = draft ? `${draft}\n${text}` : text
+    try {
+      directTextBytes(next)
+    } catch {
+      return `The shared item and your draft must fit in ${maxDirectTextBytes} UTF-8 bytes. Shorten the draft or share the link separately.`
+    }
+    updateDraft(next)
+    return null
+  }
+
   return (
     <section className="conversation-pane" aria-label={`Conversation with ${conversation.title}`}>
       <div className="conversation-heading">
@@ -385,13 +418,11 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
         <form className="chat-composer" onSubmit={(event) => void send(event)}>
           <label htmlFor="chat-draft">Message</label>
           <textarea id="chat-draft" ref={composer} rows={3} value={draft} aria-describedby="chat-byte-count chat-draft-error"
-            onChange={(event) => {
-              const text = event.currentTarget.value
-              setDraft(text)
-              void direct.saveDraft(radioKey, conversation.id, text, preferences.saveDrafts).catch(() => {})
-            }} />
+            onChange={(event) => updateDraft(event.currentTarget.value)} />
           <div className="chat-compose-actions">
             <span id="chat-byte-count">{bytes}/{maxDirectTextBytes} UTF-8 bytes</span>
+            {active && <ComposerTools ownContact={ownContact} contacts={contacts} channels={channels}
+              readChannelKey={readChannelKey} mapPosition={mapPosition} insert={insertInDraft} />}
             <button type="submit" disabled={!draft || Boolean(invalid) || status.activeId !== null}>Send message</button>
           </div>
           <p id="chat-draft-error" className="chat-action-error">{invalid}</p>

@@ -17,6 +17,8 @@ import { OfflineStatus } from './offline/OfflineStatus.tsx'
 import { PreferencesPanel } from './preferences/PreferencesPanel.tsx'
 import { useAppPreferences } from './preferences/use-app-preferences.ts'
 import { useScreenWakeLock } from './preferences/use-screen-wake-lock.ts'
+import { ImportShare, ShareCode } from './sharing/ShareDialogs.tsx'
+import { formatCompanionSetup } from './sharing/setupLink.ts'
 
 const session = new CompanionSession()
 const cache = new SessionCache(session)
@@ -71,6 +73,9 @@ function App() {
   })
   const [discoveryMapRequest, setDiscoveryMapRequest] = useState(0)
   const [contactFocus, setContactFocus] = useState<{ position: Coordinates; terrain: boolean } | null>(null)
+  const [sharePosition, setSharePosition] = useState<Coordinates | null>(null)
+  const [shareDialog, setShareDialog] = useState<{ kind: 'import' } | { kind: 'export'; link: string } | null>(null)
+  const [setupError, setSetupError] = useState('')
   const mapVisible = isMapSection(activeSection)
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
@@ -109,6 +114,8 @@ function App() {
   useEffect(() => {
     const updateSection = () => {
       const activeSection = sectionFromHash()
+      setShareDialog(null)
+      setSetupError('')
       setNavigation((previous) => ({
         activeSection,
         hasOpenedMap: previous.hasOpenedMap || isMapSection(activeSection),
@@ -239,18 +246,42 @@ function App() {
         <div className="chat-slot" hidden={activeSection !== 'Chats'}>
           <ChatPanel snapshot={snapshot} messageSync={messageSync} messageStatus={messageStatus}
             direct={directMessages} status={directStatus} cacheSaving={cacheStatus.saving}
-            active={activeSection === 'Chats'} preferences={settings.preferences} locale={settings.locale} />
+            active={activeSection === 'Chats'} preferences={settings.preferences} locale={settings.locale}
+            mapPosition={sharePosition}
+            readChannelKey={(key, channel) => session.readChannelShareKey(key, channel.index, channel.name)} />
         </div>
         {activeSection === 'Settings' && (
           <div className="section-pane">
             <div className="pane-heading"><h1>Settings</h1></div>
             <PreferencesPanel preferences={settings.preferences} saveFailed={settings.saveFailed} update={settings.update} wake={wake} />
+            <section className="preferences" aria-label="Companion setup links">
+              <h2>Companion setup links</h2>
+              <div className="share-actions">
+                <button type="button" onClick={() => setShareDialog({ kind: 'import' })}>Import link or QR code</button>
+                <button type="button" disabled={snapshot.phase !== 'ready' || !snapshot.device?.radioParameters}
+                  onClick={() => {
+                    const device = snapshot.device
+                    if (!device?.radioParameters) return
+                    try {
+                      setSetupError('')
+                      const mode = device.capabilities.pathHashMode
+                      setShareDialog({ kind: 'export', link: formatCompanionSetup(
+                        'MeshCore companion radio preset', device.radioParameters, mode === null ? undefined : mode + 1,
+                      ) })
+                    } catch (error) {
+                      setSetupError(error instanceof Error ? error.message : 'The radio preset could not be shared.')
+                    }
+                  }}>Share current radio preset</button>
+              </div>
+              {setupError && <p role="alert">{setupError}</p>}
+            </section>
           </div>
         )}
         {activeSection === 'Channels' && (
           <div className="section-pane">
             <div className="pane-heading"><h1>Channels</h1></div>
             <ChannelsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving} messageSyncing={messageStatus.syncing}
+              onImport={() => setShareDialog({ kind: 'import' })}
               onBlockedSendersChanged={(key) => {
                 if (directMessages.getSnapshot().key === key) void directMessages.load(key)
               }} />
@@ -262,6 +293,8 @@ function App() {
               <div className="pane-heading"><h1>Contacts</h1><a href="#discovery">Browse discovered adverts</a></div>
               <ContactsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving}
                 messageSyncing={messageStatus.syncing} messageSending={directStatus.activeId !== null}
+                onImport={() => setShareDialog({ kind: 'import' })}
+                onShare={(link) => setShareDialog({ kind: 'export', link })}
                 onMap={(position, terrain) => {
                   setContactFocus({ position, terrain })
                   window.location.hash = terrain ? 'tools' : 'map'
@@ -291,12 +324,18 @@ function App() {
               </div>
               <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
                 <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'}
-                  contactFocus={contactFocus} discoveryRequest={discoveryMapRequest} />
+                  contactFocus={contactFocus} discoveryRequest={discoveryMapRequest}
+                  onSharePosition={mapVisible ? (position) => {
+                    setSharePosition(position)
+                    window.location.hash = 'chats'
+                  } : undefined} />
               </Suspense>
             </div>
           </div>
         )}
       </main>
+      {shareDialog?.kind === 'import' && <ImportShare snapshot={snapshot} session={session} close={() => setShareDialog(null)} />}
+      {shareDialog?.kind === 'export' && <ShareCode link={shareDialog.link} close={() => setShareDialog(null)} />}
 
       <footer className="status-bar" aria-label="Workspace status">
         <div><span>Device</span><strong>{snapshot.device
