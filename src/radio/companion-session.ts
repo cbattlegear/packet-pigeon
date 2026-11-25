@@ -20,6 +20,7 @@ export interface SyncProgress {
 
 export interface CompanionSnapshot {
   readonly phase: 'idle' | 'choosing' | 'opening' | 'handshake' | 'syncing' | 'ready' | 'reconnecting' | 'closing' | 'error'
+  readonly transport: 'usb' | 'bluetooth' | null
   readonly error: CompanionError | null
   readonly device: CompanionDevice | null
   readonly contacts: readonly CompanionContact[]
@@ -55,7 +56,7 @@ interface LockProvider {
 }
 
 const initial: CompanionSnapshot = {
-  phase: 'idle', error: null, device: null, contacts: [], channels: [], messages: [], progress: null,
+  phase: 'idle', transport: null, error: null, device: null, contacts: [], channels: [], messages: [], progress: null,
 }
 
 function cleanupError(cause: unknown) {
@@ -196,7 +197,7 @@ export class CompanionSession {
     const generation = ++this.generation
     const attempt: Attempt = {}
     this.attempt = attempt
-    this.update({ phase: 'choosing', error: null, progress: null })
+    this.update({ phase: 'choosing', transport: null, error: null, progress: null })
 
     try {
       const connection = await choose()
@@ -207,7 +208,7 @@ export class CompanionSession {
         return
       }
 
-      this.update({ phase: 'opening' })
+      this.update({ phase: 'opening', transport: connection.kind })
       await this.cleanup
       if (this.attempt !== attempt) return
       attempt.locking = this.acquireLock()
@@ -218,7 +219,7 @@ export class CompanionSession {
       attempt.opening = this.openConnection(attempt, connection)
       const link = await attempt.opening
       if (!link || this.attempt !== attempt) return
-      this.update({ ...initial, phase: 'handshake' })
+      this.update({ ...initial, phase: 'handshake', transport: connection.kind })
       await this.initialize(attempt, link)
       if (this.attempt !== attempt) await this.failure
     } catch (error) {
@@ -284,7 +285,7 @@ export class CompanionSession {
       else if (attempt?.opening) await attempt.opening
       await this.cleanup
       await this.releaseLock()
-      this.update({ phase: 'idle' })
+      this.update({ phase: 'idle', transport: null })
     } catch (error) {
       this.update({
         phase: 'error',
@@ -297,6 +298,11 @@ export class CompanionSession {
     const link = this.attempt?.link
     if (this.snapshot.phase !== 'ready' || !link || this.snapshot.device?.publicKey !== publicKey) {
       throw new CompanionError('disconnected', 'Connect the selected radio before syncing messages.')
+    }
+    // BLE can split a dequeued message across notifications without exposing
+    // its total length. Only the framed USB transport can safely drain it.
+    if (this.connection?.kind !== 'usb') {
+      throw new CompanionError('unsupported-transport', 'Connect over USB to sync queued messages.')
     }
     if (this.receiptHolds.size) {
       throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
@@ -505,7 +511,7 @@ export class CompanionSession {
           attempt.opening = this.openConnection(attempt, connection)
           const link = await attempt.opening
           if (!link || generation !== this.generation) return
-          this.update({ ...initial, phase: 'handshake' })
+          this.update({ ...initial, phase: 'handshake', transport: connection.kind })
           await this.initialize(attempt, link)
           if (generation !== this.generation) return
           if (this.attempt === attempt && this.snapshot.phase === 'ready') {

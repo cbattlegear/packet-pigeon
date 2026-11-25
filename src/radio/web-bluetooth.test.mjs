@@ -20,13 +20,14 @@ function ownership() {
   }
 }
 
-function fixture({ writeWithoutResponse = false } = {}) {
+function fixture({ writeWithoutResponse = false, fragmentedReceipt = false } = {}) {
   const device = new EventTarget()
   const notifications = new EventTarget()
   const writes = []
   const state = {
     chooses: 0, connects: 0, closes: 0, subscriptions: 0, connected: false,
     identity: 0xab, missingService: false, rejectSubscription: false, rejectClose: false, rejectConnects: 0,
+    dequeued: 0,
   }
   const notify = (frame) => {
     // Bluetooth characteristic values may be views into a larger backing buffer.
@@ -55,6 +56,11 @@ function fixture({ writeWithoutResponse = false } = {}) {
       notify(Uint8Array.of(2, 1, 0, 0, 0))
       notify(contact)
       notify(Uint8Array.of(4, 0, 0, 0, 0))
+    } else if (command[0] === 10 && fragmentedReceipt) {
+      const receipt = Uint8Array.of(7, 1, 2, 3, 4, 5, 6, 0xff, 0, 1, 0, 0, 0, ...encode('x'.repeat(100)))
+      state.dequeued++
+      notify(receipt.slice(0, 80))
+      notify(receipt.slice(80))
     } else assert.fail(`Unexpected raw command ${command[0]}`)
   }
   const rx = Object.assign(new EventTarget(), {
@@ -188,6 +194,25 @@ test('checks the radio identity before syncing after Bluetooth recovery', async 
   assert.equal(session.getSnapshot().error.code, 'identity')
   assert.deepEqual(radio.writes.map(({ bytes }) => bytes[0]), [22, 1, 4, 22, 1])
   assert.equal(radio.state.connected, false)
+})
+
+test('leaves a receipt that would span notifications queued across Bluetooth connection and recovery', async () => {
+  const radio = fixture({ fragmentedReceipt: true })
+  const session = new CompanionSession({
+    bluetoothEnvironment: radio.environment, locks: ownership(), retryDelays: [1],
+  })
+  await session.connectBluetooth()
+  for (let attempt = 0; attempt < 2; attempt++) {
+    assert.equal(session.getSnapshot().transport, 'bluetooth')
+    assert.throws(() => session.reserveQueuedMessage('ab'.repeat(32)), /Connect over USB/)
+    assert.equal(radio.state.dequeued, 0)
+    assert(!radio.writes.some(({ bytes }) => bytes[0] === 10))
+    if (attempt === 0) {
+      radio.drop()
+      await until(session, ({ phase }) => phase === 'ready')
+    }
+  }
+  await session.disconnect()
 })
 
 test('cleans up missing services and keeps shared ownership if setup cleanup fails', async () => {

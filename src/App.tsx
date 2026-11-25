@@ -69,6 +69,8 @@ function App() {
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
   const canDisconnect = ['opening', 'handshake', 'syncing', 'ready', 'reconnecting'].includes(snapshot.phase)
   const controlsDisabled = busy || snapshot.error?.code === 'cleanup-failed'
+  const bluetoothConnected = snapshot.transport === 'bluetooth'
+  const canSyncMessages = snapshot.phase === 'ready' && snapshot.transport === 'usb'
   const connection = {
     idle: 'Disconnected',
     choosing: 'Choosing device',
@@ -214,10 +216,13 @@ function App() {
                 <p>Received messages</p>
               </div>
               <div className="message-controls">
-                <button type="button" onClick={() => void messageSync.sync()} disabled={messageStatus.syncing || (snapshot.phase !== 'ready' && !messageStatus.pending)}>
-                  {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending ? 'Retry saving and sync' : 'Sync messages'}
+                <button type="button" onClick={() => void messageSync.sync()}
+                  disabled={messageStatus.syncing || (!canSyncMessages && !messageStatus.pending)}>
+                  {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
+                    ? canSyncMessages ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
                 </button>
-                <p>Each receipt is saved before requesting the next. Interruptions can still lose a message.</p>
+                <p>{bluetoothConnected ? 'Connect over USB to sync queued messages.'
+                  : 'Each receipt is saved before requesting the next. Interruptions can still lose a message.'}</p>
               </div>
             </section>
 

@@ -101,6 +101,9 @@ reconnect schedule as USB. Reconnection reuses the authorized Bluetooth device
 and checks its radio public key before syncing. **Disconnect** cancels recovery
 and releases the connection. Pairing, GATT data exchange and disconnect recovery
 are covered by simulated transport tests. Physical BLE hardware has not been tested.
+Use USB to sync queued messages. Some BLE firmware splits responses across
+notifications, and Web Bluetooth does not expose enough information to verify
+receipt boundaries. Bluetooth can display messages already saved to the cache.
 
 ## Contacts
 
