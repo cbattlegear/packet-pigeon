@@ -10,6 +10,17 @@ export type CapturedPacket = {
   packet: RxPacket
 }
 
+export function matchingChannelObservations(selected: CapturedPacket, entries: readonly CapturedPacket[]) {
+  const valid = ({ packet, transport }: CapturedPacket) => transport === 'usb'
+    && packet.status === 'decoded' && packet.header?.version === 1 && packet.header.typeCode === 5
+    && packet.payload !== undefined && packet.payload.length >= 19 && (packet.payload.length - 3) % 16 === 0
+    && packet.path?.hashes !== undefined
+  if (!valid(selected)) return []
+  const payload = selected.packet.payload!
+  return entries.filter((entry) => valid(entry) && entry.packet.payload!.length === payload.length
+    && entry.packet.payload!.every((byte, index) => byte === payload[index]))
+}
+
 export function redactedDiagnostics(entries: readonly CapturedPacket[]) {
   return JSON.stringify({
     version: 1,

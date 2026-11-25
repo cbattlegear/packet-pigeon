@@ -4,7 +4,7 @@ import { clockFormatter } from '../preferences/appPreferences.ts'
 import type { CompanionSession, CompanionSnapshot } from '../radio/companion-session.ts'
 import { decodeRxPacket, packetHex, payloadFields, routeLabel, rxPacketHash, rxPacketPush, typeLabel } from '../radio/rx-packet.ts'
 import type { CapturedPacket } from './rx-log.ts'
-import { maxRxPackets, redactedDiagnostics } from './rx-log.ts'
+import { matchingChannelObservations, maxRxPackets, redactedDiagnostics } from './rx-log.ts'
 import './diagnostics.css'
 
 type Props = {
@@ -159,7 +159,7 @@ export function RxInspector({ snapshot, session, prefs, locale }: Props) {
       </label>
     </fieldset>
     <p>{filtered.length} of {entries.length} packets</p>
-    {detail && <PacketDetails entry={detail} key={detail.id} format={format}
+    {detail && <PacketDetails entry={detail} observations={matchingChannelObservations(detail, entries)} key={detail.id} format={format}
       close={() => setSelected(null)} copyRaw={(text) => void copy(text, true)} />}
     {filtered.length ? <div className="rx-table-wrap" role="region" aria-label="Received packet table" tabIndex={0}>
       <table>
@@ -181,8 +181,8 @@ export function RxInspector({ snapshot, session, prefs, locale }: Props) {
   </section>
 }
 
-function PacketDetails({ entry, format, close, copyRaw }: {
-  entry: CapturedPacket; format: (date: Date) => string; close: () => void; copyRaw: (text: string) => void
+function PacketDetails({ entry, observations, format, close, copyRaw }: {
+  entry: CapturedPacket; observations: CapturedPacket[]; format: (date: Date) => string; close: () => void; copyRaw: (text: string) => void
 }) {
   const [fingerprint, setFingerprint] = useState('')
   const { packet, time, transport } = entry
@@ -230,6 +230,17 @@ function PacketDetails({ entry, format, close, copyRaw }: {
       </>}
       {payloadFields(packet).map(([name, value]) => <div key={name}><dt>{name}</dt><dd><code>{value}</code></dd></div>)}
     </dl>
+    {observations.length > 0 && <div>
+      <h4>Matching encrypted channel-packet observations: {observations.length}</h4>
+      <p>These USB packets have identical encrypted payload bytes in this capture. They may be separate transmissions,
+        not delivery confirmations. Missing packets are not evidence of no repeats; they cannot be reliably linked to a queued message.</p>
+      <ul>{observations.map(({ id, time: observedAt, packet: observed }) => <li key={id}>
+        <time dateTime={new Date(observedAt).toISOString()}>{format(new Date(observedAt))}</time>
+        {' · '}{observed.path!.count} hops
+        {observed.path!.hashes?.length ? <> · <code>{observed.path!.hashes.join(', ')}</code></> : null}
+        {observed.transportCodes && <> · transport codes <code>{observed.transportCodes.map((code) => code.toString(16).padStart(4, '0')).join(', ')}</code></>}
+      </li>)}</ul>
+    </div>}
     {wire && <details>
       <summary>Show raw packet hex</summary>
       <p>Raw bytes can include private data and identifiers.</p>
