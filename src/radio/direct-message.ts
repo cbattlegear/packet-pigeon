@@ -1,7 +1,8 @@
 import { contactPublicKey } from './contact-commands.ts'
 import { Command, CompanionError, Response } from './protocol.ts'
 
-export const maxDirectTextBytes = 150
+// The last four retry attempts reserve two of the firmware's 160 text bytes.
+export const maxDirectTextBytes = 158
 export const maxDirectAttempts = 8
 
 function bytesFromKey(publicKey: string) {

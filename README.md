@@ -65,16 +65,17 @@ unplug/replug on every supported browser.
 `connect()` must be called directly from a user action for the port chooser.
 Use **Sync messages** in Chats to request queued receipts. Each receipt,
 including an unsupported or malformed response's raw bytes, is saved before
-requesting another; receipts are shown individually and are not deduplicated
-by their contents. Unrecognized or malformed responses are saved as raw bytes
-and stop the sync for inspection; they can also be device errors rather than
-receipts. If saving fails, syncing stops and the receipt stays in memory
-for retry. Keep the tab open until it has been saved. Radio ownership remains
-reserved, even after disconnect, until that receipt is saved; retry saving in
-the owning tab to let another tab connect. Browser or process termination can
-still lose the in-memory receipt and release the lock. Failed contact or channel
-writes remain queued in memory for **Retry saving**; closing or reloading the
-page loses unsaved updates.
+requesting another; receipts are stored individually and are not deduplicated
+by their contents. An optional filter hides possible repeats without deleting
+them; they may be distinct messages. Unrecognized or malformed responses are
+saved as raw bytes and stop the sync for inspection; they can also be device
+errors rather than receipts. If saving fails, syncing stops and the receipt stays
+in memory for retry. Keep the tab open until it has been saved. Radio ownership
+remains reserved, even after disconnect, until that receipt is saved; retry
+saving in the owning tab to let another tab connect. Browser or process
+termination can still lose the in-memory receipt and release the lock. Failed
+contact or channel writes remain queued in memory for **Retry saving**; closing
+or reloading the page loses unsaved updates.
 
 Earlier development builds may already have dequeued messages: those saved in
 the local cache are browsable, while unsaved receipts lost on page close cannot
@@ -103,16 +104,19 @@ reconnect schedule as USB. Reconnection reuses the authorized Bluetooth device
 and checks its radio public key before syncing. **Disconnect** cancels recovery
 and releases the connection. Pairing, GATT data exchange and disconnect recovery
 are covered by simulated transport tests. Physical BLE hardware has not been tested.
-Use USB to sync queued messages. Some BLE firmware splits responses across
-notifications, and Web Bluetooth does not expose enough information to verify
-receipt boundaries. Bluetooth can display messages already saved to the cache.
+Use USB to sync queued messages. BLE firmware can split or drop responses that
+exceed the negotiated MTU. Web Bluetooth does not expose that MTU, and queued
+text responses have no total length to verify completeness. Bluetooth can
+display messages already saved to the cache.
 
 ## Direct messages
 
 Choose a companion or room contact in **Chats**, write a message, and select
 **Send message** while the selected radio is connected. Messages use at most
-150 UTF-8 bytes and cannot contain NUL characters. A disconnected send reports
-an error and keeps its draft; it is not queued for automatic transmission.
+158 UTF-8 bytes and cannot contain NUL characters. The limit leaves room for
+retry metadata on all eight attempts and fits older companion frame sizes.
+A disconnected send reports an error and keeps its draft; it is not queued
+for automatic transmission.
 Drafts and messages are stored in the browser's per-radio cache, including when
 the radio is offline.
 
@@ -141,9 +145,9 @@ Interrupted sends are marked failed on reconnection and are never automatically
 retransmitted. If a post-send update or draft cannot be saved, keep the page
 open and use **Retry saving message changes**. Closing the page while an update
 is unsaved can lose its delivery state; a packet may already have been sent.
-Possible repeated receipts are labeled but retained separately because MeshCore
-does not provide a guaranteed unique message ID. Browser data clearing or
-eviction can remove saved history.
+Possible repeated receipts are labeled and can be hidden, but are retained
+separately because MeshCore does not provide a guaranteed unique message ID.
+Browser data clearing or eviction can remove saved history.
 
 Direct-message commands and acknowledgement handling have been tested with
 mocked USB and Bluetooth transports, not physical hardware. Some Bluetooth

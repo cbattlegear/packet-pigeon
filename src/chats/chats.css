@@ -77,6 +77,20 @@
   margin: 0;
 }
 
+.chat-repeat-filter {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 28px;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.chat-repeat-filter input {
+  flex: 0 0 auto;
+  margin-top: 3px;
+}
+
 .chat-message-list li {
   max-width: min(100%, 48rem);
   background: var(--surface);
@@ -204,6 +218,7 @@
   }
 
   .chat-workspace .conversation-heading,
+  .chat-repeat-filter,
   .chat-composer,
   .chat-retry-settings {
     flex-shrink: 0;

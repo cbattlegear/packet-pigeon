@@ -6,7 +6,7 @@ import type { CompanionSnapshot } from '../radio/companion-session.ts'
 import { directTextBytes, maxDirectTextBytes } from '../radio/direct-message.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { DirectSendOptions, RadioData, RadioKey, StoredMessage, StoredOutgoing } from '../storage/index.ts'
-import { conversations, possibleRepeats } from './model.ts'
+import { conversations, messageVisibility } from './model.ts'
 import type { Conversation } from './model.ts'
 import './chats.css'
 
@@ -191,9 +191,12 @@ function timestamp(value: number | null) {
 function ConversationView({ conversation, radioKey, options, direct, status }: ConversationProps) {
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
+  const [hideRepeats, setHideRepeats] = useState(false)
   const messageList = useRef<HTMLOListElement>(null)
   const following = useRef(true)
-  const repeats = useMemo(() => possibleRepeats(conversation.messages), [conversation.messages])
+  const { repeats, visible } = useMemo(
+    () => messageVisibility(conversation.messages, hideRepeats), [conversation.messages, hideRepeats],
+  )
   const bytes = new TextEncoder().encode(draft).length
   let invalid = ''
   if (draft) {
@@ -202,7 +205,7 @@ function ConversationView({ conversation, radioKey, options, direct, status }: C
 
   useLayoutEffect(() => {
     if (following.current && messageList.current) messageList.current.scrollTop = messageList.current.scrollHeight
-  }, [conversation.messages])
+  }, [conversation.messages, hideRepeats])
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -233,12 +236,19 @@ function ConversationView({ conversation, radioKey, options, direct, status }: C
         <p>{conversation.title}</p>
         <span>{conversation.description}</span>
       </div>
+      {repeats.size > 0 && (
+        <label className="chat-repeat-filter">
+          <input type="checkbox" checked={hideRepeats} onChange={(event) => setHideRepeats(event.currentTarget.checked)} />
+          <span>Hide {repeats.size} possible repeat{repeats.size === 1 ? '' : 's'}.
+            These may be distinct messages; all receipts are kept.</span>
+        </label>
+      )}
       {conversation.messages.length ? (
         <ol className="received-messages chat-message-list" ref={messageList} onScroll={(event) => {
           const element = event.currentTarget
           following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60
         }}>
-          {conversation.messages.map((message) => (
+          {visible.map((message) => (
             <li key={message.id} className={message.outgoing ? 'chat-message--outgoing' : undefined}>
               <div className="chat-message-header">
                 <strong>{message.outgoing ? 'You' : conversation.title}</strong>
