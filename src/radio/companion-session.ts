@@ -8,7 +8,7 @@ import type { CompanionLinkPort } from './serial-link.ts'
 import { browserSerialEnvironment, choosePort } from './web-serial.ts'
 import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
 import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contactPublicKey,
-  readContactFrame, removeContactCommand, writeContactCommand } from './contact-commands.ts'
+  readContactForEdit, readContactFrame, removeContactCommand, writeContactCommand } from './contact-commands.ts'
 import type { ContactPermissions, NewContact } from './contact-commands.ts'
 import type { ContactPathWidth } from './contact-path.ts'
 import { contactPingWidth, sendContactPing } from './contact-ping.ts'
@@ -483,16 +483,19 @@ export class CompanionSession {
 
   private async editContact(radioKey: string, contactKey: string, edit: (frame: Uint8Array) => Uint8Array) {
     const key = contactPublicKey(contactKey)
+    let clockAdvanced = false
     await this.changeContacts(radioKey, async (link) => {
       if (this.snapshot.transport !== 'usb') throw new Error('Connect over USB to edit radio paths or permissions.')
-      const frame = await readContactFrame(link, key)
+      const { frame, since } = await readContactForEdit(link, key)
       if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') throw new Error('The radio disconnected before the edit.')
       await writeContactCommand(link, edit(frame))
       const changed = decodeContact(await readContactFrame(link, key))
+      clockAdvanced = changed.lastModifiedAt > since
       return this.snapshot.contacts.some(({ publicKey }) => publicKey === key)
         ? this.snapshot.contacts.map((contact) => contact.publicKey === key ? changed : contact)
         : [...this.snapshot.contacts, changed]
     })
+    if (!clockAdvanced) throw new Error('The radio saved the contact, but its clock changed during the edit. Check the radio clock before retrying.')
   }
 
   readonly saveContactPath = (radioKey: string, contactKey: string, width: ContactPathWidth, text: string) =>

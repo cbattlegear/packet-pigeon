@@ -13,6 +13,8 @@ export type NewContact = {
 const addOrUpdateContact = 9
 const removeContact = 15
 const ok = 0
+const deviceTime = 5
+const currentTime = 9
 const getContactByKey = 30
 const contactUpdateLength = 144
 
@@ -77,6 +79,35 @@ export async function readContactFrame(link: SerialLink, publicKey: string) {
   if (frame[0] !== Response.contact) throw new Error('The radio could not read this contact. Check firmware support and try again.')
   if (decodeContact(frame).publicKey !== publicKey) throw new Error('The radio returned a different contact.')
   return frame
+}
+
+async function readContactClock(link: SerialLink) {
+  const frame = await link.request(Uint8Array.of(deviceTime), (response) => {
+    if (response[0] !== Response.error && response[0] !== Response.disabled) expectResponse(response, currentTime)
+    return { value: response }
+  })
+  if (frame[0] !== currentTime || frame.length !== 5) {
+    throw new Error('The radio clock could not be read before the contact edit.')
+  }
+  return new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(1, true)
+}
+
+export async function readContactForEdit(link: SerialLink, publicKey: string) {
+  // Incremental GET_CONTACTS returns lastmod > since. Move past the active
+  // radio second even when the target contact is older than the client's cursor.
+  let since = await readContactClock(link)
+  const deadline = performance.now() + 2_500
+  while (performance.now() < deadline) {
+    const now = await readContactClock(link)
+    if (now > since) {
+      const frame = await readContactFrame(link, publicKey)
+      const { lastModifiedAt } = decodeContact(frame)
+      if (lastModifiedAt < now) return { frame, since: Math.max(since, lastModifiedAt) }
+      since = lastModifiedAt
+    }
+    await new Promise((resolve) => setTimeout(resolve, 125))
+  }
+  throw new Error('The radio clock did not advance. The contact was left unchanged.')
 }
 
 function contactUpdate(frame: Uint8Array) {

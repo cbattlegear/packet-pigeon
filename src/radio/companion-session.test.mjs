@@ -612,7 +612,10 @@ test('edits saved routes and permissions with a fresh contact record, preserving
   const original = contact.slice()
   const record = new DataView(contact.buffer)
   const oldTimestamp = record.getUint32(144, true)
-  let clock = oldTimestamp
+  const oldSyncCursor = oldTimestamp + 3
+  let clock = oldSyncCursor
+  let clockReads = 0
+  let freezeClock = false
   function handleCommand(command, serial) {
     switch (command[0]) {
       case 22: serial.emit(...deviceInfo()); break
@@ -625,10 +628,20 @@ test('edits saved routes and permissions with a fresh contact record, preserving
         break
       }
       case 30: assert.deepEqual(command.slice(1), Array(32).fill(0xbc)); serial.emit(...contact); break
+      case 5: {
+        clockReads++
+        if (!freezeClock && clockReads % 4 === 0) clock++
+        const time = Uint8Array.of(9, 0, 0, 0, 0)
+        new DataView(time.buffer).setUint32(1, clock, true)
+        serial.emit(...time)
+        break
+      }
       case 9:
         assert.equal(command.length, 144)
+        assert.equal(clockReads % 4, 0)
+        assert.ok(clockReads > 0, 'the edit waited for an actual radio clock tick')
         contact.set(command.slice(1), 1)
-        record.setUint32(144, ++clock, true)
+        record.setUint32(144, clock, true)
         serial.emit(0)
         break
       default: assert.fail(`Unexpected command ${command[0]}`)
@@ -644,22 +657,27 @@ test('edits saved routes and permissions with a fresh contact record, preserving
   assert.deepEqual([...contact.slice(36, 42)], [1, 2, 0xaa, 0xbb, 0, 0])
   assert.deepEqual(contact.slice(0, 35), original.slice(0, 35))
   assert.deepEqual(contact.slice(100, 144), original.slice(100, 144))
-  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldTimestamp + 1)
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldSyncCursor + 1)
   await session.saveContactPermissions(key, target, { telemetry: true, location: false, remoteCli: true })
   assert.equal(contact[34], 0xf3)
   assert.equal(session.getSnapshot().contacts[0].flags, 0xf3)
   assert.equal(session.getSnapshot().contacts[0].pathLength, 0x42)
-  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldTimestamp + 2)
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldSyncCursor + 2)
   await session.resetContactPath(key, target)
   assert.equal(session.getSnapshot().contacts[0].pathLength, 0xff)
   assert.equal(contact[34], 0xf3)
-  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldTimestamp + 3)
-  assert.deepEqual(port.commands.slice(3).map(([code]) => code), [30, 9, 30, 30, 9, 30, 30, 9, 30])
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldSyncCursor + 3)
+  assert.deepEqual(port.commands.slice(3).map(([code]) => code).filter((code) => code !== 5),
+    [30, 9, 30, 30, 9, 30, 30, 9, 30])
+  freezeClock = true
+  await assert.rejects(session.saveContactPath(key, target, 1, 'ab'), /clock did not advance/)
+  assert.equal(port.commands.filter(([code]) => code === 9).length, 3)
+  assert.equal(session.getSnapshot().contacts[0].lastModifiedAt, oldSyncCursor + 3)
   await session.disconnect()
 
   const secondClient = new SerialLink(new FixturePort(handleCommand), 1000, () => {}, assert.fail)
   const incremental = Uint8Array.of(4, 0, 0, 0, 0)
-  new DataView(incremental.buffer).setUint32(1, oldTimestamp, true)
+  new DataView(incremental.buffer).setUint32(1, oldSyncCursor, true)
   const unseen = []
   try {
     await secondClient.request(incremental, (frame) => {

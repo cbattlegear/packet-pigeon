@@ -30,6 +30,7 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
       createContact('Repeater Two', 2, [0xbc, 0x44]),
     ]
     const changes = []
+    let time = 100
     window.radioChanges = changes
     let controller
     const emit = (bytes) => controller.enqueue(Uint8Array.of(0x3e, bytes.length, 0, ...bytes))
@@ -45,11 +46,16 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
           table.forEach(emit)
           emit([4, 0, 0, 0, 0])
         } else if (data[0] === 30) emit(found())
+        else if (data[0] === 5) {
+          const reply = Uint8Array.of(9, 0, 0, 0, 0)
+          new DataView(reply.buffer).setUint32(1, time++, true)
+          emit(reply)
+        }
         else if (data[0] === 9) {
           changes.push([...data])
           const record = found()
           record.set(data.slice(1), 1)
-          new DataView(record.buffer).setUint32(144, changes.length, true)
+          new DataView(record.buffer).setUint32(144, time - 1, true)
           emit([0])
         }
         else if (data[0] === 36) {
