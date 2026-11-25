@@ -1,0 +1,130 @@
+.contact-workspace {
+  padding: 22px clamp(16px, 3vw, 28px) 28px;
+}
+
+.contact-filters,
+.contact-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.contact-workspace label:not(.contact-checkbox) {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.contact-checkbox {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  align-self: center;
+}
+
+.contact-radio {
+  width: min(100%, 28rem);
+}
+
+.contact-workspace :is(button, input:not([type='checkbox']), select) {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.contact-workspace button:not(:disabled),
+.contact-new summary {
+  cursor: pointer;
+}
+
+.contact-workspace button[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.contact-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, 2fr) minmax(0, 3fr);
+  align-items: start;
+  gap: 12px;
+}
+
+.contact-list {
+  max-height: 480px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.contact-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.contact-list button {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.contact-meta,
+.contact-status {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.contact-status {
+  margin-bottom: 8px;
+  min-height: 1.4em;
+}
+
+.contact-note,
+.contact-details,
+.contact-new {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.contact-details dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 12px 0;
+}
+
+.contact-details dt {
+  font-weight: 600;
+}
+
+.contact-details dd {
+  margin: 0;
+}
+
+.contact-new {
+  margin-top: 12px;
+}
+
+@media (max-width: 780px) {
+  .contact-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
