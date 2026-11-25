@@ -76,10 +76,7 @@ function ProfileChart({ profile }: { profile: ProfileResult }) {
 
     context.clearRect(0, 0, width, height)
     context.beginPath()
-    context.moveTo(x(0), y(samples[0].terrain))
-    for (let index = 1; index < samples.length; index++) {
-      context.lineTo(x(index), y(samples[index].terrain))
-    }
+    for (const [index, sample] of samples.entries()) context.lineTo(x(index), y(sample.terrain))
     context.lineTo(width - padding, height)
     context.lineTo(padding, height)
     context.closePath()
