@@ -67,7 +67,10 @@ requesting another; receipts are shown individually and are not deduplicated
 by their contents. Unrecognized or malformed responses are saved as raw bytes
 and stop the sync for inspection; they can also be device errors rather than
 receipts. If saving fails, syncing stops and the receipt stays in memory
-for retry. Keep the tab open until it has been saved. Failed contact or channel
+for retry. Keep the tab open until it has been saved. USB ownership remains
+reserved, even after disconnect, until that receipt is saved; retry saving in
+the owning tab to let another tab connect. Browser or process termination can
+still lose the in-memory receipt and release the lock. Failed contact or channel
 writes remain queued in memory for **Retry saving**; closing or reloading the
 page loses unsaved updates.
 

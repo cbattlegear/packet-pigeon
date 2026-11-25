@@ -1,13 +1,14 @@
+import type { QueuedMessageLease } from '../radio/companion-session.ts'
 import { CompanionError, Response, decodeQueuedMessage } from '../radio/protocol.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioData, RadioKey, StoredMessage } from '../storage/index.ts'
 
 type MessageSource = {
   getSnapshot(): { phase: string; device: { publicKey: string } | null }
-  nextQueuedMessage(publicKey: string): Promise<Uint8Array | null>
+  reserveQueuedMessage(publicKey: string): QueuedMessageLease
 }
 
-type PendingReceipt = { key: RadioKey; message: StoredMessage }
+type PendingReceipt = { key: RadioKey; message: StoredMessage; release: () => void }
 type Status = {
   syncing: boolean
   error: string | null
@@ -20,6 +21,7 @@ const knownResponses: readonly number[] = [
   Response.directText, Response.directTextV3, Response.channelText,
   Response.channelTextV3, Response.channelData,
 ]
+const unsupportedError = 'An unrecognized response was saved as raw bytes. Sync stopped; inspect it before trying again.'
 
 function makeReceipt(frame: Uint8Array, id: string): StoredMessage {
   const rawHex = Array.from(frame, (byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -87,6 +89,16 @@ export class MessageSync {
     }
   }
 
+  private async savePending(storage: Awaited<ReturnType<typeof openRadioStorage>>) {
+    const pending = this.pendingReceipt
+    if (!pending) throw new Error('No received message is waiting to be saved.')
+    await storage.update(pending.key, { messages: [pending.message] })
+    this.pendingReceipt = undefined
+    pending.release()
+    this.update({ pending: false })
+    return pending.message.receipt !== undefined
+  }
+
   readonly sync = async () => {
     if (this.status.syncing) return
     ++this.loadVersion
@@ -95,9 +107,7 @@ export class MessageSync {
     try {
       storage = await this.openStorage()
       if (this.pendingReceipt) {
-        await storage.update(this.pendingReceipt.key, { messages: [this.pendingReceipt.message] })
-        this.pendingReceipt = undefined
-        this.update({ pending: false })
+        if (!await this.savePending(storage)) throw new Error(unsupportedError)
       }
       const snapshot = this.source.getSnapshot()
       if (snapshot.phase !== 'ready' || !snapshot.device) {
@@ -110,21 +120,35 @@ export class MessageSync {
       while (true) {
         if (!this.cacheReady()) throw new Error('Resolve pending cache writes before syncing messages.')
         const id = crypto.randomUUID()
-        const frame = await this.source.nextQueuedMessage(key)
-        if (!frame) break
-        const rawHex = Array.from(frame, (byte) => byte.toString(16).padStart(2, '0')).join('')
-        this.pendingReceipt = {
-          key, message: { id, rawHex, conversationId: 'unsupported', sender: '', timestamp: null, text: '' },
+        const lease = this.source.reserveQueuedMessage(key)
+        let failed = false
+        let requestError: unknown
+        let received = false
+        try {
+          received = await lease.request((frame) => {
+            const rawHex = Array.from(frame, (byte) => byte.toString(16).padStart(2, '0')).join('')
+            this.pendingReceipt = {
+              key, release: lease.release,
+              message: { id, rawHex, conversationId: 'unsupported', sender: '', timestamp: null, text: '' },
+            }
+            this.update({ pending: true })
+            this.pendingReceipt.message = makeReceipt(frame, id)
+          })
+        } catch (error) {
+          failed = true
+          requestError = error
         }
-        this.update({ pending: true })
-        this.pendingReceipt.message = makeReceipt(frame, id)
-        await storage.update(key, { messages: [this.pendingReceipt.message] })
-        const supported = this.pendingReceipt.message.receipt !== undefined
-        this.pendingReceipt = undefined
-        this.update({ pending: false })
+        if (!this.pendingReceipt) {
+          lease.release()
+          if (failed) throw requestError
+          if (received) throw new Error('The received message could not be captured.')
+          break
+        }
+        const supported = await this.savePending(storage)
         const data = await storage.read(key)
         if (this.status.key === key) this.update({ data })
-        if (!supported) throw new Error('An unrecognized response was saved as raw bytes. Sync stopped; inspect it before trying again.')
+        if (!supported) throw new Error(unsupportedError)
+        if (failed) throw requestError
       }
     } catch (error) {
       this.update({ error: error instanceof Error ? error.message : 'Could not sync messages.' })

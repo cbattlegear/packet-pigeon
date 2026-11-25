@@ -175,7 +175,10 @@ function App() {
             {snapshot.error && <p role="alert">{snapshot.error.message}</p>}
             {messageStatus.error && <p role="alert">Message sync: {messageStatus.error}</p>}
             {messageStatus.pending && (
-              <p role="alert">A received message is not saved. Keep this page open and retry syncing before closing it.</p>
+              <div role="alert">
+                <p>A received message is not saved. Keep this page open and retry saving. USB ownership stays reserved until the receipt is saved.</p>
+                <button type="button" disabled={messageStatus.syncing} onClick={() => void messageSync.sync()}>Retry saving</button>
+              </div>
             )}
             {cacheStatus.error && (
               <div role="alert">

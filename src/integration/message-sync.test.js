@@ -13,10 +13,18 @@ function sourceFor(frames) {
     calls: 0,
     snapshot: { phase: 'ready', device: { publicKey } },
     getSnapshot() { return this.snapshot },
-    async nextQueuedMessage(expected) {
+    reserveQueuedMessage(expected) {
       assert.equal(expected, publicKey)
-      this.calls++
-      return frames.shift() ?? null
+      return {
+        request: async (receive) => {
+          this.calls++
+          const frame = frames.shift()
+          if (!frame) return false
+          receive(frame)
+          return true
+        },
+        release() {},
+      }
     },
   }
 }
@@ -74,6 +82,38 @@ test('stops after a failed save and retries the same receipt before fetching ano
   source.snapshot.phase = 'ready'
   await sync.sync()
   assert.equal(sync.getSnapshot().data.messages.length, 2)
+})
+
+test('stops for inspection after retrying a failed unsupported receipt save', async (t) => {
+  for (const frame of [Uint8Array.of(0x55, 1, 2), Uint8Array.of(16)]) {
+    await t.test(`response ${frame[0]}`, async () => {
+      const factory = new IDBFactory()
+      const source = sourceFor([frame, direct])
+      const attempts = []
+      let fail = true
+      const sync = new MessageSync(source, async () => {
+        const storage = await openRadioStorage(factory)
+        return {
+          ...storage,
+          update: async (target, update) => {
+            attempts.push(update.messages[0])
+            if (fail) { fail = false; throw new Error('Disk unavailable') }
+            await storage.update(target, update)
+          },
+        }
+      })
+
+      await sync.sync()
+      assert.equal(source.calls, 1)
+      assert.equal(sync.getSnapshot().pending, true)
+      await sync.sync()
+      assert.equal(source.calls, 1, 'no additional queue request after saving unsupported bytes')
+      assert.equal(sync.getSnapshot().pending, false)
+      assert.match(sync.getSnapshot().error, /unrecognized/)
+      assert.equal(attempts[0].id, attempts[1].id)
+      assert.equal(sync.getSnapshot().data.messages[0].rawHex, Buffer.from(frame).toString('hex'))
+    })
+  }
 })
 
 test('does not request queued receipts while other cache writes need attention', async () => {

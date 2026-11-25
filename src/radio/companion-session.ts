@@ -28,6 +28,12 @@ export interface CompanionPush {
   readonly payload: Uint8Array
 }
 
+export interface QueuedMessageLease {
+  /** Keep the lease until any received frame has been durably saved. */
+  request(receive: (frame: Uint8Array) => void): Promise<boolean>
+  release(): void
+}
+
 interface Attempt {
   link?: SerialLink
   opening?: Promise<SerialLink | null>
@@ -60,6 +66,8 @@ export class CompanionSession {
   private failure = Promise.resolve()
   private releaseOwnership?: () => void
   private ownership?: Promise<void>
+  private readonly receiptHolds = new Set<symbol>()
+  private readonly receiptWaiters = new Set<() => void>()
   private generation = 0
   private retryTimer?: ReturnType<typeof setTimeout>
   private cancelDelay?: () => void
@@ -145,6 +153,9 @@ export class CompanionSession {
   }
 
   private async releaseLock() {
+    if (this.receiptHolds.size) {
+      await new Promise<void>((resolve) => this.receiptWaiters.add(resolve))
+    }
     this.releaseOwnership?.()
     this.releaseOwnership = undefined
     await this.ownership
@@ -243,14 +254,51 @@ export class CompanionSession {
     }
   }
 
-  readonly nextQueuedMessage = async (publicKey: string): Promise<Uint8Array | null> => {
+  readonly reserveQueuedMessage = (publicKey: string): QueuedMessageLease => {
     const link = this.attempt?.link
     if (this.snapshot.phase !== 'ready' || !link || this.snapshot.device?.publicKey !== publicKey) {
       throw new CompanionError('disconnected', 'Connect the selected radio before syncing messages.')
     }
-    return link.request(Uint8Array.of(Command.nextMessage), (frame) => {
-      return { value: frame[0] === Response.noMoreMessages && frame.length === 1 ? null : frame.slice() }
-    })
+    if (this.receiptHolds.size) {
+      throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
+    }
+    const hold = Symbol()
+    this.receiptHolds.add(hold)
+    let used = false
+    let released = false
+    let requesting = false
+    const finishRelease = () => {
+      this.receiptHolds.delete(hold)
+      if (this.receiptHolds.size === 0) {
+        for (const resolve of this.receiptWaiters) resolve()
+        this.receiptWaiters.clear()
+      }
+    }
+    return {
+      request: async (receive) => {
+        if (used || released) throw new CompanionError('protocol', 'This message request is no longer available.')
+        used = true
+        if (this.attempt?.link !== link || this.snapshot.phase !== 'ready' || this.snapshot.device?.publicKey !== publicKey) {
+          throw new CompanionError('disconnected', 'Connect the selected radio before syncing messages.')
+        }
+        requesting = true
+        try {
+          return await link.request(Uint8Array.of(Command.nextMessage), (frame) => {
+            if (frame[0] === Response.noMoreMessages && frame.length === 1) return { value: false }
+            receive(frame.slice())
+            return { value: true }
+          })
+        } finally {
+          requesting = false
+          if (released) finishRelease()
+        }
+      },
+      release: () => {
+        if (released) return
+        released = true
+        if (!requesting) finishRelease()
+      },
+    }
   }
 
   private async initialize(attempt: Attempt, link: SerialLink) {
