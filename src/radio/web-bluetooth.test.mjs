@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { setTimeout } from 'node:timers/promises'
 import test from 'node:test'
+import { IDBFactory } from 'fake-indexeddb'
 import { CompanionSession } from './index.ts'
+import { SessionCache } from '../integration/session-cache.ts'
+import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import { chooseBluetoothDevice, getWebBluetoothSupport, meshCoreBluetooth } from './web-bluetooth.ts'
 
 const encode = (value) => new TextEncoder().encode(value)
@@ -218,6 +221,32 @@ test('leaves a receipt that would span notifications queued across Bluetooth con
     }
   }
   await session.disconnect()
+})
+
+test('ignores split Bluetooth adverts even when a continuation looks like a complete advert', async () => {
+  const radio = fixture()
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const radioKey = radioKeyFromPublicKey('ab'.repeat(32))
+  const saved = { publicKey: 'ef'.repeat(32), name: 'Previously observed on USB', heardAt: 1 }
+  const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks: ownership() })
+  const cache = new SessionCache(session, async () => storage)
+  try {
+    await storage.update(radioKey, { discovery: { upsert: [saved] } })
+    await session.connectBluetooth()
+    const advert = Uint8Array.of(0x8a, ...new Uint8Array(32).fill(0x91), 2, 0, 0xff, ...new Uint8Array(112))
+    advert[115] = 0x80
+    radio.notify(advert.slice(0, 115))
+    radio.notify(advert.slice(115))
+    await setTimeout(0)
+    for (let index = 0; cache.getSnapshot().pending && index < 100; index++) await setTimeout(2)
+    assert.deepEqual((await storage.read(radioKey)).discoveries, [saved])
+    await assert.rejects(session.advertPath(radioKey, saved.publicKey), { code: 'unsupported-transport' })
+    assert(!radio.writes.some(({ bytes }) => bytes[0] === 42))
+  } finally {
+    await session.disconnect()
+    storage.close()
+  }
 })
 
 test('sends direct commands over Bluetooth while keeping queued receipts inaccessible', async () => {

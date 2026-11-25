@@ -13,6 +13,8 @@ import { decodeDirectSent, directMessageCommand, resetPathCommand } from './dire
 import type { DirectSendReceipt } from './direct-message.ts'
 import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort } from './web-bluetooth.ts'
 import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bluetooth.ts'
+import { readAdvertPath, readAutoAddPolicy, writeAutoAddPolicy } from './discovery-commands.ts'
+import type { AutoAddPolicy } from './discovery-commands.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -355,31 +357,61 @@ export class CompanionSession {
     }
   }
 
-  private async changeContacts(
+  private async runRadioCommand<T>(
     radioKey: string,
-    write: (link: SerialLink) => Promise<readonly CompanionContact[]>,
+    run: (link: SerialLink) => Promise<T>,
   ) {
     const attempt = this.attempt
     if (
       !attempt?.link || this.snapshot.phase !== 'ready'
       || this.snapshot.device?.publicKey !== radioKey
     ) throw new Error('Connect the selected radio and wait for it to finish syncing.')
-    if (this.contactWritePending) throw new Error('A radio contact change is already in progress.')
-    if (this.directCommandPending) throw new Error('Wait for the direct-message command to finish before changing contacts.')
-    if (this.receiptHolds.size) throw new Error('Finish message sync or save the pending receipt before changing contacts.')
+    if (this.contactWritePending) throw new Error('A radio action is already in progress.')
+    if (this.directCommandPending) throw new Error('Wait for the direct-message command to finish before changing contacts or discovery.')
+    if (this.receiptHolds.size) throw new Error('Finish message sync or save the pending receipt before changing contacts or discovery.')
 
     this.contactWritePending = true
     try {
-      const contacts = await write(attempt.link)
+      const result = await run(attempt.link)
       if (this.attempt !== attempt) {
-        throw new Error('The radio disconnected. Reconnect and check its contacts before retrying.')
+        throw new Error('The radio disconnected. Reconnect and check its state before retrying.')
       }
-      this.update({ contacts })
+      return result
     } finally {
       this.contactWritePending = false
     }
   }
 
+  private async changeContacts(radioKey: string, write: (link: SerialLink) => Promise<readonly CompanionContact[]>) {
+    await this.runRadioCommand(radioKey, async (link) => {
+      const contacts = await write(link)
+      if (this.attempt?.link === link) this.update({ contacts })
+    })
+  }
+
+  readonly refreshContacts = (radioKey: string) => this.changeContacts(radioKey, (link) => this.readContacts(link))
+
+  readonly advertPath = (radioKey: string, contactKey: string) => (
+    this.runRadioCommand(radioKey, (link) => {
+      if (this.connection?.kind !== 'usb') {
+        throw new CompanionError('unsupported-transport', 'Connect over USB to read an advert path from the radio.')
+      }
+      return readAdvertPath(link, contactKey)
+    })
+  )
+
+  readonly getAutoAdd = (radioKey: string) => (
+    this.runRadioCommand(radioKey, (link) => readAutoAddPolicy(link, this.snapshot.device!.contactMode))
+  )
+
+  readonly setAutoAdd = (radioKey: string, policy: AutoAddPolicy) => (
+    this.runRadioCommand(radioKey, async (link) => {
+      const current = this.snapshot.device!
+      const result = await writeAutoAddPolicy(link, policy, current.contactMode)
+      if (this.attempt?.link === link) this.update({ device: { ...current, contactMode: result.mode } })
+      return result.policy
+    })
+  )
   private async readContacts(link: SerialLink, progress?: (status: SyncProgress) => void) {
     const contacts: CompanionContact[] = []
     let total: number | null = null

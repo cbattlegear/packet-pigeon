@@ -5,6 +5,10 @@ import { MessageSync } from './integration/message-sync.ts'
 import { DirectMessages } from './integration/direct-messages.ts'
 import { ChatPanel } from './chats/ChatPanel.tsx'
 import { ContactsPanel } from './contacts/ContactsPanel.tsx'
+import { DiscoveryPanel } from './discovery/DiscoveryPanel.tsx'
+import { discoveryEntries, discoveryMapNodes } from './discovery/model.ts'
+import { useRadioDiscoveries } from './discovery/use-radio-discoveries.ts'
+import { storedContact } from './integration/contact-record.ts'
 import { mapRadioContacts } from './map/nodes.ts'
 import type { Coordinates } from './map/nodes.ts'
 import './App.css'
@@ -19,7 +23,7 @@ const messageSync = new MessageSync(session, undefined, () => {
 const directMessages = new DirectMessages(session)
 const MapWorkspace = lazy(() => import('./map/MapWorkspace.tsx'))
 
-const sections = ['Chats', 'Contacts', 'Channels', 'Map', 'Tools', 'Settings'] as const
+const sections = ['Chats', 'Contacts', 'Discovery', 'Channels', 'Map', 'Tools', 'Settings'] as const
 type Section = (typeof sections)[number]
 
 function sectionFromHash(): Section {
@@ -31,7 +35,7 @@ function isMapSection(section: Section): section is 'Map' | 'Tools' {
   return section === 'Map' || section === 'Tools'
 }
 
-const sectionDescriptions: Record<Exclude<Section, 'Chats' | 'Contacts' | 'Map' | 'Tools'>, string> = {
+const sectionDescriptions: Record<Exclude<Section, 'Chats' | 'Contacts' | 'Discovery' | 'Map' | 'Tools'>, string> = {
   Channels: 'Channels will appear here when that feature is available.',
   Settings: 'Settings will appear here when they are available.',
 }
@@ -57,17 +61,29 @@ function StateMessage({ kind, title, description }: StateMessageProps) {
 }
 
 function App() {
-  const [{ activeSection, hasOpenedMap, hasOpenedContacts }, setNavigation] = useState(() => {
+  const [{ activeSection, hasOpenedMap, hasOpenedContacts, hasOpenedDiscovery }, setNavigation] = useState(() => {
     const activeSection = sectionFromHash()
-    return { activeSection, hasOpenedMap: isMapSection(activeSection), hasOpenedContacts: activeSection === 'Contacts' }
+    return {
+      activeSection, hasOpenedMap: isMapSection(activeSection), hasOpenedContacts: activeSection === 'Contacts',
+      hasOpenedDiscovery: activeSection === 'Discovery',
+    }
   })
+  const [discoveryMapRequest, setDiscoveryMapRequest] = useState(0)
   const [contactFocus, setContactFocus] = useState<{ position: Coordinates; terrain: boolean } | null>(null)
   const mapVisible = isMapSection(activeSection)
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
   const messageStatus = useSyncExternalStore(messageSync.subscribe, messageSync.getSnapshot)
   const directStatus = useSyncExternalStore(directMessages.subscribe, directMessages.getSnapshot)
-  const radioNodes = useMemo(() => mapRadioContacts(snapshot.contacts), [snapshot.contacts])
+  const discoveryConnected = snapshot.phase === 'syncing' || snapshot.phase === 'ready'
+  const discovery = useRadioDiscoveries(snapshot.device?.publicKey, discoveryConnected,
+    hasOpenedDiscovery || hasOpenedMap, cacheStatus.saving)
+  const radioContacts = useMemo(() => snapshot.contacts.map(storedContact), [snapshot.contacts])
+  const adverts = useMemo(() => discoveryEntries(discovery.data,
+    discoveryConnected && snapshot.progress?.stage !== 'contacts' ? radioContacts : undefined),
+  [discovery.data, discoveryConnected, radioContacts, snapshot.progress?.stage])
+  const radioNodes = useMemo(() => [...mapRadioContacts(snapshot.contacts), ...discoveryMapNodes(adverts)],
+    [snapshot.contacts, adverts])
   const usbSupport = getWebSerialSupport()
   const bluetoothSupport = getWebBluetoothSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
@@ -96,6 +112,7 @@ function App() {
         activeSection,
         hasOpenedMap: previous.hasOpenedMap || isMapSection(activeSection),
         hasOpenedContacts: previous.hasOpenedContacts || activeSection === 'Contacts',
+        hasOpenedDiscovery: previous.hasOpenedDiscovery || activeSection === 'Discovery',
       }))
     }
     window.addEventListener('hashchange', updateSection)
@@ -222,7 +239,7 @@ function App() {
           <ChatPanel snapshot={snapshot} messageSync={messageSync} messageStatus={messageStatus}
             direct={directMessages} status={directStatus} cacheSaving={cacheStatus.saving} />
         </div>
-        {activeSection !== 'Chats' && !mapVisible && activeSection !== 'Contacts' && (
+        {activeSection !== 'Chats' && !mapVisible && activeSection !== 'Contacts' && activeSection !== 'Discovery' && (
           <section className="section-pane" aria-labelledby="section-heading">
             <div className="pane-heading">
               <h1 id="section-heading">{activeSection}</h1>
@@ -238,12 +255,26 @@ function App() {
         {hasOpenedContacts && (
           <div hidden={activeSection !== 'Contacts'}>
             <div className="section-pane">
-              <div className="pane-heading"><h1>Contacts</h1></div>
+              <div className="pane-heading"><h1>Contacts</h1><a href="#discovery">Browse discovered adverts</a></div>
               <ContactsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving}
                 messageSyncing={messageStatus.syncing} messageSending={directStatus.activeId !== null}
                 onMap={(position, terrain) => {
                   setContactFocus({ position, terrain })
                   window.location.hash = terrain ? 'tools' : 'map'
+                }} />
+            </div>
+          </div>
+        )}
+        {hasOpenedDiscovery && (
+          <div hidden={activeSection !== 'Discovery'}>
+            <div className="section-pane">
+              <div className="pane-heading"><h1>Discovery</h1></div>
+              <DiscoveryPanel view={discovery} entries={adverts} radioContacts={radioContacts}
+                connected={discoveryConnected} ready={snapshot.phase === 'ready'} usb={snapshot.transport === 'usb'}
+                pending={cacheStatus.pending}
+                session={session} openMap={() => {
+                  setDiscoveryMapRequest((value) => value + 1)
+                  window.location.hash = 'map'
                 }} />
             </div>
           </div>
@@ -255,7 +286,8 @@ function App() {
                 <h1>{activeSection === 'Tools' ? 'Tools' : 'Map'}</h1>
               </div>
               <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
-                <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'} contactFocus={contactFocus} />
+                <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'}
+                  contactFocus={contactFocus} discoveryRequest={discoveryMapRequest} />
               </Suspense>
             </div>
           </div>

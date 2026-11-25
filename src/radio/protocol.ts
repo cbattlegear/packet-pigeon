@@ -61,6 +61,7 @@ export interface CompanionDevice {
   readonly publicKey: string
   readonly name: string
   readonly type: number
+  readonly contactMode: number
   readonly capabilities: DeviceCapabilities
 }
 
@@ -158,6 +159,7 @@ export function decodeSelf(frame: Uint8Array, capabilities: DeviceCapabilities):
     publicKey: hex(frame.subarray(4, 36)),
     name: text(frame.subarray(58)),
     type: frame[1],
+    contactMode: frame[47],
     capabilities,
   }
 }
