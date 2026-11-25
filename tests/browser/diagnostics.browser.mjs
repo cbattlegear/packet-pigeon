@@ -80,11 +80,14 @@ test('captures received packets, filters the log and redacts clipboard and file 
   await page.evaluate(() => {
     const body = [0x12, 0x34, 0x56, ...new Uint8Array(16).fill(0xa5)]
     window.fixtureRx([0x88, 4, 200, 0x15, 1, 0xaa, ...body])
-    window.fixtureRx([0x88, 4, 200, 0x14, 0x34, 0x12, 0x78, 0x56, 2, 0xbb, 0xcc, ...body])
+    window.fixtureRx([0x88, 4, 200, 0x17, 0x34, 0x12, 0x78, 0x56, 2, 0xbb, 0xcc, ...body])
   })
   await page.getByText('2 of 5 packets').waitFor()
   await page.getByRole('button', { name: 'RX Channel text' }).first().click()
   await page.getByRole('heading', { name: 'Matching encrypted channel-packet observations: 2' }).waitFor()
+  assert.match(await page.getByRole('listitem').filter({ hasText: 'aa' }).textContent(), /Flood · 1 traversed hop/)
+  assert.match(await page.getByRole('listitem').filter({ hasText: 'bb, cc' }).textContent(),
+    /Direct with transport codes · 2 remaining hops/)
   await page.getByText('bb, cc', { exact: true }).waitFor()
   await page.getByText('1234, 5678', { exact: true }).waitFor()
   await page.getByText(/not delivery confirmations/).waitFor()

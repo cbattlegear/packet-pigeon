@@ -236,7 +236,8 @@ function PacketDetails({ entry, observations, format, close, copyRaw }: {
         not delivery confirmations. Missing packets are not evidence of no repeats; they cannot be reliably linked to a queued message.</p>
       <ul>{observations.map(({ id, time: observedAt, packet: observed }) => <li key={id}>
         <time dateTime={new Date(observedAt).toISOString()}>{format(new Date(observedAt))}</time>
-        {' · '}{observed.path!.count} hops
+        {observed.header && <> · {routeLabel(observed.header)} · {observed.path!.count}{' '}
+          {observed.header.routeCode >= 2 ? 'remaining' : 'traversed'} hop{observed.path!.count === 1 ? '' : 's'}</>}
         {observed.path!.hashes?.length ? <> · <code>{observed.path!.hashes.join(', ')}</code></> : null}
         {observed.transportCodes && <> · transport codes <code>{observed.transportCodes.map((code) => code.toString(16).padStart(4, '0')).join(', ')}</code></>}
       </li>)}</ul>
