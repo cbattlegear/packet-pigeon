@@ -1,19 +1,22 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { FormEvent } from 'react'
 import type { DirectMessages, DirectStatus } from '../integration/direct-messages.ts'
 import type { MessageSync } from '../integration/message-sync.ts'
+import { ChannelObservations } from '../integration/channel-observations.ts'
+import type { CapturedChannelObservation, ChannelObservationSource } from '../integration/channel-observations.ts'
 import { clockFormatter } from '../preferences/appPreferences.ts'
 import type { AppPreferences } from '../preferences/appPreferences.ts'
 import type { CompanionSnapshot } from '../radio/companion-session.ts'
 import { directTextBytes, maxDirectTextBytes } from '../radio/direct-message.ts'
 import { channelTextBytes, channelTextLimit } from '../radio/channel-message.ts'
+import { routeLabel } from '../radio/rx-packet.ts'
 import { channelSender } from '../channels/senders.ts'
-import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
+import { openRadioStorage, radioKeyFromPublicKey, validChannelScopeSettings } from '../storage/index.ts'
 import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredContact, StoredMessage, StoredOutgoing } from '../storage/index.ts'
 import type { Coordinates } from '../map/nodes.ts'
 import { ComposerTools } from '../sharing/ComposerTools.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
-import { conversations, matchingChannelReceipts, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
+import { conversations, correlateChannelObservations, matchingChannelReceipts, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import './chats.css'
 
@@ -30,6 +33,7 @@ type Props = {
   preferences: AppPreferences
   locale: string
   readChannelKey?: (radioKey: RadioKey, channel: StoredChannel) => Promise<string>
+  observationSource?: ChannelObservationSource
   mapPosition?: Coordinates | null
 }
 
@@ -42,6 +46,9 @@ type ChatDisplay = {
   contacts: readonly StoredContact[]
   channels: readonly StoredChannel[]
   readChannelKey?: (channel: StoredChannel) => Promise<string>
+  observationSource?: ChannelObservationSource
+  canObserve: boolean
+  regionNames: string[] | null
   mapPosition?: Coordinates | null
 }
 
@@ -50,7 +57,7 @@ function errorText(error: unknown) {
 }
 
 export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving,
-  active, preferences, locale, readChannelKey, mapPosition }: Props) {
+  active, preferences, locale, readChannelKey, observationSource, mapPosition }: Props) {
   const live = (snapshot.phase === 'ready' || snapshot.phase === 'syncing') && snapshot.device
     ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
   const last = snapshot.device ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
@@ -66,6 +73,10 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const formatTime = useMemo(() => clockFormatter(locale, preferences.clock).format, [locale, preferences.clock])
   const preferred = selection?.key === radioKey ? selection.id : data?.preferences?.selectedConversationId
   const selected = items.find((item) => item.id === preferred) ?? items[0]
+  const regionNames = data?.channelScopes === undefined ? []
+    : validChannelScopeSettings(data.channelScopes)
+      ? data.channelScopes.flatMap((setting) => !setting.paused && setting.scope.mode === 'region' ? [setting.scope.name] : [])
+      : null
   const ownContact = snapshot.device && last === radioKey
     ? contactShareLink(snapshot.device.name, snapshot.device.publicKey, snapshot.device.type) : null
 
@@ -150,6 +161,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             active, preferences, read, formatTime, mapPosition, ownContact,
             contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
             readChannelKey: canSync && live && readChannelKey ? (channel) => readChannelKey(live, channel) : undefined,
+            observationSource, canObserve: Boolean(live && canSync && snapshot.transport === 'usb'), regionNames,
           }} />
       )}
     </div>
@@ -237,8 +249,13 @@ function timestamp(value: number | null, format: ChatDisplay['formatTime']) {
   return <time dateTime={date.toISOString()}>{format(date)}</time>
 }
 
+const idleObservation = { phase: 'idle' as const, error: null, dropped: 0, evicted: 0, entries: [] }
+const noSubscription = () => () => {}
+const noObservation = () => idleObservation
+
 function ConversationView({ conversation, radioKey, options, direct, status, senderName, display }: ConversationProps) {
-  const { active, preferences, read, formatTime, ownContact, contacts, channels, readChannelKey, mapPosition } = display
+  const { active, preferences, read, formatTime, ownContact, contacts, channels, readChannelKey, mapPosition,
+    observationSource, canObserve, regionNames } = display
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
   const [readError, setReadError] = useState('')
@@ -251,6 +268,15 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     () => messageVisibility(conversation.messages, hideRepeats), [conversation.messages, hideRepeats],
   )
   const channelMatches = useMemo(() => matchingChannelReceipts(conversation.messages), [conversation.messages])
+  const channelIndex = conversation.channel?.index
+  const observer = useMemo(() => observationSource && channelIndex !== undefined
+    ? new ChannelObservations(observationSource) : null, [observationSource, channelIndex])
+  const observed = useSyncExternalStore(observer?.subscribe ?? noSubscription, observer?.getSnapshot ?? noObservation,
+    observer?.getSnapshot ?? noObservation)
+  useEffect(() => () => observer?.stop(), [observer])
+  const correlations = useMemo(() => correlateChannelObservations(
+    conversation.channel?.index ?? -1, conversation.messages, observed.entries,
+  ), [conversation.channel, conversation.messages, observed.entries])
   const unread = useMemo(() => unreadReceipts(visible, read), [visible, read])
   const bytes = new TextEncoder().encode(draft).length
   const isChannel = conversation.id.startsWith('channel:')
@@ -414,8 +440,30 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       <div className="conversation-heading">
         <p>{conversation.title}</p>
         <span>{conversation.description}</span>
-        {isChannel && <span>Heard-repeat and multiple-path tracking are not available. Radio acceptance does not confirm delivery.</span>}
+        {isChannel && <span>Radio acceptance does not confirm delivery. Live packet matches are best effort.</span>}
       </div>
+      {isChannel && observer && <div className="chat-observation">
+        <div className="chat-observation-actions">
+          {observed.phase === 'active' || observed.phase === 'starting'
+            ? <button type="button" onClick={() => observer.stop()}>Stop channel observation</button>
+            : <button type="button" disabled={!canObserve || !conversation.channel || regionNames === null}
+              onClick={() => {
+                if (conversation.channel && regionNames) void observer.start(radioKey, conversation.channel, regionNames)
+              }}>Observe channel packets</button>}
+          <details><summary>About observation</summary>
+            <p>USB only. Reads this channel key temporarily and captures up to 500 packets in this tab until stopped,
+              disconnected or the conversation changes. Captures can miss packets; matches and region names are best effort.
+              Region candidates use named sending scopes saved when observation starts. Restart after changing scopes;
+              16-bit codes can collide and unknown regions cannot be identified.</p>
+          </details>
+        </div>
+        {regionNames === null && <p role="alert">Saved channel scopes are invalid; reset them in Channels before observing.</p>}
+        {observed.error && <p role="alert">{observed.error}</p>}
+        {observed.phase === 'starting' && <p role="status">Starting channel observation…</p>}
+        {observed.phase === 'active' && <p role="status">Observing channel packets.
+          {observed.dropped > 0 && ` ${observed.dropped} packets were skipped while processing.`}
+          {observed.evicted > 0 && ` ${observed.evicted} older channel observations were discarded.`}</p>}
+      </div>}
       {repeats.size > 0 && (
         <label className="chat-repeat-filter">
           <input type="checkbox" checked={hideRepeats} onChange={(event) => setHideRepeats(event.currentTarget.checked)} />
@@ -432,6 +480,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             const sender = channelSender(message)
             const body = sender ? message.text.slice(sender.length + 2) : message.text
             const matches = channelMatches.get(message.id)
+            const correlation = correlations.get(message.id)
             return (
             <li key={message.id} data-receipt-id={message.id}
               className={message.outgoing || message.channelOutgoing ? 'chat-message--outgoing' : undefined}>
@@ -452,6 +501,8 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                   {match.receipt && <ReceiptPath receipt={match.receipt} />}
                 </li>)}</ul>}
               </details>}
+              {correlation && <RxObservationDetails correlation={correlation} outgoing={Boolean(message.channelOutgoing)}
+                preferences={preferences} formatTime={formatTime} />}
               {preferences.pathMetadata && message.receipt && <ReceiptPath receipt={message.receipt} />}
               {preferences.regionMetadata && message.region && <p className="chat-meta">Region {message.region}</p>}
               {message.outgoing && (
@@ -535,6 +586,37 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       {conversation.recipient && <RetrySettings key={radioKey} radioKey={radioKey} current={options} direct={direct} />}
     </section>
   )
+}
+
+function RxObservationDetails({ correlation, outgoing, preferences, formatTime }: {
+  correlation: { entries: CapturedChannelObservation[]; matchingMessages: number }
+  outgoing: boolean; preferences: AppPreferences; formatTime: ChatDisplay['formatTime']
+}) {
+  const [open, setOpen] = useState(false)
+  return <details className="chat-meta" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary>{correlation.entries.length} matching RX observation{correlation.entries.length === 1 ? '' : 's'} (possible repeats)</summary>
+    {open && <>
+      <p>Matched by channel key, timestamp, type and exact text. Packets may be missed or distinct messages
+        may match; short hashes and authentication codes can collide. This does not confirm delivery.</p>
+      {correlation.matchingMessages > 1 && <p>These observations match {correlation.matchingMessages} saved
+        messages and cannot be assigned uniquely.</p>}
+      {correlation.matchingMessages === 1 && <p>{outgoing
+        ? `${correlation.entries.length} possible echo${correlation.entries.length === 1 ? '' : 'es'}.`
+        : `${correlation.entries.length - 1} additional match${correlation.entries.length === 2 ? '' : 'es'} beyond the first; the original may not have been captured.`}</p>}
+      <ul className="chat-observed-paths">{correlation.entries.map((entry) => <li key={entry.id}>
+        <time dateTime={new Date(entry.receivedAt).toISOString()}>{formatTime(new Date(entry.receivedAt))}</time>
+        {preferences.pathMetadata && <> · {routeLabel({ routeCode: entry.routeCode, typeCode: 5, version: 1 })}
+          {' · '}{entry.pathHashes.length} {entry.routeCode >= 2 ? 'remaining' : 'traversed'} hop{entry.pathHashes.length === 1 ? '' : 's'}
+          {entry.pathHashes.length > 0 && <> · {entry.hashWidth}-byte hashes <code>{entry.pathHashes.join(', ')}</code></>}
+          {entry.snrDb !== null && <> · SNR {entry.snrDb} dB</>}
+          {entry.rssiDbm !== null && <> · RSSI {entry.rssiDbm} dBm</>}
+        </>}
+        {preferences.regionMetadata && <> · {entry.region.kind === 'candidates'
+          ? `Possible regions: ${entry.region.names.join(', ')}`
+          : entry.region.kind === 'unscoped' ? 'Unscoped transport code' : 'Region unknown'}</>}
+      </li>)}</ul>
+    </>}
+  </details>
 }
 
 function ReceiptPath({ receipt }: { receipt: NonNullable<StoredMessage['receipt']> }) {

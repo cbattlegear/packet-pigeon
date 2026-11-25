@@ -184,10 +184,33 @@ other devices. A possible-repeat filter retains the individual receipts, which
 may represent distinct messages. Matching channel receipts also show a count
 and, when enabled, their reported path lengths and signal readings, including
 receipts hidden by the filter. This is not a heard-repeat count: the radio may
-not queue every copy. Multiple-path attribution is not available.
+not queue every copy.
 When path details are enabled, received flood messages show their encoded hop
 count and path-hash width. The queued receipt does not include the path hashes
 themselves, so these details do not identify a route or prove a repeat.
+
+For live, best-effort repeat and path details, connect by USB and select
+**Observe channel packets** in a channel conversation. The app reads and
+verifies the channel's 16-byte key without saving it, and refuses observation
+if another radio slot has the same key. While active, it authenticates and
+decrypts live channel-text RX logs in memory, then compares channel, sender
+timestamp, text type and exact text against saved incoming and outgoing
+messages. Matches shared by multiple saved messages are explicitly ambiguous.
+The first observed copy may not be the original; matching observations are not
+proof of delivery, and identical messages or short hash/MAC collisions can
+produce false matches. Capture can miss packets, firmware can omit RX logs,
+and observations are limited to the newest 500 for the selected channel.
+Processing overload and discarded older observations are reported.
+
+Observed flood paths show traversed hops and direct paths show the remaining
+route. When region details are enabled, transport codes are compared against
+the browser's saved named channel sending scopes at observation start. Matches
+are only possible region candidates: 16-bit codes can collide, and regions
+not in the saved scopes cannot be identified. All matching names are shown.
+Restart observation after changing scopes. The observer stops and clears its
+memory on disconnect, channel change, or conversation change; Bluetooth is
+excluded because notifications may be truncated. A same-name channel key
+change by another application may not be detected until observation restarts.
 
 ## App preferences
 
@@ -338,8 +361,9 @@ marker and can send with that override. Reconnect with this app and the same
 browser storage to recover before using another app, or reboot the radio to
 clear its temporary state. Clearing/evicting browser storage loses the marker.
 Region names and scopes are routing filters, not privacy or reachability
-guarantees. Received region metadata, actual route hashes, correlated
-heard-repeat attribution, and notification modes remain unavailable.
+guarantees. Queued receipts alone do not include region names or route hashes;
+live observation is best effort as described above. Notification modes remain
+unavailable.
 Channel changes and scope recovery have been exercised with simulated
 transports and storage, not physical hardware; the BLE framing limitation above
 remains unchanged.

@@ -5,7 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 import { defaultPreferences } from '../preferences/appPreferences.ts'
-import { matchingChannelReceipts, messageVisibility } from './model.ts'
+import { correlateChannelObservations, matchingChannelReceipts, messageVisibility } from './model.ts'
 
 function channelReceipt(id, changes = {}) {
   const receipt = {
@@ -33,6 +33,25 @@ test('matches channel receipts without losing them or conflating distinct conten
   assert.deepEqual(messageVisibility(messages, true).visible.map(({ id }) => id),
     ['first', 'channel', 'time', 'type', 'text'])
   assert.equal(messages.length, 7)
+})
+
+test('correlates live observations by exact fields and flags ambiguous saved messages', () => {
+  const first = channelReceipt('first')
+  const duplicate = channelReceipt('duplicate')
+  const different = channelReceipt('different', { senderTimestamp: 124 })
+  const outgoing = {
+    id: 'outgoing', conversationId: 'channel:1', text: 'hello',
+    channelOutgoing: { senderName: 'Alice', wireTimestamp: 123 },
+  }
+  const observed = [{ id: 1, timestamp: 123, textType: 0, text: 'Alice: hello' }]
+  const matches = correlateChannelObservations(1, [first, duplicate, different, outgoing], observed)
+  assert.equal(matches.get('first').matchingMessages, 3)
+  assert.equal(matches.get('duplicate').matchingMessages, 3)
+  assert.equal(matches.get('outgoing').matchingMessages, 3)
+  assert.equal(matches.has('different'), false)
+  assert.equal(correlateChannelObservations(2, [first, outgoing], observed).size, 0)
+  assert.equal(correlateChannelObservations(1, [first], [{ ...observed[0], text: 'Alice: other' }]).size, 0)
+  assert.equal(correlateChannelObservations(1, [first], [{ ...observed[0], textType: 1 }]).size, 0)
 })
 
 test('renders matching receipt details without claiming delivery', async () => {

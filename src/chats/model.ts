@@ -1,5 +1,6 @@
 import type { RadioData, StoredContact, StoredMessage } from '../storage/index.ts'
 import { isBlockedChannelMessage } from '../channels/senders.ts'
+import type { CapturedChannelObservation } from '../integration/channel-observations.ts'
 
 export type Conversation = {
   id: string
@@ -117,6 +118,39 @@ export function matchingChannelReceipts(messages: readonly StoredMessage[]) {
     if (group.length > 1) for (const message of group) matches.set(message.id, group)
   }
   return matches
+}
+
+export function correlateChannelObservations(
+  channelIndex: number, messages: readonly StoredMessage[], observations: readonly CapturedChannelObservation[],
+) {
+  const key = (timestamp: number, textType: number, text: string) => JSON.stringify([timestamp, textType, text])
+  const groupedMessages = new Map<string, StoredMessage[]>()
+  for (const message of messages) {
+    let identity: string | undefined
+    if (message.receipt?.kind === 'channel-text' && message.receipt.channelIndex === channelIndex) {
+      identity = key(message.receipt.senderTimestamp, message.receipt.textType, message.receipt.text)
+    } else if (message.channelOutgoing && message.conversationId === `channel:${channelIndex}`) {
+      identity = key(message.channelOutgoing.wireTimestamp, 0, `${message.channelOutgoing.senderName}: ${message.text}`)
+    }
+    if (identity === undefined) continue
+    const group = groupedMessages.get(identity) ?? []
+    group.push(message)
+    groupedMessages.set(identity, group)
+  }
+  const groupedObservations = new Map<string, CapturedChannelObservation[]>()
+  for (const entry of observations) {
+    const identity = key(entry.timestamp, entry.textType, entry.text)
+    const group = groupedObservations.get(identity) ?? []
+    group.push(entry)
+    groupedObservations.set(identity, group)
+  }
+  const result = new Map<string, { entries: CapturedChannelObservation[]; matchingMessages: number }>()
+  for (const [identity, group] of groupedMessages) {
+    const entries = groupedObservations.get(identity)
+    if (!entries?.length) continue
+    for (const message of group) result.set(message.id, { entries, matchingMessages: group.length })
+  }
+  return result
 }
 
 export function unreadReceipts(messages: readonly StoredMessage[], read: ReadonlySet<string>) {
