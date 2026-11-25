@@ -38,7 +38,27 @@ These checks use mocks and do not need a radio.
 
 In a secure context with Web Serial available, use **Connect USB** to choose a
 port and **Disconnect** to release it. The shell reports connection, sync and
-cache errors. `src/radio` exports `CompanionSession` and `getWebSerialSupport()`;
+cache errors. After an unexpected disconnect, the same tab retries the
+previously authorized port with delays of 1, 2, 4, 8 and 16 seconds. The
+radio's full public key is checked before syncing. If multiple authorized ports
+match the original USB vendor and product, recovery stops rather than guessing;
+use **Connect USB** to select a port. A missing port, revoked permission, a
+failed identity check, or exhausted retries also requires manual recovery.
+**Disconnect** cancels recovery. Recovery is not persisted across a reload and
+requires the browser to expose the replugged port and USB identifiers. The
+public-key handshake is not cryptographic authentication.
+
+Web Locks reserve one USB session per origin across cooperating Packet Pigeon
+tabs, including during retries; a second tab must wait for the owner to release
+it. Browsers without Web Locks cannot connect safely. Other applications and
+older versions of Packet Pigeon do not participate in this coordination.
+If the port cannot be released, the owning tab keeps the lock and disables
+reconnection until it is reloaded. If the browser or OS still holds the port,
+close the tab or unplug the device before trying again.
+Automatic USB recovery has been exercised with mocked ports, not a physical
+unplug/replug on every supported browser.
+
+`src/radio` exports `CompanionSession` and `getWebSerialSupport()`;
 `connect()` must be called directly from a user action for the port chooser.
 The session reads contact and channel records but does not request queued
 messages, including when the radio reports messages waiting. Draining is disabled

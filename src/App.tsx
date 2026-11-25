@@ -58,7 +58,7 @@ function App() {
   const radioNodes = useMemo(() => mapRadioContacts(snapshot.contacts), [snapshot.contacts])
   const support = getWebSerialSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
-  const canDisconnect = ['opening', 'handshake', 'syncing', 'ready'].includes(snapshot.phase)
+  const canDisconnect = ['opening', 'handshake', 'syncing', 'ready', 'reconnecting'].includes(snapshot.phase)
   const connection = {
     idle: 'Disconnected',
     choosing: 'Choosing port',
@@ -66,6 +66,7 @@ function App() {
     handshake: 'Identifying radio',
     syncing: 'Connected',
     ready: 'Connected',
+    reconnecting: 'Reconnecting',
     closing: 'Disconnecting',
     error: 'Error',
   }[snapshot.phase]
@@ -115,7 +116,7 @@ function App() {
             </div>
             <button
               type="button"
-              disabled={busy || (!canDisconnect && !support.supported)}
+              disabled={busy || snapshot.error?.code === 'cleanup-failed' || (!canDisconnect && !support.supported)}
               aria-describedby="connection-warning"
               onClick={() => void (canDisconnect ? session.disconnect() : session.connect())}
             >
