@@ -1,6 +1,11 @@
 import { CompanionError, Response } from './protocol.ts'
 import { encodeCommand, SerialFrameDecoder } from './web-serial.ts'
-import type { CompanionSerialPort } from './web-serial.ts'
+
+export interface CompanionLinkPort extends EventTarget {
+  readonly readable: ReadableStream<Uint8Array> | null
+  readonly writable: WritableStream<Uint8Array> | null
+  close(): Promise<void>
+}
 
 interface PendingCommand {
   receive(frame: Uint8Array): void
@@ -8,30 +13,33 @@ interface PendingCommand {
 }
 
 export class SerialLink {
-  private readonly port: CompanionSerialPort
+  private readonly port: CompanionLinkPort
   private readonly reader: ReadableStreamDefaultReader<Uint8Array>
   private readonly writer: WritableStreamDefaultWriter<Uint8Array>
   private readonly onPush: (frame: Uint8Array) => void
   private readonly onError: (error: CompanionError) => void
   private readonly reading: Promise<void>
   private readonly timeoutMs: number
+  private readonly transport: 'usb' | 'bluetooth'
   private pending?: PendingCommand
   private stopped = false
   private closing?: Promise<void>
 
   constructor(
-    port: CompanionSerialPort,
+    port: CompanionLinkPort,
     timeoutMs: number,
     onPush: (frame: Uint8Array) => void,
     onError: (error: CompanionError) => void,
+    transport: 'usb' | 'bluetooth' = 'usb',
   ) {
     if (!port.readable || !port.writable) {
-      throw new CompanionError('open-failed', 'The USB serial port did not expose both streams.')
+      throw new CompanionError('open-failed', 'The radio connection did not expose both streams.')
     }
     this.port = port
     this.onPush = onPush
     this.onError = onError
     this.timeoutMs = timeoutMs
+    this.transport = transport
     this.writer = port.writable.getWriter()
     try {
       this.reader = port.readable.getReader()
@@ -44,7 +52,7 @@ export class SerialLink {
   }
 
   private readonly onDisconnect = () => {
-    this.fail(new CompanionError('disconnected', 'The USB serial device disconnected.'))
+    this.fail(new CompanionError('disconnected', 'The radio disconnected.'))
   }
 
   private fail(error: CompanionError) {
@@ -55,7 +63,7 @@ export class SerialLink {
   }
 
   private async read() {
-    const decoder = new SerialFrameDecoder()
+    const decoder = this.transport === 'usb' ? new SerialFrameDecoder() : null
     try {
       while (!this.stopped) {
         const { done, value } = await this.reader.read()
@@ -63,23 +71,23 @@ export class SerialLink {
           this.onDisconnect()
           return
         }
-        for (const frame of decoder.read(value)) {
+        for (const frame of decoder ? decoder.read(value) : value.length ? [value] : []) {
           if (this.stopped) return
           if (frame[0] >= 0x80) this.onPush(frame)
           else this.pending?.receive(frame)
         }
       }
     } catch (error) {
-      this.fail(new CompanionError('serial-io', 'Could not read from the USB serial device.', { cause: error }))
+      this.fail(new CompanionError('serial-io', 'Could not read from the radio.', { cause: error }))
     } finally {
       this.reader.releaseLock()
     }
   }
 
   request<T>(command: Uint8Array, receive: (frame: Uint8Array) => { value: T } | undefined): Promise<T> {
-    if (this.stopped) return Promise.reject(new CompanionError('disconnected', 'The USB serial port is closed.'))
+    if (this.stopped) return Promise.reject(new CompanionError('disconnected', 'The radio connection is closed.'))
     if (this.pending) return Promise.reject(new CompanionError('protocol', 'A companion command is already pending.'))
-    const packet = encodeCommand(command)
+    const packet = this.transport === 'usb' ? encodeCommand(command) : command
 
     return new Promise((resolve, reject) => {
       let written = false
@@ -126,7 +134,7 @@ export class SerialLink {
         written = true
         complete()
       }, (error) => {
-        this.fail(new CompanionError('serial-io', 'Could not write to the USB serial device.', { cause: error }))
+        this.fail(new CompanionError('serial-io', 'Could not write to the radio.', { cause: error }))
       })
     })
   }
@@ -134,7 +142,7 @@ export class SerialLink {
   close() {
     if (this.closing) return this.closing
     this.stopped = true
-    const error = new CompanionError('disconnected', 'The USB serial port was closed.')
+    const error = new CompanionError('disconnected', 'The radio connection was closed.')
     this.pending?.reject(error)
     this.port.removeEventListener('disconnect', this.onDisconnect)
     this.closing = this.closeStreams()

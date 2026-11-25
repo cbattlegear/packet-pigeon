@@ -33,7 +33,7 @@ export const messageAcknowledged = 0x82
 export type CompanionErrorCode =
   | 'insecure-context' | 'unsupported-browser' | 'chooser-failed' | 'open-failed'
   | 'disconnected' | 'serial-io' | 'timeout' | 'protocol' | 'device-error'
-  | 'unsupported-firmware'
+  | 'unsupported-firmware' | 'unsupported-transport'
   | 'ownership' | 'identity' | 'reconnect-failed' | 'cleanup-failed'
 
 export class CompanionError extends Error {

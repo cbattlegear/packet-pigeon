@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { CompanionSession, getWebSerialSupport } from './radio/index.ts'
+import { CompanionSession, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import { MessageSync } from './integration/message-sync.ts'
 import { ContactsPanel } from './contacts/ContactsPanel.tsx'
@@ -64,13 +64,17 @@ function App() {
   const cacheStatus = useSyncExternalStore(cache.subscribe, cache.getSnapshot)
   const messageStatus = useSyncExternalStore(messageSync.subscribe, messageSync.getSnapshot)
   const radioNodes = useMemo(() => mapRadioContacts(snapshot.contacts), [snapshot.contacts])
-  const support = getWebSerialSupport()
+  const usbSupport = getWebSerialSupport()
+  const bluetoothSupport = getWebBluetoothSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
   const canDisconnect = ['opening', 'handshake', 'syncing', 'ready', 'reconnecting'].includes(snapshot.phase)
+  const controlsDisabled = busy || snapshot.error?.code === 'cleanup-failed'
+  const bluetoothConnected = snapshot.transport === 'bluetooth'
+  const canSyncMessages = snapshot.phase === 'ready' && snapshot.transport === 'usb'
   const connection = {
     idle: 'Disconnected',
-    choosing: 'Choosing port',
-    opening: 'Opening port',
+    choosing: 'Choosing device',
+    opening: 'Opening connection',
     handshake: 'Identifying radio',
     syncing: 'Connected',
     ready: 'Connected',
@@ -138,12 +142,18 @@ function App() {
             </div>
             <button
               type="button"
-              disabled={busy || snapshot.error?.code === 'cleanup-failed' || (!canDisconnect && !support.supported)}
+              disabled={controlsDisabled || (!canDisconnect && !usbSupport.supported)}
               aria-describedby="connection-warning"
               onClick={() => void (canDisconnect ? session.disconnect() : session.connect())}
             >
               {canDisconnect ? 'Disconnect' : 'Connect USB'}
             </button>
+            {!canDisconnect && (
+              <button type="button" disabled={controlsDisabled || !bluetoothSupport.supported}
+                aria-describedby="connection-warning" onClick={() => void session.connectBluetooth()}>
+                Connect Bluetooth
+              </button>
+            )}
           </div>
           <p className="connection-warning" id="connection-warning">
             Message sync is manual. Sending is not available yet.
@@ -172,14 +182,16 @@ function App() {
       </nav>
 
       <main className="main-content" id="main-content" tabIndex={-1}>
-        {(!support.supported || snapshot.error || cacheStatus.error || messageStatus.error || messageStatus.pending) && (
+        {(!usbSupport.supported || !bluetoothSupport.supported || snapshot.error
+          || cacheStatus.error || messageStatus.error || messageStatus.pending) && (
           <div className="notices">
-            {!support.supported && <p role="status">{support.error.message}</p>}
+            {!usbSupport.supported && <p role="status">{usbSupport.error.message}</p>}
+            {!bluetoothSupport.supported && <p role="status">{bluetoothSupport.error.message}</p>}
             {snapshot.error && <p role="alert">{snapshot.error.message}</p>}
             {messageStatus.error && <p role="alert">Message sync: {messageStatus.error}</p>}
             {messageStatus.pending && (
               <div role="alert">
-                <p>A received message is not saved. Keep this page open and retry saving. USB ownership stays reserved until the receipt is saved.</p>
+                <p>A received message is not saved. Keep this page open and retry saving. Radio ownership stays reserved until the receipt is saved.</p>
                 <button type="button" disabled={messageStatus.syncing} onClick={() => void messageSync.sync()}>Retry saving</button>
               </div>
             )}
@@ -204,10 +216,13 @@ function App() {
                 <p>Received messages</p>
               </div>
               <div className="message-controls">
-                <button type="button" onClick={() => void messageSync.sync()} disabled={messageStatus.syncing || (snapshot.phase !== 'ready' && !messageStatus.pending)}>
-                  {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending ? 'Retry saving and sync' : 'Sync messages'}
+                <button type="button" onClick={() => void messageSync.sync()}
+                  disabled={messageStatus.syncing || (!canSyncMessages && !messageStatus.pending)}>
+                  {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
+                    ? canSyncMessages ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
                 </button>
-                <p>Each receipt is saved before requesting the next. Interruptions can still lose a message.</p>
+                <p>{bluetoothConnected ? 'Connect over USB to sync queued messages.'
+                  : 'Each receipt is saved before requesting the next. Interruptions can still lose a message.'}</p>
               </div>
             </section>
 
