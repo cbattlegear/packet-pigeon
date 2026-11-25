@@ -2,6 +2,7 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 import { CompanionSession, getWebSerialSupport } from './radio/index.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import './App.css'
+import { OfflineStatus } from './offline/OfflineStatus.tsx'
 
 const session = new CompanionSession()
 const cache = new SessionCache(session)
@@ -109,6 +110,7 @@ function App() {
           <p className="connection-warning" id="connection-warning">
             Connecting drains the radio queue; interrupted sync can lose messages.
           </p>
+          <OfflineStatus />
         </div>
       </header>
 

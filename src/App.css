@@ -84,6 +84,11 @@
   text-align: right;
 }
 
+.connection-status {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
 .connection-controls button,
 .notices button {
   padding: 9px 14px;
