@@ -38,6 +38,9 @@ Run direct-message fixtures with
 `node --test src/radio/direct-message.test.mjs src/integration/direct-messages.test.js src/chats/model.test.js`.
 These checks use mocks and do not need a radio.
 
+With Google Chrome installed, run `npm run test:browser` to exercise the chat
+reopening and wake-lock behavior in the browser.
+
 ## USB companion session
 
 In a secure context with Web Serial available, use **Connect USB** to choose a

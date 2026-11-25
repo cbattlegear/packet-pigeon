@@ -235,8 +235,12 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
   }
 
   useLayoutEffect(() => {
+    if (!active) {
+      positioned.current = false
+      return
+    }
     const list = messageList.current
-    if (!active || !list) return
+    if (!list) return
     if (!positioned.current) {
       positioned.current = true
       const oldest = preferences.oldestUnread ? oldestUnreadReceipt(unread) : undefined
@@ -268,7 +272,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, dis
       const seen: string[] = []
       for (const entry of entries) {
         const id = (entry.target as HTMLElement).dataset.receiptId
-        if (entry.isIntersecting && id && ids.delete(id)) {
+        if (entry.intersectionRatio >= 0.01 && id && ids.delete(id)) {
           observer.unobserve(entry.target)
           seen.push(id)
         }
