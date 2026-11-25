@@ -1,9 +1,15 @@
-.channel-workspace { display: grid; gap: 1rem; max-width: 64rem; }
+.channel-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; max-width: 64rem; }
 .channel-workspace p { margin: 0; }
-.channel-workspace label { display: grid; gap: .3rem; }
+.channel-workspace label { display: grid; gap: .3rem; min-width: 0; }
+.channel-workspace input, .channel-workspace select { min-width: 0; max-width: 100%; }
 .channel-filters, .channel-list form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
 .channel-list { display: grid; gap: .75rem; list-style: none; padding: 0; margin: 0; }
-.channel-list li, .channel-create, .channel-secret { display: grid; gap: .75rem; padding: 1rem; border: 1px solid var(--border-color, #778); border-radius: .5rem; }
+.channel-list li, .channel-create, .channel-secret { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; padding: 1rem; border: 1px solid var(--border-color, #778); border-radius: .5rem; }
 .channel-create { max-width: 32rem; }
 .channel-secret output { overflow-wrap: anywhere; }
 .channel-secret button, .channel-create button { justify-self: start; }
+.channel-blocked { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+.channel-blocked form { display: flex; flex-wrap: wrap; align-items: end; gap: .75rem; }
+.channel-senders { display: grid; gap: .5rem; list-style: none; margin: .75rem 0 0; padding: 0; }
+.channel-list .channel-senders li, .channel-senders li { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 0; border: 0; }
+.channel-senders li span { min-width: 0; overflow-wrap: anywhere; }

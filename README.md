@@ -210,10 +210,16 @@ names to 31 UTF-8 bytes and reports the number of available slots. A rejected
 or interrupted change may need a reconnect to check the radio's actual state.
 
 Deleting a channel does not delete cached messages; reusing its slot can make
-old messages appear associated with the replacement. Notification modes,
-retention, participants, blocked senders and per-channel region scope are not
-implemented. No region scope is changed by these controls. Channel changes
-have been exercised with simulated transports rather than physical hardware.
+old messages appear associated with the replacement. Each channel lists sender
+names observed in recognizable `name: message` text receipts, not verified
+members. Sender names are unauthenticated and can be changed or impersonated.
+Blocking a name uses an exact match across channels for the selected radio;
+matching receipts are hidden in Chats but retained in the cache and reappear
+when unblocked. Messages without a recognizable name remain visible. Blocking
+does not prevent reception by the radio. Names and blocks are browser-local.
+Notification modes, retention, and per-channel region scope are not implemented.
+No region scope is changed by these controls. Channel changes have been
+exercised with simulated transports rather than physical hardware.
 
 ## Discovered adverts
 

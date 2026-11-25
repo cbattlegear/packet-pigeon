@@ -68,6 +68,71 @@ test('enabling oldest unread repositions the open conversation and preserves its
   await page.getByRole('region', { name: 'Conversation with Pigeon' }).waitFor()
 })
 
+test('sender blocks preserve chat preferences and unread receipts until restored', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1260, height: 900 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  const radio = 'cd'.repeat(32)
+  await page.goto(`${url}#channels`)
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const messages = ['Bob', 'Alice'].map((name, index) => {
+      const text = `${name}: hello`
+      return {
+        id: name, conversationId: 'channel:0', sender: '', timestamp: (index + 1) * 1000, text,
+        receipt: {
+          kind: 'channel-text', receiptId: name, channelIndex: 0, textType: 0,
+          senderTimestamp: index + 1, text, pathLength: 0, snrDb: null,
+        },
+      }
+    })
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        channels: [{ index: 0, name: 'Public' }], messages, markRead: ['Bob'],
+      })
+    } finally {
+      storage.close()
+    }
+  }, radio)
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await page.getByText('Observed sender names').click()
+  await page.getByRole('button', { name: 'Block sender name Alice' }).click()
+  await page.getByText('Sender name blocked on this radio.').waitFor()
+
+  await page.getByRole('link', { name: 'Settings' }).click()
+  await page.getByLabel('Show conversation previews').uncheck()
+  await page.getByRole('link', { name: 'Chats' }).click()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  const conversation = page.getByRole('region', { name: 'Conversation with Public' })
+  await conversation.getByText('Bob: hello').waitFor()
+  assert.equal(await conversation.getByText('Alice: hello').count(), 0)
+  assert.equal(await page.getByRole('navigation', { name: 'Conversations' }).getByText('Bob: hello').count(), 0)
+  const readWhileBlocked = await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).readMessages }
+    finally { storage.close() }
+  }, radio)
+  assert.deepEqual(readWhileBlocked, ['Bob'])
+
+  await page.getByRole('link', { name: 'Channels' }).click()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await page.getByRole('button', { name: 'Unblock sender name Alice' }).click()
+  await page.getByText('Sender name unblocked on this radio.').waitFor()
+  await page.getByRole('link', { name: 'Chats' }).click()
+  await conversation.getByText('Alice: hello').waitFor()
+  await page.waitForFunction(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(radio))).readMessages?.includes('Alice') }
+    finally { storage.close() }
+  }, radio)
+  await page.getByRole('link', { name: 'Settings' }).click()
+  assert.equal(await page.getByLabel('Show conversation previews').isChecked(), false)
+})
+
 test('restores an enabled wake lock after visibility changes during a pending request and release', async (t) => {
   const context = await browser.newContext()
   t.after(() => context.close())

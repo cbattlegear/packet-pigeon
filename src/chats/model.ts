@@ -1,4 +1,5 @@
 import type { RadioData, StoredContact, StoredMessage } from '../storage/index.ts'
+import { isBlockedChannelMessage } from '../channels/senders.ts'
 
 export type Conversation = {
   id: string
@@ -17,6 +18,7 @@ export function conversations(data: RadioData): Conversation[] {
   }
   const names = new Map((data.contactPreferences ?? []).map((entry) => [entry.publicKey, entry.customName]))
   const byId = new Map<string, Conversation>()
+  const blockedSenders = new Set(data.blockedChannelSenders ?? [])
 
   function direct(id: string) {
     const key = id.slice('direct:'.length).toLowerCase()
@@ -59,7 +61,12 @@ export function conversations(data: RadioData): Conversation[] {
       if (key.length === 12 && matches.length === 1) id = `direct:${matches[0].publicKey.toLowerCase()}`
       else id = `direct:${key}`
     }
-    add(id).messages.push(message)
+    const conversation = add(id)
+    if (isBlockedChannelMessage(message, blockedSenders)) {
+      conversation.description = 'Received channel entries; messages from blocked names are hidden.'
+    } else {
+      conversation.messages.push(message)
+    }
   }
   return [...byId.values()].sort((first, second) => {
     const latest = (conversation: Conversation) => conversation.messages.reduce(
