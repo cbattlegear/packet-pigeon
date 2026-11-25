@@ -2,11 +2,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { DirectMessages, DirectStatus } from '../integration/direct-messages.ts'
 import type { MessageSync } from '../integration/message-sync.ts'
+import { clockFormatter } from '../preferences/appPreferences.ts'
+import type { AppPreferences } from '../preferences/appPreferences.ts'
 import type { CompanionSnapshot } from '../radio/companion-session.ts'
 import { directTextBytes, maxDirectTextBytes } from '../radio/direct-message.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { DirectSendOptions, RadioData, RadioKey, StoredMessage, StoredOutgoing } from '../storage/index.ts'
-import { conversations, messageVisibility } from './model.ts'
+import { conversations, messageVisibility, oldestUnreadReceipt, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import './chats.css'
 
@@ -19,13 +21,23 @@ type Props = {
   direct: DirectMessages
   status: DirectStatus
   cacheSaving: boolean
+  active: boolean
+  preferences: AppPreferences
+  locale: string
+}
+
+type ChatDisplay = {
+  active: boolean
+  preferences: AppPreferences
+  read: ReadonlySet<string>
+  formatTime: (date: Date) => string
 }
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : 'The message action failed.'
 }
 
-export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving }: Props) {
+export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving, active, preferences, locale }: Props) {
   const live = (snapshot.phase === 'ready' || snapshot.phase === 'syncing') && snapshot.device
     ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
   const last = snapshot.device ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
@@ -37,6 +49,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const data = status.key === radioKey ? status.data : null
   const canSync = snapshot.phase === 'ready'
   const items = useMemo(() => data ? conversations(data) : [], [data])
+  const read = useMemo(() => new Set(data?.readMessages), [data?.readMessages])
+  const formatTime = useMemo(() => clockFormatter(locale, preferences.clock).format, [locale, preferences.clock])
   const preferred = selection?.key === radioKey ? selection.id : data?.preferences?.selectedConversationId
   const selected = items.find((item) => item.id === preferred) ?? items[0]
 
@@ -98,7 +112,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
           )}
         </div>
         {radioKey && data && (
-          <ConversationList items={items} selectedId={selected?.id} status={status}
+          <ConversationList items={items} selectedId={selected?.id} status={status} read={read}
+            showPreviews={preferences.chatPreviews}
             onSelect={(id) => setSelection({ key: radioKey, id })} />
         )}
       </section>
@@ -114,7 +129,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
           <div className="state-message" role="status"><h2>Loading cached chats</h2></div>
         </section>
       ) : (
-        <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} />
+        <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status}
+          display={{ active, preferences, read, formatTime }} />
       )}
     </div>
   )
@@ -125,12 +141,15 @@ type WorkspaceProps = {
   data: RadioData
   direct: DirectMessages
   status: DirectStatus
+  display: ChatDisplay
 }
 
-function ConversationList({ items, selectedId, status, onSelect }: {
+function ConversationList({ items, selectedId, status, read, showPreviews, onSelect }: {
   items: Conversation[]
   selectedId?: string
   status: DirectStatus
+  read: ReadonlySet<string>
+  showPreviews: boolean
   onSelect: (id: string) => void
 }) {
   return (
@@ -139,13 +158,15 @@ function ConversationList({ items, selectedId, status, onSelect }: {
         <ul className="chat-conversation-list">
           {items.map((item) => {
             const last = item.messages.at(-1)
+            const unread = unreadReceipts(item.messages, read).length
             return (
               <li key={item.id}>
                 <button type="button" aria-current={selectedId === item.id ? 'page' : undefined}
                   onClick={() => onSelect(item.id)}>
                   <strong>{item.title}</strong>
-                  <span>{last?.text || (last ? 'Received entry' : 'No messages yet')}</span>
-                  {last?.outgoing && <small>{deliveryLabel(last.outgoing)}</small>}
+                  {unread > 0 && <small>{unread} unread</small>}
+                  {showPreviews && <span>{last?.text || (last ? 'Received entry' : 'No messages yet')}</span>}
+                  {showPreviews && last?.outgoing && <small>{deliveryLabel(last.outgoing)}</small>}
                 </button>
               </li>
             )
@@ -157,7 +178,7 @@ function ConversationList({ items, selectedId, status, onSelect }: {
   )
 }
 
-function ConversationPane({ radioKey, data, selected, direct, status }: WorkspaceProps & { selected?: Conversation }) {
+function ConversationPane({ radioKey, data, selected, direct, status, display }: WorkspaceProps & { selected?: Conversation }) {
   if (!selected) {
     return (
       <section className="conversation-pane" aria-label="Conversation">
@@ -166,7 +187,7 @@ function ConversationPane({ radioKey, data, selected, direct, status }: Workspac
     )
   }
   return <ConversationView key={`${radioKey}:${selected.id}`} conversation={selected}
-    radioKey={radioKey} options={data.directSendOptions ?? defaultOptions} direct={direct} status={status} />
+    radioKey={radioKey} options={data.directSendOptions ?? defaultOptions} direct={direct} status={status} display={display} />
 }
 
 type ConversationProps = {
@@ -175,6 +196,7 @@ type ConversationProps = {
   options: DirectSendOptions
   direct: DirectMessages
   status: DirectStatus
+  display: ChatDisplay
 }
 
 function deliveryLabel(outgoing: StoredOutgoing) {
@@ -186,21 +208,26 @@ function deliveryLabel(outgoing: StoredOutgoing) {
   return `Sending${progress}`
 }
 
-function timestamp(value: number | null) {
+function timestamp(value: number | null, format: ChatDisplay['formatTime']) {
   if (value === null || !Number.isFinite(value) || Math.abs(value) > 8.64e15) return null
   const date = new Date(value)
-  return <time dateTime={date.toISOString()}>{date.toLocaleString()}</time>
+  return <time dateTime={date.toISOString()}>{format(date)}</time>
 }
 
-function ConversationView({ conversation, radioKey, options, direct, status }: ConversationProps) {
+function ConversationView({ conversation, radioKey, options, direct, status, display }: ConversationProps) {
+  const { active, preferences, read, formatTime } = display
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
+  const [readError, setReadError] = useState('')
   const [hideRepeats, setHideRepeats] = useState(false)
+  const composer = useRef<HTMLTextAreaElement>(null)
   const messageList = useRef<HTMLOListElement>(null)
+  const positioned = useRef(false)
   const following = useRef(true)
   const { repeats, visible } = useMemo(
     () => messageVisibility(conversation.messages, hideRepeats), [conversation.messages, hideRepeats],
   )
+  const unread = useMemo(() => unreadReceipts(visible, read), [visible, read])
   const bytes = new TextEncoder().encode(draft).length
   let invalid = ''
   if (draft) {
@@ -208,8 +235,67 @@ function ConversationView({ conversation, radioKey, options, direct, status }: C
   }
 
   useLayoutEffect(() => {
-    if (following.current && messageList.current) messageList.current.scrollTop = messageList.current.scrollHeight
-  }, [conversation.messages, hideRepeats])
+    if (!active) {
+      positioned.current = false
+      return
+    }
+    const list = messageList.current
+    if (!list) return
+    if (!positioned.current) {
+      positioned.current = true
+      const oldest = preferences.oldestUnread ? oldestUnreadReceipt(unread) : undefined
+      const row = oldest && Array.from(list.children).find(
+        (element) => (element as HTMLElement).dataset.receiptId === oldest.id,
+      )
+      if (row) {
+        if (list.scrollHeight > list.clientHeight) {
+          list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top
+        } else if (row.getBoundingClientRect().bottom > window.innerHeight) {
+          row.scrollIntoView({ block: 'start' })
+        }
+        following.current = false
+      }
+    }
+    if (following.current) list.scrollTop = list.scrollHeight
+  }, [active, visible, unread, preferences.oldestUnread])
+
+  useLayoutEffect(() => {
+    if (active && preferences.composerAutofocus) composer.current?.focus({ preventScroll: true })
+  }, [active, preferences.composerAutofocus])
+
+  useEffect(() => {
+    const list = messageList.current
+    if (!active || !unread.length || !list) return
+    const ids = new Set(unread.map((message) => message.id))
+    const observer = new IntersectionObserver((entries) => {
+      if (document.hidden) return
+      const seen: string[] = []
+      for (const entry of entries) {
+        const id = (entry.target as HTMLElement).dataset.receiptId
+        if (entry.intersectionRatio >= 0.01 && id && ids.delete(id)) {
+          observer.unobserve(entry.target)
+          seen.push(id)
+        }
+      }
+      if (seen.length) void direct.markRead(radioKey, seen).then(() => setReadError(''), () => {
+        setReadError('Could not save the read status.')
+      })
+    }, { threshold: 0.01 })
+    function observeVisibleTab() {
+      observer.disconnect()
+      if (document.hidden || !list) return
+      for (const row of list.children) {
+        const id = (row as HTMLElement).dataset.receiptId
+        if (id && ids.has(id)) observer.observe(row)
+      }
+    }
+    observeVisibleTab()
+    document.addEventListener('visibilitychange', observeVisibleTab)
+    return () => {
+      document.removeEventListener('visibilitychange', observeVisibleTab)
+      observer.disconnect()
+    }
+  }, [active, direct, radioKey, unread])
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -217,7 +303,7 @@ function ConversationView({ conversation, radioKey, options, direct, status }: C
     const text = draft
     setActionError('')
     try {
-      if (await direct.send(radioKey, conversation.recipient, text, options)) {
+      if (await direct.send(radioKey, conversation.recipient, text, options, preferences.saveDrafts)) {
         setDraft((current) => current === text ? '' : current)
       }
     } catch (error) {
@@ -253,22 +339,25 @@ function ConversationView({ conversation, radioKey, options, direct, status }: C
           following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60
         }}>
           {visible.map((message) => (
-            <li key={message.id} className={message.outgoing ? 'chat-message--outgoing' : undefined}>
+            <li key={message.id} data-receipt-id={message.id}
+              className={message.outgoing ? 'chat-message--outgoing' : undefined}>
               <div className="chat-message-header">
                 <strong>{message.outgoing ? 'You' : conversation.title}</strong>
-                {timestamp(message.timestamp)}
+                {timestamp(message.timestamp, formatTime)}
               </div>
               {message.text && <p>{message.text}</p>}
               {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
               {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
               {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
               {repeats.has(message.id) && <p className="chat-meta">Possible repeat; both receipts are kept.</p>}
+              {preferences.pathMetadata && message.receipt && <ReceiptPath receipt={message.receipt} />}
+              {preferences.regionMetadata && message.region && <p className="chat-meta">Region {message.region}</p>}
               {message.outgoing && (
                 <div className="chat-delivery">
                   <strong className={message.outgoing.status === 'failed' ? 'chat-failed' : undefined}>
                     {deliveryLabel(message.outgoing)}
                   </strong>
-                  {message.outgoing.attempt > 0 && message.outgoing.status !== 'delivered' && (
+                  {preferences.pathMetadata && message.outgoing.attempt > 0 && message.outgoing.status !== 'delivered' && (
                     <span>{message.outgoing.route
                       ? message.outgoing.route === 'direct' ? 'Direct' : 'Flood'
                       : message.outgoing.attempt <= message.outgoing.options.directAttempts ? 'Direct phase' : 'Flood phase'}</span>
@@ -290,15 +379,16 @@ function ConversationView({ conversation, radioKey, options, direct, status }: C
           ))}
         </ol>
       ) : <div className="state-message"><h2>No messages yet</h2><p>Messages in this conversation will appear here.</p></div>}
+      {readError && <p className="chat-action-error" role="alert">{readError}</p>}
       {actionError && <p className="chat-action-error" role="alert">{actionError}</p>}
       {conversation.recipient && (
         <form className="chat-composer" onSubmit={(event) => void send(event)}>
           <label htmlFor="chat-draft">Message</label>
-          <textarea id="chat-draft" rows={3} value={draft} aria-describedby="chat-byte-count chat-draft-error"
+          <textarea id="chat-draft" ref={composer} rows={3} value={draft} aria-describedby="chat-byte-count chat-draft-error"
             onChange={(event) => {
               const text = event.currentTarget.value
               setDraft(text)
-              void direct.saveDraft(radioKey, conversation.id, text).catch(() => {})
+              void direct.saveDraft(radioKey, conversation.id, text, preferences.saveDrafts).catch(() => {})
             }} />
           <div className="chat-compose-actions">
             <span id="chat-byte-count">{bytes}/{maxDirectTextBytes} UTF-8 bytes</span>
@@ -311,6 +401,14 @@ function ConversationView({ conversation, radioKey, options, direct, status }: C
       {conversation.recipient && <RetrySettings key={radioKey} radioKey={radioKey} current={options} direct={direct} />}
     </section>
   )
+}
+
+function ReceiptPath({ receipt }: { receipt: NonNullable<StoredMessage['receipt']> }) {
+  const hops = receipt.pathLength & 63
+  return <p className="chat-meta">
+    {receipt.pathLength === 0xff ? 'Direct receipt' : `${hops} path hop${hops === 1 ? '' : 's'}`}
+    {receipt.snrDb !== null && ` · SNR ${receipt.snrDb} dB`}
+  </p>
 }
 
 function RetrySettings({ radioKey, current, direct }: { radioKey: RadioKey; current: DirectSendOptions; direct: DirectMessages }) {

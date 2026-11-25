@@ -13,6 +13,29 @@ const message = {
   text: 'Hello',
 }
 
+test('concurrent read markers preserve received entries for the selected radio', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const otherTab = await openRadioStorage(factory)
+  const later = { ...message, id: 'later', region: 'Local region' }
+  await storage.update(firstRadio, { messages: [message, later] })
+  await storage.update(secondRadio, { messages: [message] })
+  await storage.changeDirect(firstRadio, {
+    kind: 'begin', id: 'sent', recipient: secondRadio, text: 'Outgoing',
+    options: { directAttempts: 1, floodAttempts: 0 }, now: 100_000,
+  })
+  await Promise.all([
+    storage.update(firstRadio, { markRead: [message.id, 'sent', 'unknown'] }),
+    otherTab.update(firstRadio, { markRead: [later.id, message.id] }),
+  ])
+  const stored = await storage.read(firstRadio)
+  assert.deepEqual(new Set(stored.readMessages), new Set([message.id, later.id]))
+  assert.deepEqual(stored.messages.find(({ id }) => id === later.id), later)
+  assert.equal((await storage.read(secondRadio)).readMessages, undefined)
+  storage.close()
+  otherTab.close()
+})
+
 test('requires a full public key and restores only the explicitly selected radio from an offline cache', async () => {
   assert.throws(() => radioKeyFromPublicKey('same radio name'), { code: 'identity' })
   assert.throws(() => radioKeyFromPublicKey(`${firstRadio}\n`), { code: 'identity' })

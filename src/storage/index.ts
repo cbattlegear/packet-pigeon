@@ -44,6 +44,7 @@ export type StoredMessage = {
   sender: string
   timestamp: number | null
   text: string
+  region?: string
   receipt?: StoredReceipt
   /** Exact companion response bytes, including for unsupported receipt types. */
   rawHex?: string
@@ -104,6 +105,7 @@ export type RadioData = {
   discoveries?: StoredDiscovery[]
   directSendOptions?: DirectSendOptions
   lastDirectTimestamp?: number
+  readMessages?: string[]
 }
 
 export type RadioUpdate = {
@@ -116,6 +118,7 @@ export type RadioUpdate = {
   contactsCapturedAt?: number
   discovery?: { upsert?: readonly StoredDiscovery[]; remove?: readonly string[] }
   directSendOptions?: DirectSendOptions
+  markRead?: readonly string[]
 }
 
 type StorageErrorCode = 'identity' | 'update' | 'unavailable' | 'blocked' | 'open' | 'read' | 'write'
@@ -162,7 +165,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   if (messages?.length) {
     const seen = new Set(current.messages.map(({ id }) => id))
     next.messages = [...current.messages]
-    for (const { id, conversationId, sender, timestamp, text, receipt, rawHex, outgoing } of messages) {
+    for (const { id, conversationId, sender, timestamp, text, region, receipt, rawHex, outgoing } of messages) {
       if (!id.trim()) {
         throw new RadioStorageError('update', 'A stable message identifier is required.')
       }
@@ -170,6 +173,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
       seen.add(id)
       next.messages.push({
         id, conversationId, sender, timestamp, text,
+        ...(region ? { region } : {}),
         ...(receipt ? { receipt: copyReceipt(receipt) } : {}),
         ...(rawHex !== undefined ? { rawHex } : {}),
         ...(outgoing ? { outgoing: copyOutgoing(outgoing) } : {}),
@@ -211,6 +215,11 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
     next.discoveries = [...records.values()].sort((a, b) => b.heardAt - a.heardAt).slice(0, 1_000)
   }
   if (directSendOptions) next.directSendOptions = validateDirectOptions(directSendOptions)
+  if (update.markRead?.length) {
+    const knownReceipts = new Set(next.messages.filter((message) => !message.outgoing).map(({ id }) => id))
+    next.readMessages = [...new Set([...(current.readMessages ?? []),
+      ...update.markRead.filter((id) => knownReceipts.has(id))])]
+  }
   return next
 }
 

@@ -45,7 +45,7 @@
 
 .chat-conversation-list button[aria-current='page'] {
   border-color: var(--accent);
-  background: #e6f0f1;
+  background: var(--selection);
   box-shadow: inset 3px 0 var(--accent);
 }
 
@@ -98,7 +98,7 @@
 
 .chat-message-list .chat-message--outgoing {
   justify-self: end;
-  background: #eef6f6;
+  background: var(--message-background);
 }
 
 .chat-message-header,
@@ -124,7 +124,7 @@
 
 .chat-failed,
 .chat-action-error {
-  color: #a02b2b;
+  color: var(--error);
 }
 
 .chat-message-list code {

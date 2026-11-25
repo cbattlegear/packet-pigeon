@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { conversations, messageVisibility, possibleRepeats } from './model.ts'
+import { conversations, messageVisibility, oldestUnreadReceipt, possibleRepeats, unreadReceipts } from './model.ts'
 
 const details = {
   type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
@@ -69,4 +69,14 @@ test('does not attribute an ambiguous sender or enable sending to colliding cont
   assert.deepEqual(items.find((item) => item.id === 'direct:010203040506').messages, [received])
   assert.equal(items.find((item) => item.id === 'channel:0').title, 'Public')
   assert.equal(items.find((item) => item.id === 'unsupported').messages[0].rawHex, '5501')
+})
+
+test('the oldest unread receipt uses the sender timestamp and skips outgoing and read entries', () => {
+  const undated = { ...received, id: 'undated', timestamp: null }
+  const oldest = { ...received, id: 'oldest', timestamp: 100000 }
+  const sent = { ...received, id: 'sent', timestamp: 99000, outgoing: {} }
+  const read = { ...received, id: 'read', timestamp: 98000 }
+  const unread = unreadReceipts([undated, received, oldest, sent, read], new Set([read.id]))
+  assert.deepEqual(unread.map(({ id }) => id), [undated.id, received.id, oldest.id])
+  assert.equal(oldestUnreadReceipt(unread), oldest)
 })

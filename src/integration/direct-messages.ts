@@ -47,6 +47,7 @@ export class DirectMessages {
   private readonly timeoutFor: (suggested: number) => number
   private readonly pendingChanges: PendingChange[] = []
   private readonly pendingDrafts = new Map<string, PendingDraft>()
+  private readonly draftEditsThisVisit = new Map<string, string>()
   private tail: Promise<void> = Promise.resolve()
   private draftVersion = 0
   private loadVersion = 0
@@ -154,13 +155,19 @@ export class DirectMessages {
   }
 
   readonly draft = (key: RadioKey, conversationId: string) => {
-    const pending = this.pendingDrafts.get(`${key}:${conversationId}`)
-    return pending?.text ?? (this.status.key === key
+    const name = `${key}:${conversationId}`
+    const pending = this.pendingDrafts.get(name)
+    return this.draftEditsThisVisit.get(name) ?? pending?.text ?? (this.status.key === key
       ? this.status.data?.drafts.find((entry) => entry.conversationId === conversationId)?.text : undefined) ?? ''
   }
 
-  readonly saveDraft = (key: RadioKey, conversationId: string, text: string) => {
+  readonly saveDraft = (key: RadioKey, conversationId: string, text: string, persist = true) => {
     const name = `${key}:${conversationId}`
+    if (!persist) {
+      this.draftEditsThisVisit.set(name, text)
+      return Promise.resolve()
+    }
+    this.draftEditsThisVisit.delete(name)
     const draft: PendingDraft = { key, conversationId, text, version: ++this.draftVersion }
     this.pendingDrafts.set(name, draft)
     this.update({ pending: this.pendingCount() })
@@ -185,6 +192,20 @@ export class DirectMessages {
         throw error
       } finally {
         storage?.close()
+      }
+    })
+  }
+
+  readonly markRead = async (key: RadioKey, ids: readonly string[]) => {
+    if (!ids.length) return
+    await this.serial(async () => {
+      const storage = await this.openStorage()
+      try {
+        await storage.update(key, { markRead: ids })
+        const data = await storage.read(key)
+        if (this.status.key === key) this.update({ data })
+      } finally {
+        storage.close()
       }
     })
   }
@@ -292,7 +313,7 @@ export class DirectMessages {
     this.update({ activeId: null, cancelling: false })
   }
 
-  readonly send = async (key: RadioKey, recipient: string, text: string, options: DirectSendOptions) => {
+  readonly send = async (key: RadioKey, recipient: string, text: string, options: DirectSendOptions, persistDraft = true) => {
     let active: ActiveSend | undefined
     try {
       directTextBytes(text)
@@ -300,7 +321,8 @@ export class DirectMessages {
       const valid = validateDirectOptions(options)
       const id = crypto.randomUUID()
       active = this.start(key, id)
-      await this.saveDraft(key, `direct:${target}`, text)
+      const conversationId = `direct:${target}`
+      await this.saveDraft(key, conversationId, text, persistDraft)
       if (!this.isConnected(key)) throw new Error('Connect the selected radio before sending. Your draft was kept.')
       if (this.pendingCount()) throw new Error('Retry saving the pending message changes before sending.')
       if (active.cancelled) throw new Error('Sending was cancelled. Your draft was kept.')
@@ -308,6 +330,8 @@ export class DirectMessages {
         kind: 'begin', id, recipient: target, text, options: valid, now: Date.now(),
       }, false)
       if (!result.message?.outgoing) throw new Error('The outgoing message could not be saved.')
+      const draftKey = `${key}:${conversationId}`
+      if (this.draftEditsThisVisit.get(draftKey) === text) this.draftEditsThisVisit.set(draftKey, '')
       void this.run(active, result.message)
       return true
     } catch (error) {

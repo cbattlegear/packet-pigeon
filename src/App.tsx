@@ -14,6 +14,9 @@ import { mapRadioContacts } from './map/nodes.ts'
 import type { Coordinates } from './map/nodes.ts'
 import './App.css'
 import { OfflineStatus } from './offline/OfflineStatus.tsx'
+import { PreferencesPanel } from './preferences/PreferencesPanel.tsx'
+import { useAppPreferences } from './preferences/use-app-preferences.ts'
+import { useScreenWakeLock } from './preferences/use-screen-wake-lock.ts'
 
 const session = new CompanionSession()
 const cache = new SessionCache(session)
@@ -34,10 +37,6 @@ function sectionFromHash(): Section {
 
 function isMapSection(section: Section): section is 'Map' | 'Tools' {
   return section === 'Map' || section === 'Tools'
-}
-
-const sectionDescriptions: Record<Exclude<Section, 'Chats' | 'Contacts' | 'Discovery' | 'Channels' | 'Map' | 'Tools'>, string> = {
-  Settings: 'Settings will appear here when they are available.',
 }
 
 type StateMessageProps =
@@ -61,6 +60,8 @@ function StateMessage({ kind, title, description }: StateMessageProps) {
 }
 
 function App() {
+  const settings = useAppPreferences()
+  const wake = useScreenWakeLock(settings.preferences.keepScreenOn)
   const [{ activeSection, hasOpenedMap, hasOpenedContacts, hasOpenedDiscovery }, setNavigation] = useState(() => {
     const activeSection = sectionFromHash()
     return {
@@ -237,20 +238,14 @@ function App() {
         )}
         <div className="chat-slot" hidden={activeSection !== 'Chats'}>
           <ChatPanel snapshot={snapshot} messageSync={messageSync} messageStatus={messageStatus}
-            direct={directMessages} status={directStatus} cacheSaving={cacheStatus.saving} />
+            direct={directMessages} status={directStatus} cacheSaving={cacheStatus.saving}
+            active={activeSection === 'Chats'} preferences={settings.preferences} locale={settings.locale} />
         </div>
-        {activeSection !== 'Chats' && !mapVisible && activeSection !== 'Contacts' && activeSection !== 'Discovery' && activeSection !== 'Channels' && (
-          <section className="section-pane" aria-labelledby="section-heading">
-            <div className="pane-heading">
-              <h1 id="section-heading">{activeSection}</h1>
-              <p>Workspace</p>
-            </div>
-            <StateMessage
-              kind="empty"
-              title={`${activeSection} is not available yet`}
-              description={sectionDescriptions[activeSection]}
-            />
-          </section>
+        {activeSection === 'Settings' && (
+          <div className="section-pane">
+            <div className="pane-heading"><h1>Settings</h1></div>
+            <PreferencesPanel preferences={settings.preferences} saveFailed={settings.saveFailed} update={settings.update} wake={wake} />
+          </div>
         )}
         {activeSection === 'Channels' && (
           <div className="section-pane">

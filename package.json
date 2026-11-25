@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "test:browser": "node --test tests/browser/preferences.browser.mjs",
     "test:storage": "node --test src/storage/index.test.js"
   },
   "dependencies": {
@@ -23,6 +24,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "fake-indexeddb": "^6.2.8",
     "oxlint": "^1.90.0",
+    "playwright-core": "^1.65.1",
     "typescript": "~7.0.2",
     "vite": "^8.3.6"
   }
