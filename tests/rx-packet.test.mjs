@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { redactedDiagnostics } from '../src/diagnostics/rx-log.ts'
+import { matchingChannelObservations, redactedDiagnostics } from '../src/diagnostics/rx-log.ts'
 import { decodeRxPacket, payloadFields, routeLabel, rxPacketHash, typeLabel } from '../src/radio/rx-packet.ts'
 
 test('decodes signed signal values, transport codes and two-byte path hashes', async () => {
@@ -55,4 +55,22 @@ test('redacted reports exclude payloads, route identifiers, packet hashes and ra
     pathHashWidth: 2, hops: 1, snrDb: 10, rssiDbm: -86, status: 'decoded',
   }])
   assert.doesNotMatch(report, /contents|transportCodes|wireHex|adbe|1234|hashes|fingerprint/)
+})
+
+test('matches only complete USB channel packets by exact encrypted bytes, preserving distinct paths', () => {
+  const payload = [0x12, 0x34, 0x56, ...new Uint8Array(16).fill(0xa5)]
+  const capture = (id, route, path, body = payload, transport = 'usb') => ({
+    id, time: id, transport,
+    packet: decodeRxPacket(Uint8Array.of(0, 0, route, ...(route === 0x14 ? [0x12, 0x34, 0, 0] : []),
+      path.length, ...path, ...body)),
+  })
+  const first = capture(1, 0x15, [1])
+  const second = capture(2, 0x14, [2, 3])
+  const different = capture(3, 0x15, [1], [...payload.slice(0, -1), 0xa6])
+  const bluetooth = capture(4, 0x15, [1], payload, 'bluetooth')
+  const truncated = capture(5, 0x15, [1], payload.slice(0, -1))
+  const entries = [first, second, different, bluetooth, truncated]
+  assert.deepEqual(matchingChannelObservations(first, entries).map(({ id }) => id), [1, 2])
+  assert.deepEqual(matchingChannelObservations(bluetooth, entries), [])
+  assert.deepEqual(matchingChannelObservations(truncated, entries), [])
 })

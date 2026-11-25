@@ -241,6 +241,14 @@ Bluetooth notifications can be incomplete, including when the header looks valid
 Filter by type, route, or decode status. Select a packet to inspect the
 browser receipt time, MeshCore packet hash, path, signal data, and known header
 and payload fields. Raw bytes are available in the selected packet's details.
+For USB channel-text packets with complete-looking encrypted payloads, details
+also show captured observations with identical payload bytes and their paths
+and transport codes, including observations hidden by filters. Flood paths
+show traversed hops; direct paths show the remaining route. Equal bytes
+can represent separate transmissions, not confirmed repeats or delivery;
+capture can miss packets and these observations cannot be reliably linked to
+queued messages or named regions. Bluetooth packets are excluded because they
+may be truncated.
 Copy and export use the filtered list and omit raw bytes, payloads, node and
 channel identifiers, path hashes, transport codes, and packet hashes.
 
