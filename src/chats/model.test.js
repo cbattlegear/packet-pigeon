@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { conversations, messageVisibility, oldestUnreadReceipt, possibleRepeats, unreadReceipts } from './model.ts'
+import { conversations, messageVisibility, oldestUnreadReceipt, possibleRepeats, receiptPathDescription, unreadReceipts } from './model.ts'
 
 const details = {
   type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
@@ -16,6 +16,15 @@ const received = {
   id: 'one', conversationId: 'direct:010203040506', sender: '010203040506',
   timestamp: 123000, text: 'Hello', receipt,
 }
+
+test('describes the encoded path hash width without inventing paths or decoding reserved values', () => {
+  assert.equal(receiptPathDescription(0x01), '1 path hop · 1-byte path hashes')
+  assert.equal(receiptPathDescription(0x45), '5 path hops · 2-byte path hashes')
+  assert.equal(receiptPathDescription(0x8a), '10 path hops · 3-byte path hashes')
+  assert.equal(receiptPathDescription(0xff), 'Direct receipt')
+  assert.equal(receiptPathDescription(0xc1), 'Unsupported path metadata')
+  assert.equal(receiptPathDescription(256), 'Unsupported path metadata')
+})
 
 test('joins a uniquely identified sender with its contact and preserves repeated receipts', () => {
   const data = {
