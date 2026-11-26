@@ -125,8 +125,25 @@ test('bridge diagnostics are exact read-only queries and exclude secrets and uns
     }
   }
   for (const command of ['get bridge.secret', 'set bridge.secret secret',
-    'set bridge.delay 500', 'set bridge.source rx', 'set bridge.baud 9600', 'set bridge.channel 1']) {
+    'set bridge.delay 500', 'set bridge.baud 9600', 'set bridge.channel 1']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('bridge source changes require confirmation and exact firmware-compatible values', () => {
+  for (const command of ['set bridge.source rx', 'set bridge.source tx']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /does not stop packets entering/)
+    assert.match(action.warning, /local advert interval below 60 minutes/)
+    assert.match(action.warning, /delayed command/i)
+    for (const invalid of [`${command} `, `${command} extra`, `${command}\nreboot`]) {
+      assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
+    }
+  }
+  for (const invalid of ['set bridge.source', 'set bridge.source logRx', 'set bridge.source logTx',
+    'set bridge.source RX', 'set bridge.source foo']) {
+    assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
   }
 })
 

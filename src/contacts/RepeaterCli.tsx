@@ -115,7 +115,7 @@ const managementForms = {
   multiAck: { title: 'Change extra direct ACK preference', terms: 'set multi.acks get multi.acks' },
   powerSaving: { title: 'Change repeater power-saving preference', terms: 'powersaving' },
   packetLog: { title: 'Manage repeater packet log', terms: 'log start stop erase logging packet diagnostics' },
-  bridge: { title: 'Manage repeater bridge', terms: 'get bridge.type get bridge.enabled set bridge.enabled on off' },
+  bridge: { title: 'Manage repeater bridge', terms: 'get bridge.type get bridge.enabled set bridge.enabled on off get bridge.source set bridge.source rx tx logRx logTx' },
   advertInterval: { title: 'Change advertisement interval', terms: 'set advert.interval set flood.advert.interval' },
   removeAccess: { title: 'Remove repeater access-list entry', terms: 'setperm acl permissions' },
   limitedAccess: { title: 'Set non-admin repeater client role', terms: 'setperm acl permissions read-only read-write' },
@@ -174,6 +174,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     item.command === 'log start' || item.command === 'log stop' || item.command === 'log erase')
   const bridgeCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set bridge.enabled on' || item.command === 'set bridge.enabled off')
+  const bridgeSourceCommands = repeaterCliCommands.filter((item) =>
+    item.command === 'set bridge.source rx' || item.command === 'set bridge.source tx')
   const receiverGainCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set radio.rxgain on' || item.command === 'set radio.rxgain off')
   const gpsCommands = repeaterCliCommands.filter((item) => item.command === 'gps on' || item.command === 'gps off')
@@ -232,7 +234,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     const rebootFollowup = command === 'clkreboot'
       ? 'No reply is expected on repeater v1.14.1. Log in again when the repeater is available; a delayed clock reset and reboot may still arrive. Read and set the clock separately using a trusted time.'
       : 'No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.'
-    const target = reboots || command.startsWith('log ') || command.startsWith('set bridge.enabled ')
+    const target = reboots || command.startsWith('log ') || command.startsWith('set bridge.enabled ') || command.startsWith('set bridge.source ')
       ? `${name} (${contactKey.slice(0, 12)})` : name
     if (confirmed) {
       if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
@@ -691,6 +693,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'clear stats' && action && 'warning' in action && <p>{action.warning}</p>}
     {selected.startsWith('log ') && action && 'warning' in action && <p>{action.warning}</p>}
     {selected.startsWith('set bridge.enabled ') && action && 'warning' in action && <p>{action.warning}</p>}
+    {selected.startsWith('set bridge.source ') && action && 'warning' in action && <p>{action.warning}</p>}
     {selected === 'clkreboot' && action && 'warning' in action && <p>{action.warning}</p>}
     {selected === 'get adc.multiplier' && <p>In v1.14.1, a supported query returns the board-reported multiplier to three decimals,
       not whether it is the default or an override. Board and firmware support varies.</p>}
@@ -1165,6 +1168,19 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             onClick={() => sendChoice(item)}>{item.description}</button>
         ))}
       </div>
+      <p>Packet source selects which radio observations are offered to the external bridge, not whether packets can enter
+        from it. Changing it can expose different traffic and affect routes or remote access. In v1.14.1, the commands
+        use <code>rx</code> or <code>tx</code>, while the reported preference is <code>logRx</code> or <code>logTx</code>.
+        The change applies to subsequent observations and attempts to save the preference. A reply or matching read-back
+        does not prove packets were bridged or the setting was saved; firmware and build support vary.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get bridge.source', 'Read bridge packet source preference', false)}>Read bridge packet source preference</button>
+        {bridgeSourceCommands.map((item) => (
+          <button key={item.command} type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+            onClick={() => sendChoice(item)}>{item.description}</button>
+        ))}
+      </div>
     </details>
     <details data-cli-section="advertInterval">
       <summary>{managementForms.advertInterval.title}</summary>
@@ -1398,6 +1414,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">{bridgeDiagnosticHelp(item.command)} Firmware and build support vary; replies may be delayed or unsupported.</p>}
           {item.command.startsWith('set bridge.enabled ') && item.reply !== null &&
             <p className="contact-status">A reply does not prove the bridge is working, stopped, or saved. Read the preference separately;
+              a delayed command may still change it later.</p>}
+          {item.command.startsWith('set bridge.source ') && item.reply !== null &&
+            <p className="contact-status">A reply does not prove packets were bridged or the setting was saved. Read the preference separately;
               a delayed command may still change it later.</p>}
           {item.command === 'sensor get gps' && item.reply !== null &&
             <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.

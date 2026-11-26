@@ -2043,7 +2043,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   }
   await search.fill('bridge')
   assert.equal(await page.getByRole('button', { name: /get bridge\.secret/ }).count(), 0)
-  assert.equal(await page.getByRole('button', { name: /set bridge\.(delay|source|baud|channel|secret)/ }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: /set bridge\.(delay|baud|channel|secret)/ }).count(), 0)
   for (const [command, description, reply, help] of [
     ['get bridge.type', 'Read compiled bridge type', '> none', 'compiled bridge type, not whether a bridge is enabled or working'],
     ['get bridge.enabled', 'Read bridge enabled preference', '??: bridge.enabled', 'not whether bridge hardware is connected or forwarding'],
@@ -2106,6 +2106,54 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     await sync.click()
     await history.getByText(reply, { exact: true }).waitFor()
     await history.getByText(/does not prove the bridge is working, stopped, or saved/).waitFor()
+  }
+  await page.evaluate(() => { window.fixtureUnconfirmed = false })
+  await search.fill('bridge.source')
+  await bridgeSection.getByText(/not whether packets can enter/).waitFor()
+  await bridgeSection.getByText(/commands use rx or tx/).waitFor()
+  const beforeSourceQuery = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  const beforeSourceSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+  await bridgeSection.getByRole('button', { name: 'Read bridge packet source preference' }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'get bridge.source')
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeSourceQuery + 1)
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeSourceSync)
+  await page.evaluate(() => window.queueRepeaterReply('> logTx'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'get bridge.source' }).first()
+    .getByText('> logTx', { exact: true }).waitFor()
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 1280, height: 720 })
+  for (const [command, label, reply] of [
+    ['set bridge.source rx', 'Bridge received radio packets', 'OK'],
+    ['set bridge.source tx', 'Bridge transmitted radio packets', '??: bridge.source tx'],
+  ]) {
+    const button = bridgeSection.getByRole('button', { name: label, exact: true })
+    const before = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+    const beforeSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+    page.once('dialog', (dialog) => {
+      assert.match(dialog.message(), /Fixture repeater \(bcbcbcbcbcbc\)/)
+      assert.match(dialog.message(), /expose different mesh packets/)
+      assert.match(dialog.message(), /does not stop packets entering/)
+      assert.match(dialog.message(), /local advert interval below 60 minutes/)
+      void dialog.dismiss()
+    })
+    await button.click()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), before)
+    if (command.endsWith('tx')) await page.evaluate(() => { window.fixtureUnconfirmed = true })
+    page.once('dialog', (dialog) => dialog.accept())
+    await button.click()
+    assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+      window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), command)
+    const history = page.locator('.repeater-cli-history li').filter({ hasText: command }).first()
+    await history.getByText(command.endsWith('tx') ? /Send unconfirmed/ : /Accepted by radio/).waitFor()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), before + 1)
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeSync)
+    await page.evaluate((value) => window.queueRepeaterReply(value), reply)
+    await sync.click()
+    await history.getByText(reply, { exact: true }).waitFor()
+    await history.getByText(/does not prove packets were bridged or the setting was saved/).waitFor()
   }
   await page.evaluate(() => { window.fixtureUnconfirmed = false })
   await search.fill('gps setloc')

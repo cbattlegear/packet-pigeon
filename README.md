@@ -608,8 +608,17 @@ attempts to start or stop the bridge immediately and save its preference.
 Saving also sets a local advert interval below 60 minutes to zero; an already
 scheduled advert may still be sent. An OK reply or preference read-back does
 not prove the bridge is working, stopped, or saved. Firmware and build support
-vary, and commands and replies may arrive late. Other bridge changes and secret
-queries are not offered.
+vary, and commands and replies may arrive late. Administrators can separately
+confirm changes to the bridge packet source. This selects which radio
+observations are offered to the external bridge, not whether packets can
+enter from it.
+Changing it can expose different traffic and affect routes or remote access.
+In v1.14.1, the setter accepts `rx` or `tx` while the query reports `logRx`
+or `logTx`; the change applies to subsequent observations and attempts to
+save the preference. The same advert-save side effect applies. An OK reply or
+matching read-back does not prove packets were bridged or the setting was
+saved, and delayed commands may arrive later. Other firmware may differ.
+Other bridge changes and secret queries are not offered.
 Administrators can explicitly read and confirm changes to repeater radio
 preferences (frequency, bandwidth, spreading factor and coding rate). Check
 the board, local regulations, channel plan and recovery method first: changing

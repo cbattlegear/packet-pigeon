@@ -738,7 +738,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     'get bridge.source', 'get bridge.baud', 'get bridge.channel']) {
     await assert.rejects(send(command), /administrator/)
   }
-  for (const command of ['set bridge.enabled on', 'set bridge.enabled off']) {
+  for (const command of ['set bridge.enabled on', 'set bridge.enabled off', 'set bridge.source rx', 'set bridge.source tx']) {
     await assert.rejects(send(command, true), /administrator/)
   }
   await assert.rejects(send('neighbors'), /administrator/)
@@ -821,7 +821,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     'get bridge.source', 'get bridge.baud', 'get bridge.channel']) {
     await assert.rejects(send(command), /administrator/)
   }
-  for (const command of ['set bridge.enabled on', 'set bridge.enabled off']) {
+  for (const command of ['set bridge.enabled on', 'set bridge.enabled off', 'set bridge.source rx', 'set bridge.source tx']) {
     await assert.rejects(send(command, true), /administrator/)
   }
   await assert.rejects(send('neighbors'), /administrator/)
@@ -887,11 +887,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   for (const command of ['log start', 'log stop', 'log erase']) {
     await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, command, true, signal()), /route changed/)
   }
-  for (const command of ['set bridge.enabled on', 'set bridge.enabled off']) {
+  for (const command of ['set bridge.enabled on', 'set bridge.enabled off', 'set bridge.source rx', 'set bridge.source tx']) {
     await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, command, true, signal()), /route changed/)
   }
   contact[36] = 0x45
-  for (const command of ['get guest.password', 'get bridge.secret', 'set bridge.enabled yes', 'password secret', 'reboot now',
+  for (const command of ['get guest.password', 'get bridge.secret', 'set bridge.enabled yes', 'set bridge.source logRx', 'password secret', 'reboot now',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
     await assert.rejects(send(command, true), /supported repeater CLI command/)
   }
@@ -918,7 +918,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   for (const command of ['log start', 'log stop', 'log erase']) {
     await assert.rejects(send(command), /Confirm/)
   }
-  for (const command of ['set bridge.enabled on', 'set bridge.enabled off']) {
+  for (const command of ['set bridge.enabled on', 'set bridge.enabled off', 'set bridge.source rx', 'set bridge.source tx']) {
     await assert.rejects(send(command), /Confirm/)
   }
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
