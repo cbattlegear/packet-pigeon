@@ -60,6 +60,8 @@ export interface QueuedMessageLease {
   release(): void
 }
 
+export type SyncMaintenanceMessages = (publicKey: string, reserve: () => QueuedMessageLease, signal: AbortSignal) => Promise<void>
+
 interface Attempt {
   link?: SerialLink
   opening?: Promise<SerialLink | null>
@@ -350,14 +352,18 @@ export class CompanionSession {
     if (this.snapshot.phase !== 'ready' || !link || this.snapshot.device?.publicKey !== publicKey) {
       throw new CompanionError('disconnected', 'Connect the selected radio before syncing messages.')
     }
-    if (this.receiptHolds.size) {
-      throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
-    }
     if (this.contactWritePending) {
       throw new CompanionError('protocol', 'Wait for the contact change to finish before syncing messages.')
     }
     if (this.directCommandPending) {
       throw new CompanionError('protocol', 'Wait for the direct-message command to finish before syncing messages.')
+    }
+    return this.reserveReceipt(link, publicKey)
+  }
+
+  private reserveReceipt(link: SerialLink, publicKey: string): QueuedMessageLease {
+    if (this.receiptHolds.size) {
+      throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
     }
     const hold = Symbol()
     this.receiptHolds.add(hold)
@@ -1040,11 +1046,15 @@ export class CompanionSession {
         }
       })
     } finally {
-      if (disconnect && generation === this.generation) await this.disconnect()
+      if (disconnect && generation === this.generation) {
+        const closing = this.disconnect()
+        // The UI must be able to report a failed restart while ownership waits for a receipt retry.
+        if (!this.receiptHolds.size) await closing
+      }
     }
   }
 
-  readonly prepareIdentityRecovery = async (radioKey: string, signal: AbortSignal) => {
+  readonly prepareIdentityRecovery = async (radioKey: string, syncMessages: SyncMaintenanceMessages, signal: AbortSignal) => {
     const { maintenanceCommand, readBootTime } = await import('./identity-backup.ts')
     if ((this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0) < 8) {
       throw new Error('Identity recovery requires firmware that can verify a reboot before replacing the key.')
@@ -1058,6 +1068,7 @@ export class CompanionSession {
         preparation = { radioKey, bootTime, requestedAt }
       }, async (link) => {
         bootTime = await readBootTime(link)
+        await syncMessages(radioKey, () => this.reserveReceipt(link, radioKey), signal)
         signal.throwIfAborted()
       })
     } catch (error) {
@@ -1075,30 +1086,40 @@ export class CompanionSession {
   }
 
   readonly restoreDeviceIdentity = async (radioKey: string, key: Uint8Array, expectedPublicKey: string,
-    contacts: readonly Omit<CompanionContact, 'lastModifiedAt'>[], signal: AbortSignal) => {
+    contacts: readonly Omit<CompanionContact, 'lastModifiedAt'>[], syncMessages: SyncMaintenanceMessages, signal: AbortSignal) => {
     const { maintenanceCommand, writeBackupIdentity } = await import('./identity-backup.ts')
     const { restoreContactsAfterIdentity } = await import('./backup-commands.ts')
     if (radioKey === expectedPublicKey) return []
     let identitySaved = false
     let before: readonly CompanionContact[] = []
     let results: Awaited<ReturnType<typeof restoreContactsAfterIdentity>> = []
+    const unverifiedContacts = { publicKey: '', label: 'Verify contacts', status: 'uncertain' as const,
+      reason: 'Reconnect and verify the radio’s contacts after the identity change.' }
     try {
       await this.runMaintenance(radioKey, async (link) => {
         const { firmwareProtocolVersion: firmware, maxContacts: capacity } = this.snapshot.device!.capabilities
         await writeBackupIdentity(link, key, expectedPublicKey)
         identitySaved = true
         const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
-        results = await restoreContactsAfterIdentity(link, before, contacts, signal,
-          { ownKey: expectedPublicKey, firmware, capacity, connected, readContacts: () => this.readContacts(link) },
-          maintenanceCommand('reboot'))
+        try {
+          results = await restoreContactsAfterIdentity(link, before, contacts, signal,
+            { ownKey: expectedPublicKey, firmware, capacity, connected, readContacts: () => this.readContacts(link) },
+            async () => {
+              await syncMessages(expectedPublicKey, () => this.reserveReceipt(link, radioKey), signal)
+              signal.throwIfAborted()
+              await link.sendWithoutReply(maintenanceCommand('reboot'))
+            })
+        } catch {
+          results.push(unverifiedContacts)
+        }
       }, async (link) => {
+        await syncMessages(radioKey, () => this.reserveReceipt(link, radioKey), signal)
         before = await this.readContacts(link)
         signal.throwIfAborted()
       })
     } catch (error) {
       if (!identitySaved) throw error
-      if (!results.length) results.push({ publicKey: '', label: 'Verify contacts', status: 'uncertain',
-        reason: 'Reconnect and verify the radio’s contacts after the identity change.' })
+      if (!results.length) results.push(unverifiedContacts)
     }
     return results
   }

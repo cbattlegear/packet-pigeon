@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CompanionSnapshot } from '../radio/companion-session.ts'
+import type { CompanionSnapshot, SyncMaintenanceMessages } from '../radio/companion-session.ts'
 import type { IdentityRecoveryPreparation } from '../radio/identity-backup.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioKey } from '../storage/index.ts'
@@ -58,9 +58,10 @@ function toggle(set: ReadonlySet<BackupSection>, section: BackupSection) {
   return next
 }
 
-export default function BackupPanel({ snapshot, session, radioBusy, canPurge, onCacheChanged }: {
+export default function BackupPanel({ snapshot, session, syncMessages, radioBusy, canPurge, onCacheChanged }: {
   snapshot: CompanionSnapshot
   session: BackupSession
+  syncMessages: SyncMaintenanceMessages
   radioBusy: boolean
   canPurge: boolean
   onCacheChanged: (key: RadioKey, purged?: boolean) => void
@@ -184,18 +185,18 @@ export default function BackupPanel({ snapshot, session, radioBusy, canPurge, on
     const data = parsed.current
     if (!key || !data || !selectedImport.size) return
     if (needsPreparation) {
-      if (!confirmKey(`Reboot ${selectedLabel} to save pending contacts before identity recovery? Reconnect to continue the restore.`)) return
+      if (!confirmKey(`Save queued messages in this browser and restart ${selectedLabel} to save pending contacts? Messages arriving during the restart may be lost. Reconnect to continue recovery.`)) return
       void run(async (signal) => {
-        setPreparation(await session.prepareIdentityRecovery(key, signal))
+        setPreparation(await session.prepareIdentityRecovery(key, syncMessages, signal))
         setNotice('Radio reboot requested to save pending contacts. Reconnect the same radio to continue recovery.')
       })
       return
     }
     if (replacingIdentity) {
-      if (!confirmKey(`Apply the selected settings and replace the identity of ${selectedLabel}? The radio may restart to save contacts. Reconnect afterward to verify the new public key.`)) return
+      if (!confirmKey(`Apply the selected settings and replace the identity of ${selectedLabel}? If contacts are written, queued messages will be saved before another restart. Messages arriving during that restart may be lost. Reconnect to verify the new public key.`)) return
     } else if (!window.confirm(`Restore the selected sections for ${selectedLabel}? Matching contact details and selected browser settings can be replaced. Existing radio channel keys stay in place.`)) return
     void run(async (signal) => {
-      const applied = await restoreBackup(session, key, data, selectedImport, signal, preparation).catch((error: unknown) => {
+      const applied = await restoreBackup(session, key, data, selectedImport, syncMessages, signal, preparation).catch((error: unknown) => {
         if (replacingIdentity) setPreparation(undefined)
         throw error
       })

@@ -1,6 +1,6 @@
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioData, RadioKey, RadioUpdate } from '../storage/index.ts'
-import type { CompanionSession } from '../radio/companion-session.ts'
+import type { CompanionSession, SyncMaintenanceMessages } from '../radio/companion-session.ts'
 import type { DeviceEdits, DeviceSaveResult } from '../radio/device-settings.ts'
 import type { BackupWrite } from '../radio/backup-commands.ts'
 import type { IdentityRecoveryPreparation } from '../radio/identity-backup.ts'
@@ -127,7 +127,7 @@ export async function exportBackup(session: BackupSession, key: RadioKey, sectio
 }
 
 export async function restoreBackup(session: BackupSession, key: RadioKey, backup: BackupData, sections: ReadonlySet<BackupSection>,
-  signal: AbortSignal, preparation?: IdentityRecoveryPreparation) {
+  syncMessages: SyncMaintenanceMessages, signal: AbortSignal, preparation?: IdentityRecoveryPreparation) {
   const results: BackupResult[] = []
   const savedContacts = new Set<string>()
   let restoredChannels: RestoredChannels | undefined
@@ -229,7 +229,7 @@ export async function restoreBackup(session: BackupSession, key: RadioKey, backu
     try {
       const selected = sections.has('contacts') ? backup.contacts ?? [] : []
       const contacts = await session.restoreDeviceIdentity(key, identity.privateKey, identity.publicKey,
-        selected.filter((entry) => entry.publicKey !== identity.publicKey), signal)
+        selected.filter((entry) => entry.publicKey !== identity.publicKey), syncMessages, signal)
       cacheKey = radioKeyFromPublicKey(identity.publicKey)
       transferredIdentity = identity.publicKey
       contactsHandled = true

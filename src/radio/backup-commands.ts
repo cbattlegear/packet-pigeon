@@ -164,7 +164,7 @@ function pendingContactChanges(before: readonly CompanionContact[], loaded: read
 }
 
 export async function restoreContactsAfterIdentity(link: SerialLink, before: readonly CompanionContact[],
-  contacts: readonly BackupContact[], signal: AbortSignal, target: ContactBackupTarget, reboot: Uint8Array) {
+  contacts: readonly BackupContact[], signal: AbortSignal, target: ContactBackupTarget, reboot: () => Promise<void>) {
   // The firmware reloads contacts from flash when the identity changes.
   const loaded = await target.readContacts()
   const pending = pendingContactChanges(before, loaded).filter((contact) => contact.publicKey !== target.ownKey)
@@ -174,10 +174,11 @@ export async function restoreContactsAfterIdentity(link: SerialLink, before: rea
   const results = preserved.map(({ label, ...result }) => ({ ...result, publicKey: '', label: `Preserve ${label}` }))
   results.push(...await restoreBackupContacts(link, contacts, signal, target))
   if (results.some(({ status }) => status === 'saved')) {
-    try { await link.sendWithoutReply(reboot) }
-    catch {
-      results.push({ publicKey: '', label: 'Save pending contacts', status: 'uncertain',
-        reason: 'Reconnect and verify the restored contacts before powering off the radio.' })
+    try { await reboot() }
+    catch (error) {
+      const status = writeStatus(error) === 'uncertain' ? 'uncertain' : 'skipped'
+      results.push({ publicKey: '', label: 'Restart after restoring contacts', status,
+        reason: error instanceof Error ? error.message : 'Reconnect to verify restored contacts and queued messages.' })
     }
   }
   return results

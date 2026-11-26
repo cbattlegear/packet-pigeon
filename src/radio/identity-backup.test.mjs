@@ -40,7 +40,8 @@ test('preserves pending contact fields and keeps newer radio changes after ident
   const signal = AbortSignal.abort()
   const target = { ownKey: 'ef'.repeat(32), firmware: 14, capacity: 2,
     connected: () => true, readContacts: async () => flash }
-  const results = await restoreContactsAfterIdentity(link, [pending, old], [], signal, target, maintenanceCommand('reboot'))
+  const results = await restoreContactsAfterIdentity(link, [pending, old], [], signal, target,
+    () => link.sendWithoutReply(maintenanceCommand('reboot')))
   assert.deepEqual(writes, ['Pending name', 19])
   assert.deepEqual(results.map(({ label, status }) => ({ label, status })), [{ label: 'Preserve Pending name', status: 'saved' }])
 })

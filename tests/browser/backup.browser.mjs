@@ -45,10 +45,18 @@ test('backs up selected settings, restores data and identity, and guards mainten
       }
       click.call(this)
     }
+    const put = IDBObjectStore.prototype.put
+    IDBObjectStore.prototype.put = function (value, ...args) {
+      if (window.failRecoverySave && value?.messages?.some(({ text }) => text === 'Retry before reboot')) {
+        throw new DOMException('Fixture blocked receipt saving', 'QuotaExceededError')
+      }
+      return put.call(this, value, ...args)
+    }
     const encoder = new TextEncoder()
     const decode = new TextDecoder()
     const bytes = (hex) => Uint8Array.from(hex.match(/../g), (pair) => parseInt(pair, 16))
     const commands = []
+    const queuedMessages = []
     let contacts = new Map()
     const existing = new Uint8Array(148)
     existing.set([3, ...bytes(existingKey), 2, 0, 255])
@@ -64,6 +72,9 @@ test('backs up selected settings, restores data and identity, and guards mainten
     let storedName = 'Backup fixture'
     let region = null
     window.backupCommands = commands
+    window.droppedRecoveryMessages = 0
+    window.queueBackupMessage = (text) => queuedMessages.push(Uint8Array.of(17, 16, 0, 0, 0, 0, 0,
+      1, 0, 0, 0, ...encoder.encode(text)))
     window.savedContactKeys = () => [...contacts.keys()]
     window.receiveSignedMessage = (cursor) => { signedMessageCursor = cursor }
     window.readSignedMessageCursor = () => signedMessageCursor
@@ -112,12 +123,14 @@ test('backs up selected settings, restores data and identity, and guards mainten
             if (!contacts.has(key) && contacts.size === 2) contacts.delete(contacts.keys().next().value)
             contacts.set(key, record)
             send([0])
-          } else if (code === 23) send([14, ...bytes(identity.secret)])
+          } else if (code === 10) send(queuedMessages.shift() ?? [10])
+          else if (code === 23) send([14, ...bytes(identity.secret)])
           else if (code === 24 && data.slice(1).every((byte, index) => byte === bytes(target.secret)[index])) {
             identity = target
             // Identity replacement reloads contacts and drops recent edits that have not reached flash.
             contacts = new Map(flashContacts)
             signedMessageCursor = flashSignedMessageCursor
+            window.queueBackupMessage('After identity replacement')
             send([0])
           } else if (code === 31) {
             const channel = slots[slot]
@@ -139,6 +152,8 @@ test('backs up selected settings, restores data and identity, and guards mainten
           else if (code === 19) {
             if (window.ignoreReboot) return
             await rebootGate
+            window.droppedRecoveryMessages += queuedMessages.length
+            queuedMessages.length = 0
             flashContacts = new Map(contacts)
             flashSignedMessageCursor = signedMessageCursor
             contacts = new Map(flashContacts)
@@ -161,6 +176,15 @@ test('backs up selected settings, restores data and identity, and guards mainten
     }, index)
     assert.equal(captured.filename, filename)
     return captured.content
+  }
+
+  async function savedMessages(key) {
+    return page.evaluate(async (key) => {
+      const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+      const storage = await openRadioStorage()
+      try { return (await storage.read(radioKeyFromPublicKey(key)))?.messages?.map(({ text }) => text) ?? [] }
+      finally { storage.close() }
+    }, key)
   }
 
   await page.goto(server.resolvedUrls.local[0] + '#settings')
@@ -246,6 +270,20 @@ test('backs up selected settings, restores data and identity, and guards mainten
   const prepare = preview.getByRole('button', { name: 'Prepare identity recovery' })
   await prepare.click()
   assert.equal(await page.evaluate(() => window.backupCommands.includes(19)), false)
+  await page.evaluate(() => {
+    window.failRecoverySave = true
+    window.queueBackupMessage('Retry before reboot')
+  })
+  page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
+  await prepare.click()
+  await panel.getByRole('alert').waitFor()
+  assert.equal(await page.evaluate(() => window.backupCommands.includes(19)), false)
+  assert.deepEqual(await savedMessages(current.publicKey), [])
+  await page.evaluate(() => { window.failRecoverySave = false })
+  await page.getByRole('button', { name: 'Retry saving', exact: true }).click()
+  await page.getByRole('button', { name: 'Retry saving', exact: true }).waitFor({ state: 'hidden' })
+  assert.deepEqual(await savedMessages(current.publicKey), ['Retry before reboot'])
+
   await page.evaluate(() => { window.ignoreReboot = true })
   page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
   await prepare.click()
@@ -260,10 +298,12 @@ test('backs up selected settings, restores data and identity, and guards mainten
   await page.evaluate(() => {
     window.ignoreReboot = false
     window.deferReboot()
+    window.queueBackupMessage('Before recovery reboot')
   })
   page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
   await prepare.click()
   await page.waitForFunction(() => window.backupCommands.filter((code) => code === 19).length === 2)
+  assert.deepEqual(await savedMessages(current.publicKey), ['Retry before reboot', 'Before recovery reboot'])
   await page.evaluate(() => {
     window.updateExistingContact('Edit while reboot is pending')
     window.receiveSignedMessage(123)
@@ -274,7 +314,10 @@ test('backs up selected settings, restores data and identity, and guards mainten
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await panel.getByText(/Connected radio Restored node/).waitFor()
   assert.equal(await page.evaluate(() => window.readExistingContact()), 'Edit while reboot is pending')
-  await page.evaluate(() => window.updateExistingContact('Edit after reconnect'))
+  await page.evaluate(() => {
+    window.updateExistingContact('Edit after reconnect')
+    window.queueBackupMessage('Before identity replacement')
+  })
   await restore.click()
   assert.equal(await page.evaluate(() => window.backupCommands.includes(24)), false)
   page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
@@ -287,6 +330,9 @@ test('backs up selected settings, restores data and identity, and guards mainten
   assert.deepEqual(await page.evaluate(() => window.savedContactKeys()), [existingKey, contactKey])
   assert.equal(await page.evaluate(() => window.readExistingContact()), 'Edit after reconnect')
   assert.equal(await page.evaluate(() => window.readSignedMessageCursor()), 123)
+  assert.deepEqual(await savedMessages(current.publicKey), ['Retry before reboot', 'Before recovery reboot', 'Before identity replacement'])
+  assert.deepEqual(await savedMessages(target.publicKey), ['After identity replacement'])
+  assert.equal(await page.evaluate(() => window.droppedRecoveryMessages), 0)
   const restoredName = await page.evaluate(async ({ publicKey, contactKey }) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()

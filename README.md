@@ -315,7 +315,9 @@ skipped, failed, and unconfirmed changes.
 Identity recovery first reboots the selected radio to save pending contacts.
 Reconnect the same radio and type its current key prefix to confirm replacement.
 The radio restarts again if contacts were written. Reconnect to verify the
-recovered public key. Recovery requires firmware with identity import and reboot
+recovered public key. Packet Pigeon saves queued messages to the browser before
+each recovery restart and stops the restart if saving fails. Messages arriving
+during a restart may be lost. Recovery requires firmware with identity import and reboot
 verification. **Local archive and radio maintenance** offers a separate download
 of cached chats and drafts, cache clearing for a disconnected radio, and
 confirmations for radio reboot and factory reset.

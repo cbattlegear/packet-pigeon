@@ -444,7 +444,7 @@ function App() {
             <Suspense fallback={null}>
               <DeviceSettingsPanel snapshot={snapshot} session={session}
                 radioBusy={messageStatus.syncing || directStatus.activeId !== null} />
-              <BackupPanel snapshot={snapshot} session={session}
+              <BackupPanel snapshot={snapshot} session={session} syncMessages={messageSync.syncForMaintenance}
                 radioBusy={messageStatus.syncing || directStatus.activeId !== null}
                 canPurge={!cacheStatus.saving && cacheStatus.pending === 0 && directStatus.pending === 0 && !messageStatus.pending}
                 onCacheChanged={(key, purged) => {
