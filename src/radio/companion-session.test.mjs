@@ -277,6 +277,80 @@ test('nearby discovery waits for an in-flight acknowledgement and stops on disco
   await session.disconnect()
 })
 
+test('repeater login and explicit status use verified routes and distinguish reported access', async () => {
+  const contact = contactInfo()
+  contact[33] = 2
+  contact[35] = 1
+  contact[36] = 0x45
+  let duplicate = false
+  let reply = true
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: {
+        serial.emit(2, 1, 0, 0, 0)
+        serial.emit(...contact)
+        if (duplicate) {
+          const other = contact.slice()
+          other[5] = 0xdd
+          serial.emit(...other)
+        }
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      }
+      case 26:
+      case 27: {
+        serial.emit(6, 0, 0, 0, 0, 0, 0xe8, 3, 0, 0)
+        if (!reply) break
+        if (command[0] === 26) serial.emit(0x85, 1, ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+        else {
+          const stats = new Uint8Array(48)
+          const view = new DataView(stats.buffer)
+          view.setUint16(0, 4050, true)
+          view.setInt16(4, -110, true)
+          view.setInt16(6, -80, true)
+          view.setUint32(8, 42, true)
+          view.setInt16(42, -8, true)
+          serial.emit(0x87, 0, ...contact.slice(1, 7), ...stats)
+        }
+        break
+      }
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const route = { pathLength: 1, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+  const signal = () => new AbortController().signal
+  await assert.rejects(session.manageRepeater(key, target, route, 'status', '', signal()), /Log in/)
+  assert.equal(port.commands.some(([code]) => code === 27), false)
+  assert.deepEqual(await session.manageRepeater(key, target, route, 'login', 'test', signal()), { role: 'admin', route: 'direct' })
+  assert.deepEqual(port.commands.find(([code]) => code === 26), [26, ...contact.slice(1, 33), ...encode('test'), 0])
+  const status = await session.manageRepeater(key, target, route, 'status', '', signal())
+  assert.equal(status.batteryMv, 4050)
+  assert.equal(status.noiseFloor, -110)
+  assert.equal(status.rssi, -80)
+  assert.equal(status.snr, -2)
+  assert.equal(status.received, 42)
+  contact[36] = 0x46
+  await assert.rejects(session.manageRepeater(key, target, route, 'status', '', signal()), /route changed/)
+  contact[36] = 0x45
+  duplicate = true
+  await assert.rejects(session.manageRepeater(key, target, route, 'login', 'test', signal()), /shares a response prefix/)
+  duplicate = false
+  reply = false
+  const controller = new AbortController()
+  const pending = session.manageRepeater(key, target, route, 'login', 'test', controller.signal)
+  await waitFor(() => port.commands.filter(([code]) => code === 26).length === 2)
+  controller.abort(new Error('Stopped waiting'))
+  await assert.rejects(pending, /Stopped waiting/)
+  await assert.rejects(session.manageRepeater(key, target, route, 'status', '', signal()), /Reconnect/)
+  await session.disconnect()
+})
+
 test('repeater details verify the current contact and direct route before sending', async () => {
   const contact = contactInfo()
   contact[33] = 2
