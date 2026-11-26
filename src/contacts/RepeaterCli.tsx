@@ -17,6 +17,7 @@ type Props = {
   ready: boolean
   busy: boolean
   onPending: (pending: boolean) => void
+  onReboot: (notice: string) => void
 }
 
 type HistoryEntry = {
@@ -29,7 +30,7 @@ type HistoryEntry = {
   unconfirmed: boolean
 }
 
-export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending }: Props) {
+export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onReboot }: Props) {
   const ownerInfoId = useId()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState('')
@@ -73,7 +74,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
 
   async function send(command: string, description: string, confirmed: boolean, warning = '') {
     if (!ready || busy || pending || syncStatus.syncing) return
-    if (confirmed && !window.confirm(`${description} on ${name}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
+    const target = command === 'reboot' ? `${name} (${contactKey.slice(0, 12)})` : name
+    if (confirmed && !window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
     if (term && !`${command} ${description}`.toLowerCase().includes(term)) setQuery('')
     const controller = new AbortController()
     request.current = controller
@@ -82,6 +84,10 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     setError('')
     try {
       const result = await session.sendRepeaterCommand(radioKey, contactKey, route, command, confirmed, controller.signal)
+      if (command === 'reboot') {
+        onReboot(`Reboot accepted by the radio (${result.route}), but execution is unverified. No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.`)
+        return
+      }
       const sentAt = Date.now()
       setNow(sentAt)
       setHistory((current) => [...current.slice(-99), {
@@ -89,6 +95,15 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         reply: null, unconfirmed: false,
       }])
     } catch (reason) {
+      if (command === 'reboot' && reason instanceof UncertainRepeaterCliError) {
+        onReboot('The radio may have sent the reboot but did not confirm it. No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.')
+        return
+      }
+      if (command === 'reboot') {
+        const detail = reason instanceof Error ? reason.message : 'The repeater command failed.'
+        onReboot(`Reboot was not confirmed: ${detail} If sent, it may still arrive without a reply. Log in again when the repeater is available.`)
+        return
+      }
       if (reason instanceof UncertainRepeaterCliError) {
         const sentAt = Date.now()
         setNow(sentAt)

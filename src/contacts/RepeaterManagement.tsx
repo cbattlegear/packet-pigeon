@@ -22,6 +22,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
   const [pending, setPending] = useState(false)
   const [cliPending, setCliPending] = useState(false)
   const [error, setError] = useState('')
+  const [rebootNotice, setRebootNotice] = useState('')
   const password = useRef<HTMLInputElement>(null)
   const request = useRef<AbortController | null>(null)
   const details = contact.details!
@@ -37,7 +38,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     request.current = controller
     setPending(true)
     setError('')
-    if (operation === 'login') { setLogin(null); setStatus(null) }
+    if (operation === 'login') { setLogin(null); setStatus(null); setRebootNotice('') }
     try {
       const result = await session.manageRepeater(radioKey, contact.publicKey,
         { pathLength: details.pathLength, pathHex: details.pathHex }, operation, secret, controller.signal)
@@ -77,7 +78,9 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     {login?.role === 'admin' && <RepeaterCli session={session} messageSync={messageSync}
       radioKey={radioKey} contactKey={contact.publicKey} name={contact.displayName}
       route={{ pathLength: details.pathLength, pathHex: details.pathHex }}
-      ready={ready} busy={busy || pending} onPending={setCliPending} />}
+      ready={ready} busy={busy || pending} onPending={setCliPending}
+      onReboot={(notice) => { setLogin(null); setStatus(null); setRebootNotice(notice) }} />}
+    {rebootNotice && <p role="status">{rebootNotice}</p>}
     {pending && <p role="status">Waiting for the repeater…
       <button type="button" onClick={() => request.current?.abort(new Error('Stopped waiting. A sent request cannot be recalled.'))}>Stop waiting</button>
     </p>}

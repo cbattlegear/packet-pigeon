@@ -38,7 +38,7 @@ import type { RemoteNodeAdmin } from './remote-nodes.ts'
 import { decodeSensorSummary } from './cayenne-lpp.ts'
 import { repeaterRequest, UncertainRepeaterRequestError } from './repeater-management.ts'
 import type { RepeaterLogin, RepeaterStatus } from './repeater-management.ts'
-import { allocateRepeaterCliTag, repeaterCliCommand, sendRepeaterCli } from './repeater-cli.ts'
+import { allocateRepeaterCliTag, repeaterCliCommand, sendRepeaterCli, UncertainRepeaterCliError } from './repeater-cli.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { IdentityRecoveryPreparation } from './identity-backup.ts'
 
@@ -658,7 +658,16 @@ export class CompanionSession {
         const tags = this.repeaterCliTags.get(tagKey) ?? new Set<string>()
         this.repeaterCliTags.set(tagKey, tags)
         const tag = allocateRepeaterCliTag(tags)
-        return await sendRepeaterCli(link, key, action.command, tag)
+        try {
+          const receipt = await sendRepeaterCli(link, key, action.command, tag)
+          if (action.command === 'reboot' && this.repeaterLogin === login) this.repeaterLogin = undefined
+          return receipt
+        } catch (error) {
+          if (action.command === 'reboot' && error instanceof UncertainRepeaterCliError && this.repeaterLogin === login) {
+            this.repeaterLogin = undefined
+          }
+          throw error
+        }
       } finally {
         stop()
       }
