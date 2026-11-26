@@ -61,6 +61,19 @@ const interferenceWarning = 'Changing this can affect collisions, transmission d
   'Changes reach the radio check periodically, not necessarily immediately. After about four seconds of busy detection, v1.14.1 may transmit anyway. Radio and firmware support varies. ' +
   'Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove detection worked or the preference was saved.'
 
+function powerDiagnosticHelp(command: string): string | undefined {
+  switch (command) {
+    case 'get pwrmgt.support':
+      return 'In v1.14.1, supported indicates a firmware build flag, not proof that every power-management feature is configured.'
+    case 'get pwrmgt.source':
+      return 'In v1.14.1, the reported source reflects USB VBUS detection, not charging state.'
+    case 'get pwrmgt.bootreason':
+      return 'Reset and shutdown reasons may be incomplete; unknown does not necessarily mean a failure.'
+    case 'get pwrmgt.bootmv':
+      return 'This is a boot-time reading, not the current battery voltage. In v1.14.1, zero can mean no reading was recorded.'
+  }
+}
+
 const managementForms = {
   regions: { title: 'Inspect repeater regions', terms: 'region get region home region put region remove region allowf region denyf region save region list region default' },
   removeNeighbor: { title: 'Remove a cached neighbor', terms: 'neighbor.remove neighbors' },
@@ -562,6 +575,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'get public.key' && <p>Compare the reported key with the saved contact; a match alone does not prove identity.
       Replies may be delayed or misattributed and firmware support varies.</p>}
     {selected === 'get role' && <p>This reads the node's firmware role, not the current user's access level. Firmware support varies.</p>}
+    {powerDiagnosticHelp(selected) && <p>{powerDiagnosticHelp(selected)} Firmware and hardware support vary; replies may be delayed.</p>}
     {selected === 'sensor get gps' && <p>This reads the reported GPS activity setting, not a fix or hardware power state.
       In v1.14.1, 1 means active and 0 inactive; null means the setting was not found. Other firmware may differ and replies may be stale.</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
@@ -1109,6 +1123,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             </p>}
           {item.command === 'get role' && item.reply !== null &&
             <p className="contact-status">This is the reported firmware role, not your access level. Firmware support varies.</p>}
+          {powerDiagnosticHelp(item.command) && item.reply !== null &&
+            <p className="contact-status">{powerDiagnosticHelp(item.command)} Firmware and hardware support vary; replies may be delayed.</p>}
           {item.command === 'sensor get gps' && item.reply !== null &&
             <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.
               In v1.14.1, 1 means active and 0 inactive. A null or unsupported reply does not establish hardware support. Firmware and hardware support vary.</p>}

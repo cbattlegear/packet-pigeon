@@ -39,6 +39,18 @@ test('identity queries accept only exact commands and compare complete public-ke
   }
 })
 
+test('power diagnostic queries accept only exact read-only commands', () => {
+  for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.command, command)
+    assert.equal('confirm' in action, false)
+    for (const invalid of [`${command} `, `${command} extra`, `${command}\nreboot`]) {
+      assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
+    }
+  }
+  assert.throws(() => repeaterCliCommand('set pwrmgt.source battery'), /supported repeater CLI command/)
+})
+
 test('neighbor replies parse exact firmware records and reject malformed or unsafe values', () => {
   assert.deepEqual(parseRepeaterNeighbors('1234ABCD:42:-20\r\n89abcdef:300:12'), [
     { keyPrefix: '1234abcd', secondsAgo: 42, snrQuarterDb: -20 },

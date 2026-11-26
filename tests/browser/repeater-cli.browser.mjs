@@ -1936,6 +1936,29 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await sync.click()
   await missingGps.getByText('null', { exact: true }).waitFor()
   await missingGps.getByText(/null or unsupported reply does not establish hardware support/).waitFor()
+  for (const [command, description, reply, help] of [
+    ['get pwrmgt.support', 'Read power-management support', '> supported', 'firmware build flag'],
+    ['get pwrmgt.source', 'Read reported power source', '> external', 'USB VBUS detection, not charging state'],
+    ['get pwrmgt.bootreason', 'Read boot reset and shutdown reasons', 'ERROR: Power management not supported', 'unknown does not necessarily mean a failure'],
+    ['get pwrmgt.bootmv', 'Read voltage recorded at boot', '> 0 mV', 'boot-time reading, not the current battery voltage'],
+  ]) {
+    await search.fill(command)
+    const beforePowerQuery = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+    const beforePowerSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+    await page.getByRole('button', { name: `${command} — ${description}`, exact: true }).click()
+    await page.getByText(help, { exact: false }).first().waitFor()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforePowerQuery)
+    await page.getByRole('button', { name: `Send ${command}`, exact: true }).click()
+    const powerHistory = page.locator('.repeater-cli-history li').first()
+    await powerHistory.getByText(/Accepted by radio/).waitFor()
+    assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+      window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), command)
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforePowerSync)
+    await page.evaluate((text) => window.queueRepeaterReply(text), reply)
+    await sync.click()
+    await powerHistory.getByText(reply, { exact: true }).waitFor()
+    await powerHistory.getByText(help, { exact: false }).waitFor()
+  }
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
 })

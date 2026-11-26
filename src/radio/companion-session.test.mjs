@@ -731,6 +731,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('get public.key'), /administrator/)
   await assert.rejects(send('get role'), /administrator/)
+  for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
+    await assert.rejects(send(command), /administrator/)
+  }
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
@@ -792,6 +795,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('get public.key'), /administrator/)
   await assert.rejects(send('get role'), /administrator/)
+  for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
+    await assert.rejects(send(command), /administrator/)
+  }
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
