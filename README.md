@@ -722,6 +722,14 @@ prove a fix, hardware state, or persistence. In v1.14.1, `1` means active and
 `0` inactive; `null` means the setting was not found.
 The `gps` status command is not offered: repeater v1.14.1 may crash when a GPS
 receiver is not detected.
+Administrators can explicitly query power-management support, reported power
+source, boot reset and shutdown reasons, and boot voltage. In v1.14.1, support
+reflects a firmware build flag rather than proof of board functionality; source
+reflects USB VBUS detection, not charging state. Boot voltage is not current
+battery voltage, and zero can mean no reading was recorded. Reasons may be
+incomplete; `unknown` does not necessarily indicate a failure. Hardware and
+firmware support vary, unsupported commands can return errors, and replies may
+be delayed.
 Administrators can also read and change the repeater power-saving preference.
 Depending on the board and firmware, enabling it may allow sleep when idle and
 affect responsiveness; disabling it may increase power consumption. An `on`
