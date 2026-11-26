@@ -581,6 +581,19 @@ preferences, not active settings or proof of persistence; frequency uses
 floating-point precision and bandwidth is rounded to three decimals. A read-back
 can require more precision than this control accepts. A delayed change may
 arrive after a later read or change.
+**Set temporary radio override** sends a separate, confirmed `tempradio`
+request with all four radio values and a duration of 1–35791 whole minutes.
+The cap avoids signed timer overflow in v1.14.1, not every timer failure.
+That firmware schedules the switch about two seconds after receiving the
+command, potentially before its reply is transmitted, and a new override
+replaces the old one without saving preferences. Expiry attempts to apply the then-current preferences,
+which may differ from the previously active settings. A reboot, other changes,
+or a failed radio operation can affect the outcome; a timer may also be skipped
+if its target wraps to zero. Automatic
+recovery is not guaranteed. Check hardware, local regulations, channel plan
+and recovery access before sending. A reply does not prove application or
+restoration; `get radio` reports preferences, not active settings. A delayed
+command may still arrive later. Firmware support varies.
 Search also finds supported management forms by name or command and can open
 them without sending anything; the forms retain their separate confirmations.
 The confirmed `discover.neighbors` action asks the repeater to broadcast a

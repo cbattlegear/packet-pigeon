@@ -383,6 +383,23 @@ test('radio preference changes require confirmation and strict bounded parameter
   }
 })
 
+test('temporary radio overrides validate all parameters and avoid signed timer overflow', () => {
+  for (const value of ['400,7.8,5,5,1', '2500,500,12,8,35791', '910.525,62.5,7,5,15']) {
+    const action = repeaterCliCommand(`tempradio ${value}`)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /automatic recovery is not guaranteed/)
+    assert.match(action.warning, /then-current preferences/)
+    assert.match(action.warning, /timer may be skipped if its target wraps to zero/)
+  }
+  for (const value of ['399,7.8,5,5,1', '400,7.799,5,5,1', '400,7.8,13,5,1',
+    '400,7.8,5,9,1', '400,7.8,5,5,5,1', '400,7.8,5,5']) {
+    assert.throws(() => repeaterCliCommand(`tempradio ${value}`), /Enter frequency/)
+  }
+  for (const duration of ['0', '01', '-1', '1.0', '1e2', '35792', '1 ', '1\n', '1\nreboot', '999999999999999999']) {
+    assert.throws(() => repeaterCliCommand(`tempradio 400,7.8,5,5,${duration}`), /override duration/)
+  }
+})
+
 test('AGC reset intervals are bounded to exact four-second steps and require confirmation', () => {
   assert.equal(repeaterCliCommand('get agc.reset.interval').command, 'get agc.reset.interval')
   for (const value of ['0', '4', '16', '1020']) {

@@ -16,6 +16,8 @@ export const repeaterRadioSettingsSafety = 'Changing radio parameters can discon
 export const repeaterRadioSettingsCaveats = 'In repeater v1.14.1 these preferences normally apply at reboot, but can apply sooner when an existing temporary radio override expires. A reboot or override may be initiated elsewhere. The reply does not prove persistence or successful application. Read-back reports preferences, not active radio settings; frequency uses floating-point precision and bandwidth is rounded to three decimals. Read-back can require more precision than this control accepts. A delayed change may arrive after a later read or change. Reboot is a separate action and is not sent automatically.'
 export const repeaterRadioSettingsWarning = `${repeaterRadioSettingsSafety} ${repeaterRadioSettingsCaveats}`
 
+export const repeaterTempRadioWarning = 'This can quickly disrupt mesh routes and remote access. Check the board, local regulations, channel plan and recovery method first; accepted ranges do not guarantee hardware support or legality. In repeater v1.14.1 the override is scheduled about 2 seconds after receipt and replaces an existing override without saving preferences. The reply may not transmit before the switch. On expiry the firmware attempts to apply its then-current preferences, not necessarily the previous active settings. A timer may be skipped if its target wraps to zero. Changes by another administrator, a reboot or a failed radio operation can also affect the outcome; automatic recovery is not guaranteed. A reply does not prove application or restoration. Delayed commands may still arrive later; get radio reports preferences, not active settings.'
+
 export const repeaterClockWarning = 'Verify this UTC time against a trusted clock. Repeater v1.14.1 only moves its clock forward; a clock set too far ahead may disrupt later commands and cannot be corrected backwards with this action. The specified time is fixed and can be behind by the time the command arrives. GPS or another administrator may also change the clock. Firmware support varies. Sync the reply and read the clock separately; a delayed change may still arrive later.'
 
 export const repeaterCliCommands = [
@@ -332,6 +334,14 @@ function validatePosition(axis: 'lat' | 'lon', value: string) {
   }
 }
 
+function validateRadioParams(value: string) {
+  const match = /^((?:0|[1-9][0-9]*)(?:\.[0-9]{1,3})?),((?:0|[1-9][0-9]*)(?:\.[0-9]{1,3})?),([5-9]|1[0-2]),([5-8])$/.exec(value)
+  if (!match || match[0] !== value || Number(match[1]) < 400 || Number(match[1]) > 2500 ||
+    Number(match[2]) < 7.8 || Number(match[2]) > 500) {
+    throw new Error('Enter frequency 400–2500 MHz and bandwidth 7.8–500 kHz with up to 3 decimals, spreading factor 5–12, and coding rate 5–8.')
+  }
+}
+
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
@@ -381,13 +391,20 @@ export function repeaterCliCommand(command: string) {
   }
   const radioPrefix = 'set radio '
   if (command.startsWith(radioPrefix)) {
-    const value = command.slice(radioPrefix.length)
-    const match = /^((?:0|[1-9][0-9]*)(?:\.[0-9]{1,3})?),((?:0|[1-9][0-9]*)(?:\.[0-9]{1,3})?),([5-9]|1[0-2]),([5-8])$/.exec(value)
-    if (!match || match[0] !== value || Number(match[1]) < 400 || Number(match[1]) > 2500 ||
-      Number(match[2]) < 7.8 || Number(match[2]) > 500) {
-      throw new Error('Enter frequency 400–2500 MHz and bandwidth 7.8–500 kHz with up to 3 decimals, spreading factor 5–12, and coding rate 5–8.')
-    }
+    validateRadioParams(command.slice(radioPrefix.length))
     return { command, description: 'Set repeater radio preferences', confirm: true as const, warning: repeaterRadioSettingsWarning }
+  }
+  const tempRadioPrefix = 'tempradio '
+  if (command.startsWith(tempRadioPrefix)) {
+    const value = command.slice(tempRadioPrefix.length)
+    const separator = value.lastIndexOf(',')
+    validateRadioParams(value.slice(0, separator))
+    const duration = value.slice(separator + 1)
+    const durationMatch = /^[1-9][0-9]*$/.exec(duration)
+    if (!durationMatch || durationMatch[0] !== duration || Number(duration) > 35791) {
+      throw new Error('Enter a whole override duration from 1 to 35791 minutes.')
+    }
+    return { command, description: 'Set temporary radio override', confirm: true as const, warning: repeaterTempRadioWarning }
   }
   const adcMultiplierPrefix = 'set adc.multiplier '
   if (command.startsWith(adcMultiplierPrefix)) {
