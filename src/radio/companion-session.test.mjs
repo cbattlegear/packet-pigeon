@@ -793,6 +793,34 @@ test('a delayed channel rename cannot publish into a different radio session', a
   storage.close()
 })
 
+test('channel observation refuses duplicate slot keys before returning a transient key', async () => {
+  const slots = ['Public', 'Other'].map((name) => {
+    const slot = new Uint8Array(48)
+    slot.set(encode(name))
+    slot.fill(1, 32)
+    return slot
+  })
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo(2)); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 31: serial.emit(18, command[1], ...slots[command[1]]); break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  await assert.rejects(session.readChannelObservationKey('ab'.repeat(32), 0, 'Public'), /same key/)
+  slots[1].fill(2, 32)
+  const key = await session.readChannelObservationKey('ab'.repeat(32), 0, 'Public')
+  assert.deepEqual([...key], Array(16).fill(1))
+  key.fill(0)
+  await assert.rejects(session.readChannelObservationKey('ab'.repeat(32), 0, 'Wrong'), /channel changed/)
+  assert(port.commands.every(([command]) => [22, 1, 4, 31].includes(command)))
+  await session.disconnect()
+})
+
 test('channel sending rechecks the radio slot and treats OK as acceptance, not delivery', async () => {
   const slot = new Uint8Array(48)
   slot.set(encode('Public'))

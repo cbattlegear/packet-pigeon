@@ -714,6 +714,43 @@ export class CompanionSession {
       return secretHex(slot.secret)
     })
 
+  readonly readChannelObservationKey = async (radioKey: string, index: number, expectedName: string) => {
+    let extracted: Uint8Array | undefined
+    try {
+      return await this.runRadioCommand(radioKey, async (link) => {
+        const capacity = this.snapshot.device!.capabilities.maxChannels
+        if (!Number.isInteger(index) || index < 0 || index >= capacity) {
+          throw new Error('Invalid channel slot.')
+        }
+        const slot = await readChannelSlot(link, index)
+        if (!slot || !expectedName || slot.channel.name !== expectedName || slot.secret.every((byte) => byte === 0)) {
+          slot?.secret.fill(0)
+          throw new Error('The channel changed on the radio. Reconnect and check before observing.')
+        }
+        try {
+          for (let other = 0; other < capacity; other++) {
+            if (other === index) continue
+            const candidate = await readChannelSlot(link, other)
+            if (!candidate) continue
+            try {
+              if (candidate.secret.every((byte, position) => byte === slot.secret[position])) {
+                throw new Error('More than one radio channel has the same key. Resolve duplicate keys before observing.')
+              }
+            } finally { candidate.secret.fill(0) }
+          }
+          extracted = slot.secret
+          return extracted
+        } catch (error) {
+          slot.secret.fill(0)
+          throw error
+        }
+      })
+    } catch (error) {
+      extracted?.fill(0)
+      throw error
+    }
+  }
+
   readonly setSetupRadioSettings = (radioKey: string, settings: RadioParameters) =>
     this.runRadioCommand(radioKey, async (link) => {
       const device = this.snapshot.device!
