@@ -32,6 +32,7 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
     window.traces = []
     let controller
     const emit = (bytes) => controller.enqueue(Uint8Array.of(0x3e, bytes.length, 0, ...bytes))
+    window.emitTraceFixture = emit
     const port = Object.assign(new EventTarget(), {
       readable: new ReadableStream({ start(incoming) { controller = incoming } }),
       writable: new WritableStream({ write(packet) {
@@ -75,6 +76,18 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
   }
   assert.deepEqual(await page.evaluate(() => window.traces), [])
   await page.getByRole('button', { name: 'Review map trace' }).click()
+  await page.getByRole('button', { name: 'Start capture' }).click()
+  await page.evaluate(() => window.emitTraceFixture([0x88, 4, 200, 0x15, 0x42, 0xbc, 1, 0xbc, 2, 0x12, 0x34, 0x56, 0x78]))
+  await page.getByRole('button', { name: 'RX Channel text' }).click()
+  const path = page.getByRole('list', { name: 'Captured packet path hops' })
+  await path.getByText(/Ambiguous: Relay A, Unselected collision/).waitFor()
+  await page.getByRole('button', { name: 'Show path on map' }).click()
+  const mapped = page.getByRole('region', { name: 'Displayed route' })
+  await mapped.getByText('bc01 · Position unavailable', { exact: true }).waitFor()
+  await mapped.getByText('Relay B', { exact: true }).waitFor()
+  assert.equal(await mapped.getByText('Relay A', { exact: true }).count(), 0)
+  assert.equal(await page.locator('.leaflet-overlay-pane path[stroke="#6047a6"][stroke-width="4"]').count(), 0)
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Diagnostics' }).click()
   const width = page.getByRole('combobox', { name: 'Trace hash width' })
   const send = page.getByRole('button', { name: 'Send trace' })
   const audible = page.getByRole('checkbox', { name: 'I can hear the final repeater directly' })

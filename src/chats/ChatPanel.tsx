@@ -38,6 +38,7 @@ type Props = {
   readChannelKey?: (radioKey: RadioKey, channel: StoredChannel) => Promise<string>
   observationSource?: ChannelObservationSource
   pathNodes?: readonly PathNode[]
+  mapPathNodes?: readonly PathNode[]
   onPathMap?: (path: MapPath) => void
   mapPosition?: Coordinates | null
 }
@@ -64,7 +65,7 @@ function errorText(error: unknown) {
 }
 
 export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving,
-  active, preferences, locale, readChannelKey, observationSource, mapPosition, pathNodes, onPathMap }: Props) {
+  active, preferences, locale, readChannelKey, observationSource, mapPosition, pathNodes, mapPathNodes = [], onPathMap }: Props) {
   const live = (snapshot.phase === 'ready' || snapshot.phase === 'syncing') && snapshot.device
     ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
   const last = snapshot.device ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
@@ -169,9 +170,10 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
             readChannelKey: canSync && live && readChannelKey ? (channel) => readChannelKey(live, channel) : undefined,
             observationSource, canObserve: Boolean(live && canSync && snapshot.transport === 'usb'), regionNames,
-            pathNodes: live && live === radioKey && pathNodes ? pathNodes : data.contacts.map(({ publicKey, name, details }) => ({
-              publicKey, name, position: contactPosition(details),
-            })), onPathMap,
+            pathNodes: live && live === radioKey && pathNodes ? pathNodes : [
+              ...data.contacts.map(({ publicKey, name, details }) => ({ publicKey, name, position: contactPosition(details) })),
+              ...mapPathNodes,
+            ], onPathMap,
           }} />
       )}
     </div>

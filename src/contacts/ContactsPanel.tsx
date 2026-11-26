@@ -12,7 +12,7 @@ import type { ContactEntry, ContactSort } from './model.ts'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { ContactRadioActions } from './ContactRadioActions.tsx'
 import type { ContactRadioSession } from './ContactRadioActions.tsx'
-import type { MapPath } from '../paths/model.ts'
+import type { MapPath, PathNode } from '../paths/model.ts'
 import './contacts.css'
 
 type ContactsProps = {
@@ -25,6 +25,7 @@ type ContactsProps = {
   onImport?: () => void
   onShare?: (link: string) => void
   onPathMap?: (path: MapPath) => void
+  mapPathNodes?: readonly PathNode[]
 }
 
 type CacheView = { keys: RadioKey[]; key: RadioKey | null; data: RadioData | null; error: string | null }
@@ -62,7 +63,8 @@ function exportContacts(contacts: readonly ContactEntry[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
-export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare, onPathMap }: ContactsProps) {
+export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare,
+  onPathMap, mapPathNodes }: ContactsProps) {
   const live = snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [offlineChoice, setOfflineChoice] = useState<RadioKey | '' | null>(null)
@@ -142,6 +144,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
           onMap={onMap}
           onShare={onShare}
           onPathMap={onPathMap}
+          mapPathNodes={mapPathNodes}
         />
       ) : <p className="contact-note">{cache.keys.length
         ? 'Select a saved radio to browse its contacts.' : 'Connect a radio to sync its contacts.'}</p>}
@@ -161,9 +164,11 @@ type BrowserProps = {
   onMap: ContactsProps['onMap']
   onShare?: ContactsProps['onShare']
   onPathMap?: ContactsProps['onPathMap']
+  mapPathNodes?: ContactsProps['mapPathNodes']
 }
 
-function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, radioBusy, savePreference, onMap, onShare, onPathMap }: BrowserProps) {
+function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, radioBusy, savePreference, onMap, onShare,
+  onPathMap, mapPathNodes }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
   const [sort, setSort] = useState<ContactSort>('name')
@@ -320,7 +325,7 @@ function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, r
             onMap={onMap} onShare={onShare} copyKey={copyKey} edit={edit} remove={() => void remove([detail])}
             radioControls={detail.details && <ContactRadioActions key={detail.publicKey} session={session}
               contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} usb={usb}
-              firmware={firmware} busy={busy || radioBusy} onMap={onPathMap} />} />
+              firmware={firmware} busy={busy || radioBusy} onMap={onPathMap} mapPathNodes={mapPathNodes} />} />
         ) : <p className="contact-note">{visited.length ? 'Select a contact to see details.' : 'No contacts match.'}</p>}
       </div>
       {canWrite ? (

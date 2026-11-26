@@ -15,6 +15,7 @@ type Props = {
   prefs: AppPreferences
   locale: string
   pathNodes?: readonly PathNode[]
+  mapPathNodes?: readonly PathNode[]
   onMap?: (path: MapPath) => void
 }
 
@@ -24,7 +25,7 @@ function connectedRadio(snapshot: CompanionSnapshot) {
   return snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device?.publicKey ?? null : null
 }
 
-export function RxInspector({ snapshot, session, prefs, locale, pathNodes, onMap }: Props) {
+export function RxInspector({ snapshot, session, prefs, locale, pathNodes, mapPathNodes = [], onMap }: Props) {
   const currentKey = connectedRadio(snapshot)
   const [captureKey, setCaptureKey] = useState<string | null>(null)
   const [buffer, setBuffer] = useState<{ key: string; entries: CapturedPacket[] } | null>(null)
@@ -164,7 +165,7 @@ export function RxInspector({ snapshot, session, prefs, locale, pathNodes, onMap
     </fieldset>
     <p>{filtered.length} of {entries.length} packets</p>
     {detail && <PacketDetails entry={detail} observations={matchingChannelObservations(detail, entries)} key={detail.id} format={format}
-      nodes={buffer?.key === snapshot.device?.publicKey ? pathNodes ?? [] : []} onMap={onMap}
+      nodes={buffer?.key === snapshot.device?.publicKey ? pathNodes ?? mapPathNodes : mapPathNodes} onMap={onMap}
       close={() => setSelected(null)} copyRaw={(text) => void copy(text, true)} />}
     {filtered.length ? <div className="rx-table-wrap" role="region" aria-label="Received packet table" tabIndex={0}>
       <table>

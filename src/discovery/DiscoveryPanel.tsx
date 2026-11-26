@@ -9,7 +9,7 @@ import { discoveryPosition, exportDiscoveries, filterDiscoveries, importDiscover
 import type { DiscoveryEntry } from './model.ts'
 import type { useRadioDiscoveries } from './use-radio-discoveries.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
-import type { MapPath } from '../paths/model.ts'
+import type { MapPath, PathNode } from '../paths/model.ts'
 import { contactPosition } from '../contacts/model.ts'
 import '../contacts/contacts.css'
 
@@ -25,6 +25,7 @@ type DiscoveryProps = {
   session: CompanionSession
   openMap: () => void
   onPathMap?: (path: MapPath) => void
+  mapPathNodes?: readonly PathNode[]
 }
 
 function errorMessage(error: unknown) {
@@ -73,7 +74,7 @@ export function DiscoveryPanel(props: DiscoveryProps) {
 }
 
 function DiscoveryBrowser({
-  radioKey, view, entries, radioContacts, ready, usb, pending, session, onPathMap,
+  radioKey, view, entries, radioContacts, ready, usb, pending, session, onPathMap, mapPathNodes = [],
 }: DiscoveryProps & { radioKey: RadioKey }) {
   const [query, setQuery] = useState('')
   const [role, setRole] = useState(0)
@@ -257,7 +258,7 @@ function DiscoveryBrowser({
                 publicKey: entry.publicKey, name: entry.displayName, position: discoveryPosition(entry),
               })), ...(ready ? radioContacts : view.data?.contacts ?? []).map((entry) => ({
                 publicKey: entry.publicKey, name: entry.name, position: contactPosition(entry.details),
-              }))]} onMap={onPathMap} />}
+              })), ...mapPathNodes]} onMap={onPathMap} />}
             <div className="contact-actions">
               <button type="button" disabled={!ready || !usb || busy} onClick={() => void act(() => paths([detail]))}>Load advert path</button>
               <button type="button" disabled={!ready || busy || detail.alreadyAdded || !detail.role}
