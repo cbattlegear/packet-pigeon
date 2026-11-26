@@ -528,6 +528,14 @@ tree cannot prove a name is absent. Unprefixed names are limited to 29 UTF-8
 bytes; names beginning with `#` or `$` to 30. Sync the reply and read the
 region again; save the whole map separately to persist changes. Private `$`
 regions require keys, which this action does not configure.
+Administrators can also remove a named region with confirmation. Removal uses
+an exact name while ignoring a leading `#`, rejects the wildcard, and firmware
+refuses regions with children. It can disrupt routes and remote access and does
+not remove private keys. Before removing the home region, set another home
+region and verify the reply: removing it does not reset the home reference,
+and a later home query can misleadingly report `*`. Sync the reply and inspect
+the map again, noting that reads use prefix matching and trees can be
+truncated. The separate save persists the entire live map.
 Administrators can also change the home-region marker to a named region or the
 wildcard with confirmation. Firmware may resolve an incomplete prefix to a
 different region; compare the reply and read the home setting again. The change

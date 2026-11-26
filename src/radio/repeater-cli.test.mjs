@@ -3,7 +3,8 @@ import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
-  repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, parseRepeaterNeighbors,
+  repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand,
+  parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -243,6 +244,21 @@ test('region put validates names and always requires confirmation', () => {
     `#${'a'.repeat(30)}`, `$${'a'.repeat(30)}`, 'North\nregion save']) {
     assert.throws(() => repeaterRegionPutCommand(name), /region name|named region/)
     assert.throws(() => repeaterCliCommand(`region put ${name}`), /region name|named region/)
+  }
+})
+
+test('region removal accepts exact names and requires confirmation', () => {
+  for (const name of ['North', '#North', '$private', 'a'.repeat(30), '#'.concat('é'.repeat(14), 'a')]) {
+    const command = repeaterRegionRemoveCommand(name)
+    assert.equal(command.command, `region remove ${name}`)
+    assert.equal(repeaterCliCommand(command.command).confirm, true)
+    assert.match(command.warning, /does not reset the home reference/)
+    assert.match(command.warning, /home query may misleadingly report \*/)
+    assert.match(command.warning, /Private keys are not removed/)
+  }
+  for (const name of ['', '*', '#', 'bad/name', 'North South', 'a'.repeat(31), 'North\nregion save']) {
+    assert.throws(() => repeaterRegionRemoveCommand(name), /region name|named region/)
+    assert.throws(() => repeaterCliCommand(`region remove ${name}`), /region name|named region/)
   }
 })
 
