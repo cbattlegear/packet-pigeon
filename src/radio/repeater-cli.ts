@@ -8,6 +8,10 @@ const receiverGainWarning = 'Support depends on the repeater radio and firmware 
 const multiAckWarning = 'In repeater firmware v1.14.1, enabling this attempts to queue one extra multipart ACK when forwarding an eligible direct ACK, and can delay the normal ACK. It can use more airtime; other nodes may not support multipart ACKs, and delivery or improved reliability is not guaranteed. Already queued ACKs are unaffected. Firmware support varies. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove ACKs were sent or the preference was saved.'
 const gpsWarning = 'GPS support depends on the repeater firmware and hardware. Enabling GPS can expose sensor coordinates in location telemetry and later advertisements when the advert policy is share; it may also change the device clock and disrupt later commands. Disabling GPS does not erase previously stored coordinates or recall queued or sent locations, and some boards cannot power off the receiver. In v1.14.1, saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An ok reply does not prove a fix, hardware state, or persistence; request the GPS activity setting separately.'
 
+export const repeaterAdcMultiplierSafety = 'An incorrect multiplier can misreport battery voltage and affect battery-dependent behavior, including power management on some boards. Check board guidance and compare with an independently measured voltage. Zero requests the board default. Support varies by hardware and firmware.'
+export const repeaterAdcMultiplierCaveats = 'In v1.14.1, a supported query returns the board-reported multiplier to three decimals, not whether it is the default or an override. An unsupported change resets the in-memory preference to zero, which a later save may persist. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove accurate voltage or persistence. Sync replies and read the multiplier and battery status separately; a delayed change may still arrive later.'
+export const repeaterAdcMultiplierWarning = `${repeaterAdcMultiplierSafety} ${repeaterAdcMultiplierCaveats}`
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -26,6 +30,7 @@ export const repeaterCliCommands = [
   { command: 'get pwrmgt.source', description: 'Read reported power source' },
   { command: 'get pwrmgt.bootreason', description: 'Read boot reset and shutdown reasons' },
   { command: 'get pwrmgt.bootmv', description: 'Read voltage recorded at boot' },
+  { command: 'get adc.multiplier', description: 'Read battery ADC multiplier' },
   { command: 'powersaving', description: 'Read repeater power-saving preference' },
   { command: 'powersaving on', description: 'Enable repeater power-saving preference', confirm: true,
     warning: 'Depending on the board and firmware, the repeater may sleep when idle and be less responsive. An on reply reports the preference, not actual sleep. Verify the reply and preference.' },
@@ -346,6 +351,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole repeater transmit power from 1 to 22 dBm.')
     }
     return { command, description: 'Set repeater transmit power', confirm: true as const }
+  }
+  const adcMultiplierPrefix = 'set adc.multiplier '
+  if (command.startsWith(adcMultiplierPrefix)) {
+    const value = command.slice(adcMultiplierPrefix.length)
+    const match = /^(?:0|[1-9]|10)(?:\.[0-9]{1,3})?$/.exec(value)
+    if (!match || match[0] !== value || Number(value) > 10) {
+      throw new Error('Enter a battery ADC multiplier from 0 to 10 with up to 3 decimal places.')
+    }
+    return { command, description: 'Set battery ADC multiplier', confirm: true as const, warning: repeaterAdcMultiplierWarning }
   }
   const agcResetPrefix = 'set agc.reset.interval '
   if (command.startsWith(agcResetPrefix)) {

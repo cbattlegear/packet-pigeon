@@ -423,6 +423,25 @@ test('receive-delay base accepts bounded decimals and requires confirmation', ()
   }
 })
 
+test('battery ADC multiplier accepts bounded decimals and requires confirmation', () => {
+  const query = repeaterCliCommand('get adc.multiplier')
+  assert.equal(query.command, 'get adc.multiplier')
+  assert.equal('confirm' in query, false)
+  for (const value of ['0', '0.000', '0.001', '1', '3.125', '9.999', '10', '10.000']) {
+    const action = repeaterCliCommand(`set adc.multiplier ${value}`)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /incorrect multiplier can misreport battery voltage/)
+    assert.match(action.warning, /local advert interval below 60 minutes to zero/)
+    assert.match(action.warning, /does not prove accurate voltage or persistence/)
+  }
+  for (const value of ['', '-1', '10.001', '11', '00', '0.0001', '.5', '1e0', ' 1', '1 ', '1\n', '1\nreboot']) {
+    assert.throws(() => repeaterCliCommand(`set adc.multiplier ${value}`), /battery ADC multiplier/)
+  }
+  for (const command of ['get adc.multiplier ', 'get adc.multiplier extra', 'get adc.multiplier\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('transmit power uses the documented whole dBm range and requires confirmation', () => {
   assert.equal(repeaterCliCommand('get tx').command, 'get tx')
   for (const value of ['1', '9', '10', '21', '22']) {
