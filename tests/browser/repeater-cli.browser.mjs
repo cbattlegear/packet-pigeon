@@ -2043,7 +2043,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   }
   await search.fill('bridge')
   assert.equal(await page.getByRole('button', { name: /get bridge\.secret/ }).count(), 0)
-  assert.equal(await page.getByRole('button', { name: /set bridge\./ }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: /set bridge\.(delay|source|baud|channel|secret)/ }).count(), 0)
   for (const [command, description, reply, help] of [
     ['get bridge.type', 'Read compiled bridge type', '> none', 'compiled bridge type, not whether a bridge is enabled or working'],
     ['get bridge.enabled', 'Read bridge enabled preference', '??: bridge.enabled', 'not whether bridge hardware is connected or forwarding'],
@@ -2069,9 +2069,45 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     await bridgeHistory.getByText(reply, { exact: true }).waitFor()
     await bridgeHistory.getByText(help, { exact: false }).waitFor()
   }
+  await search.fill('set bridge.enabled')
+  const beforeBridgeForm = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  await page.getByRole('button', { name: 'Open form: Manage repeater bridge' }).click()
+  const bridgeSection = page.locator('[data-cli-section="bridge"]')
+  await bridgeSection.getByText(/expose mesh packets to an external interface/).waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeBridgeForm)
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   await page.setViewportSize({ width: 1280, height: 720 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  for (const [command, label, warning, reply] of [
+    ['set bridge.enabled on', 'Enable repeater bridge', /expose mesh packets/, 'OK'],
+    ['set bridge.enabled off', 'Disable repeater bridge', /interrupt routes/, '??: bridge.enabled off'],
+  ]) {
+    const button = bridgeSection.getByRole('button', { name: label, exact: true })
+    const before = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+    const beforeSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+    page.once('dialog', (dialog) => {
+      assert.match(dialog.message(), /Fixture repeater \(bcbcbcbcbcbc\)/)
+      assert.match(dialog.message(), warning)
+      void dialog.dismiss()
+    })
+    await button.click()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), before)
+    if (command.endsWith('off')) await page.evaluate(() => { window.fixtureUnconfirmed = true })
+    page.once('dialog', (dialog) => dialog.accept())
+    await button.click()
+    assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+      window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), command)
+    const history = page.locator('.repeater-cli-history li').filter({ hasText: command }).first()
+    await history.getByText(command.endsWith('off') ? /Send unconfirmed/ : /Accepted by radio/).waitFor()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), before + 1)
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeSync)
+    await page.evaluate((value) => window.queueRepeaterReply(value), reply)
+    await sync.click()
+    await history.getByText(reply, { exact: true }).waitFor()
+    await history.getByText(/does not prove the bridge is working, stopped, or saved/).waitFor()
+  }
+  await page.evaluate(() => { window.fixtureUnconfirmed = false })
   await search.fill('gps setloc')
   const beforeCopyPosition = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
   await page.getByRole('button', { name: 'Open form: Change stored position' }).click()

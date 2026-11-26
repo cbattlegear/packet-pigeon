@@ -598,8 +598,18 @@ compiled bridge type and enabled, delay, packet-source, RS-232 baud, or ESP-NOW
 channel preferences. In repeater v1.14.1, the type reflects the build, and the
 other queries depend on which bridge support was compiled in; unsupported or
 delayed replies are possible. Preferences do not prove a bridge or peer is
-working, or that packets are forwarded. Bridge changes and secret queries are
-not offered.
+working, or that packets are forwarded.
+**Manage repeater bridge** offers separately confirmed enable and disable
+commands. A bridge can expose mesh packets to an external interface and
+introduce packets from it into the mesh. Disabling it can interrupt routes and
+remote access; packets already queued can still be processed. Verify the
+interface, peer and local recovery method first. In repeater v1.14.1, the change
+attempts to start or stop the bridge immediately and save its preference.
+Saving also sets a local advert interval below 60 minutes to zero; an already
+scheduled advert may still be sent. An OK reply or preference read-back does
+not prove the bridge is working, stopped, or saved. Firmware and build support
+vary, and commands and replies may arrive late. Other bridge changes and secret
+queries are not offered.
 Administrators can explicitly read and confirm changes to repeater radio
 preferences (frequency, bandwidth, spreading factor and coding rate). Check
 the board, local regulations, channel plan and recovery method first: changing
