@@ -524,6 +524,14 @@ wildcard with confirmation. Firmware may resolve an incomplete prefix to a
 different region; compare the reply and read the home setting again. The change
 is active but not saved until the separate region-map save, which writes all
 current region settings.
+Administrators can also allow or deny flood forwarding for a named region with
+confirmation. Read the region and compare its returned name before and after:
+firmware may match a different entry, including names differing only by a leading
+`#`, and its `OK` reply does not identify the changed entry. The command changes
+one entry, not its children. Read-back uses the same matching and cannot
+eliminate ambiguity. Denying can disrupt routes and remote access;
+allowing does not override other rules or guarantee forwarding. Changes are
+active but require the separate whole-map save to persist.
 Administrators can also confirm a flood or zero-hop advertisement, or change
 advertisement intervals, owner information, repeater name, stored position,
 packet forwarding, and flood hop limits with confirmation.

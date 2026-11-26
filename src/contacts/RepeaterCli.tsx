@@ -4,7 +4,7 @@ import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
-  repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, UncertainRepeaterCliError,
+  repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 import { mapPosition } from '../map/nodes.ts'
@@ -243,6 +243,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function changeRegionFlood(allow: boolean) {
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      if (regionName === '*') throw new Error('Use the wildcard flood controls below for *.')
+      const command = repeaterRegionFloodCommand(regionName, allow)
+      void send(command.command, command.description, command.confirm, command.warning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid region name.')
+    }
+  }
+
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -311,7 +322,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     </div>
     <details>
       <summary>Inspect repeater regions</summary>
-      <p>The read controls do not change regions; setting the home region below changes the active map. The tree reply
+      <p>The read controls do not change regions. Changes below affect the active map. The tree reply
         may be truncated without an indication, so it is not a
         complete inventory. In the tree, <code>F</code> marks flood permission, <code>^</code> marks the home region,
         and <code>*</code> is the wildcard for unscoped floods. Other routing rules can still block forwarding.</p>
@@ -333,6 +344,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Read region</button>
       </form>
+      <p>To change a named region's flood permission, read it first and compare the returned name. Firmware prefers
+        exact names but may match a different region, including when names differ only by a leading <code>#</code>.
+        The change reply does not identify the affected entry. Read and compare it again afterward, but read-back uses
+        the same matching and cannot eliminate ambiguity. The change applies
+        to one entry, not its children, and is not saved until the separate region-map save. Denying can disrupt routes
+        and remote access; allowing does not override other rules or guarantee forwarding.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => changeRegionFlood(true)}>Allow flood forwarding for named region</button>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => changeRegionFlood(false)}>Deny flood forwarding for named region</button>
+      </div>
       <p>The home region is the entry marked <code>^</code> in the tree. Firmware prefers an exact name, but a prefix can select a different region;
         compare the reply and read the home setting again. Setting <code>*</code> marks the wildcard as home. Changes are active but not saved
         until you separately save the entire region map.</p>

@@ -135,6 +135,16 @@ export function repeaterHomeRegionCommand(value: string) {
   }
 }
 
+export function repeaterRegionFloodCommand(value: string, allow: boolean) {
+  validateRegionName(value)
+  return {
+    command: `region ${allow ? 'allowf' : 'denyf'} ${value}`,
+    description: `${allow ? 'Allow' : 'Deny'} flood forwarding for region ${value}`,
+    confirm: true as const,
+    warning: 'Firmware may match a different region, and its OK reply does not identify the changed entry. Read and compare the region before and after changing it; read-back uses the same matching and cannot eliminate ambiguity. Denying can disrupt routes and remote access; allowing does not override other rules. This change is not saved until the separate region-map save.',
+  }
+}
+
 function validatePosition(axis: 'lat' | 'lon', value: string) {
   const maximum = axis === 'lat' ? 90 : 180
   const coordinate = Number(value)
@@ -152,6 +162,8 @@ export function repeaterCliCommand(command: string) {
   if (command.startsWith(homeRegionPrefix)) return repeaterHomeRegionCommand(command.slice(homeRegionPrefix.length))
   const regionPrefix = 'region get '
   if (command.startsWith(regionPrefix)) return repeaterRegionQuery(command.slice(regionPrefix.length))
+  const regionFlood = /^region (allowf|denyf) ([\s\S]*)$/.exec(command)
+  if (regionFlood) return repeaterRegionFloodCommand(regionFlood[2], regionFlood[1] === 'allowf')
   const namePrefix = 'set name '
   if (command.startsWith(namePrefix)) {
     const value = command.slice(namePrefix.length)
