@@ -137,10 +137,36 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByText(/Companion firmware v1.11 and earlier may cause CLI commands to be ignored/).waitFor()
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
-  const search = page.getByLabel('Search CLI commands and history')
+  const search = page.getByLabel('Search CLI commands, forms, and history')
   await search.focus()
   await page.keyboard.press('Tab')
   assert.equal(await page.getByRole('button', { name: /ver.*Read the firmware version/ }).evaluate((element) => element === document.activeElement), true)
+  const beforeSearchNavigation = await page.evaluate(() => window.fixtureCommands.length)
+  await search.fill('SETPERM')
+  const forms = page.getByRole('list', { name: 'Matching management forms' })
+  assert.equal(await forms.getByRole('button').count(), 3)
+  const roleForm = forms.getByRole('button', { name: 'Open form: Set non-admin repeater client role' })
+  await roleForm.focus()
+  await page.keyboard.press('Enter')
+  const roleSummary = page.getByText('Set non-admin repeater client role', { exact: true })
+  assert.equal(await roleSummary.evaluate((element) => element === document.activeElement && element.parentElement.open), true)
+  await roleSummary.click()
+  for (const [query, title] of [
+    ['region remove', 'Inspect repeater regions'],
+    ['set flood.max.unscoped', 'Change flood hop limits'],
+    ['set direct.txdelay', 'Change retransmission delays'],
+    ['set flood.advert.interval', 'Change advertisement interval'],
+    ['set lon', 'Change stored position'],
+    ['guest.password', 'Change guest login password'],
+  ]) {
+    await search.fill(query)
+    await forms.getByRole('button', { name: `Open form: ${title}`, exact: true }).click()
+    const summary = page.getByText(title, { exact: true })
+    assert.equal(await summary.evaluate((element) => element === document.activeElement && element.parentElement.open), true)
+    await summary.click()
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  assert.equal(await page.evaluate(() => window.fixtureCommands.length), beforeSearchNavigation)
   await page.setViewportSize({ width: 1280, height: 720 })
   await search.fill('name')
   await page.getByRole('button', { name: /get name.*Read the advertised name/ }).click()
@@ -157,7 +183,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByText('> Relay working', { exact: true }).waitFor()
   await search.fill('Relay working')
   assert.equal(await page.getByText('> Relay working', { exact: true }).count(), 1)
-  await page.getByText('No commands match.').waitFor()
+  await page.getByText('No command choices match.').waitFor()
   const saved = await page.evaluate(async () => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()
@@ -1149,7 +1175,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   assert.equal(await page.getByText('Guest read-only room access', { exact: true }).count(), 0)
   await search.fill('allow.read.only')
-  await page.getByText('No commands match.').waitFor()
+  await page.getByText('No command choices match.').waitFor()
   await search.fill('name')
   const beforeNameSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
   await page.getByRole('button', { name: 'Read repeater name', exact: true }).click()
@@ -1634,7 +1660,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await page.getByText(/Login reported admin access/).waitFor()
   await page.getByText('Administrator CLI', { exact: true }).click()
-  await page.getByLabel('Search CLI commands and history').fill('reboot')
+  await page.getByLabel('Search CLI commands, forms, and history').fill('reboot')
   await page.getByRole('button', { name: /reboot.*Reboot the repeater/ }).click()
   await page.evaluate(() => { window.fixtureRejected = false })
   await page.evaluate(() => { window.fixtureUnconfirmed = true })
@@ -1648,7 +1674,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await page.getByText(/Login reported admin access/).waitFor()
   await page.getByText('Administrator CLI', { exact: true }).click()
-  await page.getByLabel('Search CLI commands and history').fill('reboot')
+  await page.getByLabel('Search CLI commands, forms, and history').fill('reboot')
   await page.getByRole('button', { name: /reboot.*Reboot the repeater/ }).click()
   await page.evaluate(() => { window.fixtureUnconfirmed = false })
   page.once('dialog', (dialog) => dialog.accept())

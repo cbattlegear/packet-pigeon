@@ -60,6 +60,30 @@ const interferenceWarning = 'Changing this can affect collisions, transmission d
   'Changes reach the radio check periodically, not necessarily immediately. After about four seconds of busy detection, v1.14.1 may transmit anyway. Radio and firmware support varies. ' +
   'Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove detection worked or the preference was saved.'
 
+const managementForms = {
+  regions: { title: 'Inspect repeater regions', terms: 'region get region home region put region remove region allowf region denyf region save region list region default' },
+  floodLimit: { title: 'Change flood hop limits', terms: 'set flood.max set flood.max.unscoped set flood.max.advert get flood.max get flood.max.unscoped get flood.max.advert' },
+  loopDetection: { title: 'Change flood loop detection', terms: 'set loop.detect get loop.detect' },
+  pathHash: { title: 'Change advert path hash size', terms: 'set path.hash.mode get path.hash.mode' },
+  airtime: { title: 'Change airtime factor', terms: 'set af get af' },
+  retransmission: { title: 'Change retransmission delays', terms: 'set txdelay set direct.txdelay get txdelay get direct.txdelay' },
+  receiveDelay: { title: 'Change receive-delay base', terms: 'set rxdelay get rxdelay' },
+  transmitPower: { title: 'Change repeater transmit power', terms: 'set tx get tx' },
+  receiverGain: { title: 'Change receiver boosted-gain preference', terms: 'set radio.rxgain get radio.rxgain' },
+  agc: { title: 'Change AGC reset interval', terms: 'set agc.reset.interval get agc.reset.interval' },
+  interference: { title: 'Change interference threshold', terms: 'set int.thresh get int.thresh' },
+  multiAck: { title: 'Change extra direct ACK preference', terms: 'set multi.acks get multi.acks' },
+  powerSaving: { title: 'Change repeater power-saving preference', terms: 'powersaving' },
+  advertInterval: { title: 'Change advertisement interval', terms: 'set advert.interval set flood.advert.interval' },
+  removeAccess: { title: 'Remove repeater access-list entry', terms: 'setperm acl permissions' },
+  limitedAccess: { title: 'Set non-admin repeater client role', terms: 'setperm acl permissions read-only read-write' },
+  adminAccess: { title: 'Grant repeater administrator access', terms: 'setperm acl permissions' },
+  guestPassword: { title: 'Change guest login password', terms: 'set guest.password' },
+  name: { title: 'Change repeater name', terms: 'set name get name' },
+  owner: { title: 'Change owner information', terms: 'set owner.info' },
+  position: { title: 'Change stored position', terms: 'set lat set lon gps advert location' },
+} as const
+
 export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
   const ownerInfoId = useId()
@@ -102,9 +126,12 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [syncRequested, setSyncRequested] = useState(false)
   const [error, setError] = useState('')
   const request = useRef<AbortController | null>(null)
+  const panel = useRef<HTMLDetailsElement | null>(null)
   const syncStatus = useSyncExternalStore(messageSync.subscribe, messageSync.getSnapshot)
   const term = query.trim().toLowerCase()
   const choices = repeaterCliCommands.filter((item) => `${item.command} ${item.description}`.toLowerCase().includes(term))
+  const matchingForms = term ? Object.entries(managementForms).filter(([, form]) =>
+    `${form.title} ${form.terms}`.toLowerCase().includes(term)) : []
   const matchingHistory = history.filter((item) =>
     `${item.command} ${item.description} ${item.reply?.text ?? ''}`.toLowerCase().includes(term))
   const action = repeaterCliCommands.find((item) => item.command === selected)
@@ -484,22 +511,35 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     sendChoice(command)
   }
 
-  return <details>
+  return <details ref={panel}>
     <summary>Administrator CLI</summary>
     <p>Choose a supported query or confirmed management action. Commands are never retried automatically.
       Replies are saved with other messages when you sync; history here lasts while this repeater stays selected.</p>
     <p>Companion firmware v1.11 and earlier may cause CLI commands to be ignored. Upgrade the companion firmware if commands do not receive replies.</p>
     <p>Reply tags help match responses, but a delayed reply from an earlier browser session can still be mistaken for a new one.</p>
-    <label>Search CLI commands and history
+    <label>Search CLI commands, forms, and history
       <input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
     </label>
-    <ul className="repeater-cli-choices" aria-label="Available CLI commands">
+    {choices.length > 0 ? <ul className="repeater-cli-choices" aria-label="Available CLI commands">
       {choices.map((item) => <li key={item.command}>
         <button type="button" aria-pressed={selected === item.command} disabled={!ready || busy || pending}
           onClick={() => setSelected(item.command)}><code>{item.command}</code> — {item.description}</button>
       </li>)}
-    </ul>
-    {!choices.length && <p>No commands match.</p>}
+    </ul> : <p>No command choices match.</p>}
+    {matchingForms.length > 0 && <>
+      <p>Matching management forms</p>
+      <ul className="repeater-cli-choices" aria-label="Matching management forms">
+        {matchingForms.map(([id, form]) => <li key={id}>
+          <button type="button" onClick={() => {
+            const section = panel.current?.querySelector<HTMLDetailsElement>(`details[data-cli-section="${id}"]`)
+            if (section) {
+              section.open = true
+              section.querySelector('summary')?.focus()
+            }
+          }}>Open form: {form.title}</button>
+        </li>)}
+      </ul>
+    </>}
     {selected === 'neighbors' && <p>Each reply line is a four-byte key prefix, seconds since heard, and SNR multiplied by 4, separated by colons.
       The list is limited by the repeater. Only unique matches with saved coordinates can be mapped; separate dots do not imply a route.</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
@@ -515,8 +555,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }}>Sync messages for replies</button>
       <button type="button" disabled={!history.length || pending} onClick={() => setHistory([])}>Clear CLI history</button>
     </div>
-    <details>
-      <summary>Inspect repeater regions</summary>
+    <details data-cli-section="regions">
+      <summary>{managementForms.regions.title}</summary>
       <p>The read controls do not change regions. Changes below affect the active map. The tree reply
         may be truncated without an indication, so it is not a
         complete inventory. In the tree, <code>F</code> marks flood permission, <code>^</code> marks the home region,
@@ -598,8 +638,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           disabled={!ready || busy || pending || syncStatus.syncing} onClick={() => sendChoice(item)}>{item.description}</button>)}
       </div>
     </details>
-    <details>
-      <summary>Change flood hop limits</summary>
+    <details data-cli-section="floodLimit">
+      <summary>{managementForms.floodLimit.title}</summary>
       <p>These limits apply to forwarded flood packets, not direct packets. The overall limit applies to all floods;
         the unscoped and advertisement limits also apply to their matching packets. The lowest applicable limit wins.
         Zero stops forwarding matching floods and can disrupt routes or remote access. Other routing and region
@@ -629,8 +669,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set flood hop limit</button>
       </form>
     </details>
-    <details>
-      <summary>Change flood loop detection</summary>
+    <details data-cli-section="loopDetection">
+      <summary>{managementForms.loopDetection.title}</summary>
       <p>Loop detection only checks forwarded flood packets for repeated occurrences of this repeater's ID/hash in
         their path. Thresholds for 1-, 2-, and 3-byte path hashes are: minimal (4/2/1), moderate (2/1/1), and strict
         (1/1/1). Off disables the check. More restrictive modes can drop flooded packets and reduce reachability.
@@ -651,8 +691,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set loop detection</button>
       </form>
     </details>
-    <details>
-      <summary>Change advert path hash size</summary>
+    <details data-cli-section="pathHash">
+      <summary>{managementForms.pathHash.title}</summary>
       <p>This controls the hash width used in this repeater's manual flood advertisements, not the hash widths of packets it
         forwards. On repeater v1.14.0, scheduled flood advertisements still use one-byte hashes; v1.14.1 and later also
         apply the setting to scheduled flood advertisements. Repeater firmware v1.14 and later can forward all supported hash widths. Repeater
@@ -674,8 +714,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set advert hash size</button>
       </form>
     </details>
-    <details>
-      <summary>Change airtime factor</summary>
+    <details data-cli-section="airtime">
+      <summary>{managementForms.airtime.title}</summary>
       <p>Lower factors permit more airtime and may violate local regulations; higher factors can delay traffic and
         remote access. Repeater firmware v1.14.1 uses an airtime budget that refills at approximately
         1 / (1 + factor) of elapsed time; it permits bursts, not a fixed pause after each transmission. Existing
@@ -694,8 +734,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set airtime factor</button>
       </form>
     </details>
-    <details>
-      <summary>Change retransmission delays</summary>
+    <details data-cli-section="retransmission">
+      <summary>{managementForms.retransmission.title}</summary>
       <p>These factors control randomized retransmission delays for flood and direct traffic separately. Lower values
         can increase collisions; higher values can increase latency. Zero removes this random delay, not other delays.
         Changing either can affect mesh routes and remote access. Read the selected factor before changing it, then
@@ -721,8 +761,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set retransmission delay</button>
       </form>
     </details>
-    <details>
-      <summary>Change receive-delay base</summary>
+    <details data-cli-section="receiveDelay">
+      <summary>{managementForms.receiveDelay.title}</summary>
       <p>{receiveDelayWarning} A base of zero disables this delay calculation. Calculated delays below 50 ms
         are processed immediately; larger delays are capped. This control accepts 0–20 with up to 2 decimal places.
         Read the preference first, then sync the reply and read it again.</p>
@@ -737,8 +777,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set receive-delay base</button>
       </form>
     </details>
-    <details>
-      <summary>Change repeater transmit power</summary>
+    <details data-cli-section="transmitPower">
+      <summary>{managementForms.transmitPower.title}</summary>
       <p>Read the stored preference first. Firmware documents a range of 1–22 dBm, but supported values vary by board.
         Check the repeater manual and local regulations; an external power amplifier can increase output, and excessive
         power may be unlawful. Firmware saves the preference and attempts to apply it, but may report OK even if applying
@@ -755,8 +795,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set transmit power</button>
       </form>
     </details>
-    <details>
-      <summary>Change receiver boosted-gain preference</summary>
+    <details data-cli-section="receiverGain">
+      <summary>{managementForms.receiverGain.title}</summary>
       <p>Support depends on the radio and firmware build; repeater firmware v1.14.1 implements this for SX1262 and
         SX1268 builds. Changing gain may affect reception and power use. Read the preference first, sync the reply, and
         compare it after a change. On some unsupported builds the read can return radio parameters rather than{' '}
@@ -772,8 +812,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         ))}
       </div>
     </details>
-    <details>
-      <summary>Change AGC reset interval</summary>
+    <details data-cli-section="agc">
+      <summary>{managementForms.agc.title}</summary>
       <p>Set a periodic automatic gain control (AGC) reset interval in seconds.
         This control accepts 0–1020 in multiples of four, avoiding the rounding or wrapping possible in v1.14.1.
         {` ${agcResetWarning}`} Read the preference first, then sync the reply and read it again.</p>
@@ -788,8 +828,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set AGC reset interval</button>
       </form>
     </details>
-    <details>
-      <summary>Change interference threshold</summary>
+    <details data-cli-section="interference">
+      <summary>{managementForms.interference.title}</summary>
       <p>Enter a whole value from 0 to 255; this is the v1.14.1 storage range, not a recommended setting.
         Choose a value appropriate for the device and environment. {interferenceWarning} Read the preference first,
         then sync the reply and read it again.</p>
@@ -804,8 +844,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set interference threshold</button>
       </form>
     </details>
-    <details>
-      <summary>Change extra direct ACK preference</summary>
+    <details data-cli-section="multiAck">
+      <summary>{managementForms.multiAck.title}</summary>
       <p>In repeater firmware v1.14.1, enabling this attempts to queue one extra multipart acknowledgement (ACK)
         when forwarding an eligible direct ACK, and can delay the normal ACK. It can use more airtime; other nodes
         may not support multipart ACKs, and delivery or improved reliability is not guaranteed. Already queued ACKs
@@ -821,8 +861,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         ))}
       </div>
     </details>
-    <details>
-      <summary>Change repeater power-saving preference</summary>
+    <details data-cli-section="powerSaving">
+      <summary>{managementForms.powerSaving.title}</summary>
       <p>Depending on the board and firmware, enabling this preference may let the repeater sleep when idle and be less responsive.
         An <code>on</code> reply reports the preference, not actual sleep; for example, Pico W repeater firmware v1.14.1 does not implement sleep.
         Read the preference explicitly; sync each reply and check it after changing it. Radio acceptance alone does not confirm the command succeeded.</p>
@@ -835,8 +875,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         ))}
       </div>
     </details>
-    <details>
-      <summary>Change advertisement interval</summary>
+    <details data-cli-section="advertInterval">
+      <summary>{managementForms.advertInterval.title}</summary>
       <p>Changing an interval affects future transmissions. Use 0 to disable. Local intervals are even minutes
         from 60 to 240; flood intervals are hours from 3 to 168.</p>
       <form className="contact-actions" onSubmit={submitInterval}>
@@ -858,8 +898,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set interval</button>
       </form>
     </details>
-    <details>
-      <summary>Remove repeater access-list entry</summary>
+    <details data-cli-section="removeAccess">
+      <summary>{managementForms.removeAccess.title}</summary>
       <p>Enter the client's full 64-character hexadecimal public key, not the six-byte prefix shown by access-list inspection.
         This removes the entire entry, but does not change passwords: the client can log in again with a valid password, and a
         blank guest password may allow guest access. Removing the connected radio or repeater is not offered here.</p>
@@ -874,8 +914,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Remove access-list entry</button>
       </form>
     </details>
-    <details>
-      <summary>Set non-admin repeater client role</summary>
+    <details data-cli-section="limitedAccess">
+      <summary>{managementForms.limitedAccess.title}</summary>
       <p>Enter the client's full 64-character hexadecimal public key, not an access-list prefix.
         The connected radio and repeater are not offered as targets.</p>
       <p>{repeaterLimitedAccessWarning}</p>
@@ -899,8 +939,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set client role</button>
       </form>
     </details>
-    <details>
-      <summary>Grant repeater administrator access</summary>
+    <details data-cli-section="adminAccess">
+      <summary>{managementForms.adminAccess.title}</summary>
       <p>Enter the client's full 64-character hexadecimal public key, not an access-list prefix.
         The connected radio and repeater are not offered as targets.</p>
       <p>{repeaterGrantAdminWarning}</p>
@@ -913,8 +953,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Grant administrator access</button>
       </form>
     </details>
-    <details>
-      <summary>Change guest login password</summary>
+    <details data-cli-section="guestPassword">
+      <summary>{managementForms.guestPassword.title}</summary>
       <p>Changes the password used for guest repeater access, not the administrator password. Changing it does not
         revoke already-authorized guest identities; they may still access the repeater. Firmware stores a
         maximum of 15 printable ASCII characters. The value is sent only after confirmation, is cleared from the
@@ -932,8 +972,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set guest password</button>
       </form>
     </details>
-    <details>
-      <summary>Change repeater name</summary>
+    <details data-cli-section="name">
+      <summary>{managementForms.name.title}</summary>
       <p>The field starts empty. Read the stored name first; this does not change the public key or send an advertisement.
         Advertisements can show a shorter name when they include location. Names must be 1 to 31 UTF-8 bytes,
         without leading or trailing spaces, control characters, or <code>[]/\:,?*</code>.</p>
@@ -947,8 +987,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set repeater name</button>
       </form>
     </details>
-    <details>
-      <summary>Change owner information</summary>
+    <details data-cli-section="owner">
+      <summary>{managementForms.owner.title}</summary>
       <p>Replaces the current owner information. It can be requested over the mesh; do not include passwords or private data.
         Repeater firmware v1.12 or later is required. The field starts empty; use get owner.info to read the current value.
         Use line breaks instead of |, and leave blank to clear.</p>
@@ -960,8 +1000,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set owner information</button>
       </form>
     </details>
-    <details>
-      <summary>Change stored position</summary>
+    <details data-cli-section="position">
+      <summary>{managementForms.position.title}</summary>
       <p>Advertisements use these stored coordinates only when the GPS advert policy is <code>prefs</code>.
         Policy <code>none</code> omits location; <code>share</code> uses sensor coordinates.
         Read the current values with <code>get lat</code> and <code>get lon</code>. Changing one coordinate does not change the other.</p>
