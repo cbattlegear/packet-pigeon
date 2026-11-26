@@ -2,8 +2,15 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import type { FormEvent } from 'react'
 import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
-import { repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand, repeaterPositionCommand, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
+import {
+  parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
+  repeaterPositionCommand, UncertainRepeaterCliError,
+} from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
+import { mapPosition } from '../map/nodes.ts'
+import { resolvePath } from '../paths/model.ts'
+import type { MapPath, PathNode } from '../paths/model.ts'
+import type { Coordinates } from '../map/nodes.ts'
 
 export type RepeaterMessageSync = Pick<MessageSync, 'subscribe' | 'getSnapshot' | 'subscribeToSavedReceipts' | 'sync'>
 
@@ -18,6 +25,9 @@ type Props = {
   busy: boolean
   onPending: (pending: boolean) => void
   onReboot: (notice: string) => void
+  neighborNodes: readonly PathNode[]
+  repeaterPosition: Coordinates | null
+  onMap?: (path: MapPath) => void
 }
 
 type HistoryEntry = {
@@ -30,7 +40,8 @@ type HistoryEntry = {
   unconfirmed: boolean
 }
 
-export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onReboot }: Props) {
+export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onReboot,
+  neighborNodes, repeaterPosition, onMap }: Props) {
   const ownerInfoId = useId()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState('')
@@ -190,7 +201,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     </ul>
     {!choices.length && <p>No commands match.</p>}
     {selected === 'neighbors' && <p>Each reply line is a four-byte key prefix, seconds since heard, and SNR multiplied by 4, separated by colons.
-      The list is limited by the repeater; prefixes may not uniquely identify a node. This does not show a map.</p>}
+      The list is limited by the repeater. Only unique matches with saved coordinates can be mapped; separate dots do not imply a route.</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
         if (action) void send(action.command, action.description, 'confirm' in action && action.confirm,
@@ -290,7 +301,57 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.reply !== null ? <pre>{item.reply || '(empty reply)'}</pre> :
             <p>{now >= item.deadline ? 'No reply synced before the deadline. It may still arrive.' :
               'Waiting for a reply. Sync messages to check.'}</p>}
+          {item.command === 'neighbors' && item.reply !== null &&
+            <NeighborReport reply={item.reply} name={name} repeaterPosition={repeaterPosition}
+              nodes={neighborNodes} onMap={onMap} />}
         </li>)}
       </ol>}
   </details>
+}
+
+function NeighborReport({ reply, name, repeaterPosition, nodes, onMap }: {
+  reply: string
+  name: string
+  repeaterPosition: Coordinates | null
+  nodes: readonly PathNode[]
+  onMap?: (path: MapPath) => void
+}) {
+  let neighbors
+  try {
+    neighbors = parseRepeaterNeighbors(reply)
+  } catch (reason) {
+    return <p className="contact-status">{reason instanceof Error ? reason.message : 'The neighbor list could not be read.'}</p>
+  }
+  if (!neighbors.length) return <p className="contact-status">No neighbors were reported.</p>
+
+  const resolved = neighbors.map((neighbor) => ({
+    ...neighbor,
+    matches: resolvePath([neighbor.keyPrefix], nodes)[0].matches,
+  }))
+  const mappedCount = resolved.filter(({ matches }) => matches.length === 1 && mapPosition(matches[0].position)).length
+  const path: MapPath = {
+    title: `Neighbors heard by ${name}`,
+    connect: false,
+    points: [
+      { label: `${name} (repeater)`, position: repeaterPosition },
+      ...resolved.map(({ keyPrefix, secondsAgo, snrQuarterDb, matches }) => ({
+        label: `${matches.length === 1 ? matches[0].name : `${keyPrefix} (${matches.length ? 'ambiguous prefix' : 'not in saved contacts'})`} · heard ${secondsAgo}s ago · SNR ${snrQuarterDb / 4} dB`,
+        position: matches.length === 1 ? matches[0].position : null,
+      })),
+    ],
+  }
+  return <div className="repeater-neighbor-report">
+    <ul aria-label="Recently heard neighbors">
+      {resolved.map(({ keyPrefix, secondsAgo, snrQuarterDb, matches }, index) => <li key={`${keyPrefix}:${index}`}>
+        {matches.length === 1 ? matches[0].name : keyPrefix} · {secondsAgo}s ago · {snrQuarterDb / 4} dB
+        {matches.length > 1 ? ' · Ambiguous saved-contact prefix; not mapped'
+          : matches.length === 0 ? ' · Not in saved contacts'
+            : !mapPosition(matches[0].position) ? ' · Position unavailable' : ''}
+      </li>)}
+    </ul>
+    {onMap && <button type="button" disabled={!mappedCount} onClick={() => onMap(path)}>
+      Show known neighbors on map
+    </button>}
+    {!mappedCount && <p className="contact-status">No uniquely matched neighbors have mappable saved positions.</p>}
+  </div>
 }

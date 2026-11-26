@@ -2,7 +2,7 @@ import type { Coordinates, MapNode } from '../map/nodes.ts'
 
 export type PathNode = Pick<MapNode, 'publicKey' | 'name' | 'position'>
 export type PathPoint = { label: string; position: Coordinates | null }
-export type MapPath = { title: string; points: PathPoint[] }
+export type MapPath = { title: string; points: PathPoint[]; connect?: boolean }
 
 export function resolvePath(hashes: readonly string[], nodes: readonly PathNode[]) {
   const unique = new Map<string, PathNode>()
@@ -38,4 +38,8 @@ export function pathSegments(points: readonly PathPoint[]) {
   }
   if (segment.length > 1) segments.push(segment)
   return segments
+}
+
+export function mapSegments(path: MapPath) {
+  return path.connect === false ? [] : pathSegments(path.points)
 }

@@ -502,8 +502,11 @@ one. The reported role is not a guarantee of current authorization.
 
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
-confirm a flood or zero-hop advertisement, or change advertisement intervals,
-owner information, repeater name, stored position, and packet forwarding with confirmation.
+which can map unique matches with saved positions as separate points rather
+than a route. Unknown or ambiguous four-byte prefixes are not mapped.
+Administrators can also confirm a flood or zero-hop advertisement, or change
+advertisement intervals, owner information, repeater name, stored position,
+and packet forwarding with confirmation.
 The confirmed `reboot` command may interrupt mesh traffic and normally sends no
 reply; acceptance by the radio does not prove execution. The app clears the
 reported access and status after an accepted or unconfirmed reboot. Log in again

@@ -270,12 +270,15 @@ export default function MapWorkspace({
         </div>
         <div className="map-panel">
           <h3>Nodes</h3>
-          {displayPath && <section className="map-node-detail" aria-label="Displayed route">
+          {displayPath && <section className="map-node-detail"
+            aria-label={displayPath.connect === false ? 'Displayed map points' : 'Displayed route'}>
             <h4>{displayPath.title}</h4>
             <ol>{displayPath.points.map(({ label, position }, index) => <li key={index}>
               {label}{!mapPosition(position) && ' · Position unavailable'}
             </li>)}</ol>
-            {clearPath && <button type="button" onClick={clearPath}>Clear displayed path</button>}
+            {clearPath && <button type="button" onClick={clearPath}>
+              {displayPath.connect === false ? 'Clear displayed points' : 'Clear displayed path'}
+            </button>}
           </section>}
           {traceSelection.length > 0 && changeTraceSelection && <section className="map-node-detail" aria-label="Selected trace repeaters">
             <h4>Selected trace repeaters</h4>

@@ -36,6 +36,30 @@ export type RepeaterCliReceipt = {
   timeoutMs: number
 }
 
+export type RepeaterNeighbor = {
+  keyPrefix: string
+  secondsAgo: number
+  snrQuarterDb: number
+}
+
+export function parseRepeaterNeighbors(reply: string): RepeaterNeighbor[] {
+  if (reply === '-none-') return []
+  if (!reply || reply.length > 4096) throw new Error('The repeater returned an invalid neighbor list.')
+  const lines = reply.replace(/\r\n/g, '\n').split('\n')
+  if (lines.length > 64) throw new Error('The repeater returned too many neighbor records.')
+  return lines.map((line) => {
+    const match = /^([0-9a-f]{8}):([0-9]+):(-?[0-9]+)$/i.exec(line)
+    if (!match) throw new Error('The repeater returned an unrecognized neighbor record.')
+    const secondsAgo = Number(match[2])
+    const snrQuarterDb = Number(match[3])
+    if (!Number.isSafeInteger(secondsAgo) || secondsAgo > 0xffff_ffff
+      || !Number.isSafeInteger(snrQuarterDb) || snrQuarterDb < -0x8000 || snrQuarterDb > 0x7fff) {
+      throw new Error('The repeater returned an out-of-range neighbor record.')
+    }
+    return { keyPrefix: match[1].toLowerCase(), secondsAgo, snrQuarterDb }
+  })
+}
+
 export class UncertainRepeaterCliError extends Error {
   readonly tag: string
 
