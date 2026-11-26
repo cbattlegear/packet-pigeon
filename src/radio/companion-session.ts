@@ -432,9 +432,6 @@ export class CompanionSession {
 
   readonly noiseFloor = (radioKey: string) => (
     this.runRadioCommand(radioKey, (link) => {
-      if (this.connection?.kind !== 'usb') {
-        throw new CompanionError('unsupported-transport', 'Connect over USB to read radio statistics.')
-      }
       if (this.snapshot.device!.capabilities.firmwareProtocolVersion < 8) {
         throw new CompanionError('unsupported-firmware', 'Radio statistics require companion protocol v8 or newer.')
       }

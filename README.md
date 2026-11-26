@@ -475,9 +475,11 @@ available when supported by firmware. Browsing adverts and path lookup use
 passive adverts and local cache lookups, not active mesh requests.
 
 The live noise-floor monitor starts only when requested and polls local radio
-statistics every two seconds over USB on companion protocol v8 or newer. It
-does not transmit a mesh request. Stop polling or leave Discovery to prevent
-further reads; a read already in flight must finish or time out.
+statistics every two seconds over USB or Bluetooth on companion protocol v8 or
+newer. It does not transmit a mesh request. Bluetooth notifications can be
+split or dropped; malformed or missing replies stop polling. Stop polling or
+leave Discovery to prevent further reads; a read already in flight must finish
+or time out.
 
 **Send nearby discovery** explicitly transmits one zero-hop discovery broadcast
 and listens for 20 seconds. It requires companion protocol v8 or newer.

@@ -39,7 +39,8 @@ function fixture({
   const state = {
     chooses: 0, connects: 0, closes: 0, subscriptions: 0, connected: false,
     identity: 0xab, missingService: false, rejectSubscription: false, rejectClose: false, rejectConnects: 0,
-    dequeued: 0, pathLength: 0, pathBytes: [],
+    dequeued: 0, pathLength: 0, pathBytes: [], protocolVersion: 14,
+    noiseReply: [24, 1, 0x85, 0xff, ...new Uint8Array(10)],
   }
   const contactFrame = () => {
     const contact = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), directMessaging ? 1 : 2, 0,
@@ -65,7 +66,7 @@ function fixture({
     assert(state.subscriptions > 0)
     writes.push({ bytes: Array.from(command), method })
     if (command[0] === 22) {
-      notify(Uint8Array.of(13, 14, 100, 0, ...new Uint8Array(78)))
+      notify(Uint8Array.of(13, state.protocolVersion, 100, 0, ...new Uint8Array(78)))
     } else if (command[0] === 1) {
       notify(Uint8Array.of(5, 1, 0, 0, ...new Uint8Array(32).fill(state.identity),
         ...new Uint8Array(22), ...encode('Bluetooth fixture')))
@@ -83,6 +84,8 @@ function fixture({
       const body = command[33] === 1 ? '*,local' : 'Relay\nOperator'
       notify(Uint8Array.of(0x8c, 0, 1, 2, 3, 4, 9, 0, 0, 0, ...encode(body)))
       notify(Uint8Array.of(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0))
+    } else if (command[0] === 56) {
+      if (state.noiseReply) notify(Uint8Array.from(state.noiseReply))
     } else if (command[0] === 2 && directMessaging) {
       notify(Uint8Array.of(0x82, 1, 2, 3, 4, 42, 0, 0, 0))
       notify(Uint8Array.of(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0))
@@ -202,6 +205,40 @@ test('uses raw notification frames, prefers writes with response, and shares syn
   assert.equal(locks.held, false)
   assert.equal(radio.state.closes, 1)
   unsubscribe()
+})
+
+test('Bluetooth noise-floor reads stay local, reject incomplete replies, and respect firmware support', async () => {
+  const radio = fixture()
+  const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks: ownership() })
+  await session.connectBluetooth()
+  const key = session.getSnapshot().device.publicKey
+  assert.deepEqual(radio.writes.map(({ bytes }) => bytes[0]), [22, 1, 4])
+  assert.equal(await session.noiseFloor(key), -123)
+  assert.deepEqual(radio.writes.at(-1).bytes, [56, 1])
+  radio.state.noiseReply = [24, 1, 0x85]
+  await assert.rejects(session.noiseFloor(key), { code: 'protocol' })
+  radio.state.noiseReply = [1, 1]
+  await assert.rejects(session.noiseFloor(key), { code: 'unsupported-firmware' })
+  assert.equal(radio.writes.some(({ bytes }) => bytes[0] === 55 || bytes[0] === 57), false)
+  await session.disconnect()
+
+  const old = fixture()
+  old.state.protocolVersion = 7
+  const oldSession = new CompanionSession({ bluetoothEnvironment: old.environment, locks: ownership() })
+  await oldSession.connectBluetooth()
+  await assert.rejects(oldSession.noiseFloor(key), { code: 'unsupported-firmware' })
+  assert.equal(old.writes.some(({ bytes }) => bytes[0] === 56), false)
+  await oldSession.disconnect()
+
+  const dropped = fixture()
+  dropped.state.noiseReply = null
+  const timed = new CompanionSession({ bluetoothEnvironment: dropped.environment, locks: ownership(), timeoutMs: 40 })
+  await timed.connectBluetooth()
+  await assert.rejects(timed.noiseFloor(key), { code: 'timeout' })
+  await until(timed, ({ phase }) => phase === 'error')
+  assert.equal(dropped.state.closes, 1)
+  assert.equal(dropped.writes.filter(({ bytes }) => bytes[0] === 56).length, 1)
+  await timed.disconnect()
 })
 
 test('active discovery uses Bluetooth only on request and ignores short discovery replies', async () => {
