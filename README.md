@@ -467,8 +467,11 @@ one. The reported role is not a guarantee of current authorization.
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 confirm a flood or zero-hop advertisement, or change advertisement intervals,
-owner information, and stored position with confirmation. Position edits change
-one coordinate at a time; current values can be read with `get lat` and `get lon`.
+owner information, stored position, and packet forwarding with confirmation.
+Use `get repeat` to check forwarding before changing it. Disabling forwarding
+can disrupt mesh routes and some firmware also stops responding to discovery
+requests. Position edits change one coordinate at a time; current values can be
+read with `get lat` and `get lon`.
 Advertisements use stored coordinates only with GPS advert policy `prefs`;
 `none` omits location and `share` uses sensor coordinates. Use the explicit
 `gps advert` query to check the policy; some firmware builds do not support it.
