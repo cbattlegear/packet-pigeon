@@ -27,6 +27,8 @@ export const repeaterBridgeDelayWarning = 'Changing the delay can affect latency
 
 export const repeaterBridgeChannelWarning = 'Changing the ESP-NOW channel can disconnect bridge peers, interrupt routes and prevent remote access. Verify peer settings, local regulations, device support and a local recovery method first; the accepted range does not guarantee a legal or supported channel. In repeater v1.14.1, a running bridge turns Wi-Fi off before attempting an immediate restart; a stopped bridge is not started. Restart or saving can fail. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove the channel was applied, a peer is connected, or the setting was saved. A delayed command may arrive later; firmware and build support vary.'
 
+export const repeaterBridgeBaudWarning = 'Changing the RS-232 baud rate can interrupt bridge traffic, routes and remote access. Check the peer baud rate, device support and a local recovery method first; the accepted range does not guarantee that the hardware or peer supports the rate. In repeater v1.14.1, a running bridge immediately attempts to restart its serial interface; a stopped bridge is not started. In-flight data may be lost, and partial received frames may remain across the restart. Saving can fail and also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove the interface or peer is working or the setting was saved. A delayed command may arrive later; firmware and build support vary.'
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -465,6 +467,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole ESP-NOW bridge channel from 1 to 14.')
     }
     return { command, description: 'Set ESP-NOW bridge channel', confirm: true as const, warning: repeaterBridgeChannelWarning }
+  }
+  const bridgeBaudPrefix = 'set bridge.baud '
+  if (command.startsWith(bridgeBaudPrefix)) {
+    const value = command.slice(bridgeBaudPrefix.length)
+    const match = /^[1-9][0-9]*$/.exec(value)
+    if (!match || match[0] !== value || Number(value) < 9600 || Number(value) > 115200) {
+      throw new Error('Enter a whole RS-232 bridge baud rate from 9600 to 115200.')
+    }
+    return { command, description: 'Set RS-232 bridge baud rate', confirm: true as const, warning: repeaterBridgeBaudWarning }
   }
   const interferencePrefix = 'set int.thresh '
   if (command.startsWith(interferencePrefix)) {
