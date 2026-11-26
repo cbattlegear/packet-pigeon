@@ -73,6 +73,18 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
         } else if (command[0] === 26) {
           emit([6, 0, ...new Uint8Array(8)])
           emit([0x85, window.fixtureRole, ...target.slice(1, 7), 1, 0, 0, 0, 1, 2])
+        } else if (command[0] === 50) {
+          const tag = [commands.length & 255, 2, 3, 4]
+          emit([6, 0, ...tag, 0xe8, 3, 0, 0])
+          const reply = () => emit([0x8c, 0, ...tag, ...new Uint8Array(6).fill(0xdd), 3])
+          if (window.holdAccessList) window.releaseAccessList = reply
+          else {
+            if (window.releaseAccessList) {
+              window.releaseAccessList()
+              window.releaseAccessList = undefined
+            }
+            reply()
+          }
         } else if (command[0] === 2) {
           const text = new TextDecoder().decode(command.slice(13))
           lastTag = text.slice(0, 2)
@@ -97,11 +109,30 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await page.getByText(/Login reported guest access/).waitFor()
   assert.equal(await page.getByText('Administrator CLI', { exact: true }).count(), 0)
+  assert.equal(await page.getByText('Inspect repeater access', { exact: true }).count(), 0)
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).length), 0)
   await page.evaluate(() => { window.fixtureRole = 1 })
   await password.fill('fixture-secret')
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await page.getByText(/Login reported admin access/).waitFor()
   assert.equal(await password.inputValue(), '')
+  await page.getByText('Inspect repeater access', { exact: true }).click()
+  await page.getByText(/Guest entries can be omitted and the list can be truncated/).waitFor()
+  await page.getByText(/some companion firmware does not surface an empty reply/).waitFor()
+  await page.getByText(/Request tags can repeat after a radio restart/).waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).length), 0)
+  await page.getByRole('button', { name: 'Request access list' }).click()
+  await page.getByRole('list', { name: 'Reported access entries' }).getByText(/dddddddddddd.*admin.*0x03/).waitFor()
+  await page.getByText(/It may have been delayed, and this snapshot can become stale/).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33)), [5, 0, 0])
+  await page.evaluate(() => { window.holdAccessList = true })
+  await page.getByRole('button', { name: 'Request access list' }).click()
+  assert.equal(await page.getByRole('list', { name: 'Reported access entries' }).count(), 0)
+  await page.getByRole('button', { name: 'Stop waiting' }).click()
+  await page.getByRole('alert').getByText(/Stopped waiting/).waitFor()
+  await page.evaluate(() => { window.holdAccessList = false })
+  await page.getByRole('button', { name: 'Request access list' }).click()
+  await page.getByRole('list', { name: 'Reported access entries' }).getByText(/dddddddddddd.*admin.*0x03/).waitFor()
   await page.getByText('Administrator CLI', { exact: true }).click()
   await page.getByText(/Companion firmware v1.11 and earlier may cause CLI commands to be ignored/).waitFor()
   await page.setViewportSize({ width: 390, height: 844 })

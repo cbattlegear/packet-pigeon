@@ -621,6 +621,42 @@ export class CompanionSession {
     })
   }
 
+  readonly readRepeaterAccessList = async (
+    radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string }, signal: AbortSignal,
+  ) => {
+    const key = contactPublicKey(contactKey)
+    if (key === radioKey) throw new Error('Choose a different repeater from the connected radio.')
+    signal.throwIfAborted()
+    return this.runRadioCommand(radioKey, async (link) => {
+      const attempt = this.attempt!
+      if (this.uncertainRepeaterRequests.get(attempt)?.has(key)) {
+        throw new Error('A previous reply may arrive late. Reconnect before requesting this operation again.')
+      }
+      const login = this.repeaterLogin
+      if (!login || login.attempt !== attempt || login.key !== key || login.role !== 'admin') {
+        throw new Error('Log in to this repeater as an administrator before reading its access list.')
+      }
+      const disconnected = new AbortController()
+      const stop = this.subscribe(() => {
+        if (this.attempt !== attempt || this.snapshot.phase !== 'ready') {
+          disconnected.abort(new Error('The radio disconnected before the repeater request completed.'))
+        }
+      })
+      const request = AbortSignal.any([signal, disconnected.signal])
+      try {
+        const target = await this.verifiedRepeater(link, radioKey, key, expectedRoute, request)
+        if (login.pathLength !== target.pathLength || login.pathHex !== target.pathHex) {
+          throw new Error('The repeater route changed after login. Log in again before reading its access list.')
+        }
+        const { parseRemoteNodeClients, requestRemoteNodeData } = await import('./remote-nodes.ts')
+        return parseRemoteNodeClients(await requestRemoteNodeData(link, key, Uint8Array.of(5, 0, 0),
+          this.subscribeToPushes, request, { minimumMs: 10_000, marginMs: 5_000 }))
+      } finally {
+        stop()
+      }
+    })
+  }
+
   readonly sendRepeaterCommand = async (
     radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
     command: string, confirmed: boolean, signal: AbortSignal,
