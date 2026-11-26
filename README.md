@@ -571,7 +571,10 @@ three full neighbor public keys, ordered by most recently heard. Repeater
 firmware v1.14.1 supports this binary request; other builds may not. Entries can
 change between pages, causing omissions or duplicates. Discovery responses are
 unauthenticated, so independently verify a full key before using it. Request
-tags can repeat after a radio restart, making delayed replies ambiguous.
+tags can repeat after a radio restart, making delayed replies ambiguous. A page
+can be mapped using exact full-key matches with mappable saved contact positions;
+unknown keys and unavailable positions are not mapped. Points are separate
+observations, not a route, and saved positions may be stale.
 Administrators can confirm removal of a neighbor from the repeater's cache
 using its full public key. The four-byte prefixes in neighbor replies can
 collide and do not establish the full identity; verify the key independently.

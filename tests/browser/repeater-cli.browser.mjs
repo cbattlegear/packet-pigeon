@@ -45,6 +45,14 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     new DataView(neighborThree.buffer).setInt32(140, -91_000_000, true)
     neighborThree.fill(0, 100, 132)
     neighborThree.set(encoder.encode('Neighbor three'), 100)
+    const neighborNoPosition = neighborTwo.slice()
+    neighborNoPosition.set([0x88, 0x88, 0x88, 0x88], 1)
+    new DataView(neighborNoPosition.buffer).setInt32(136, 0, true)
+    new DataView(neighborNoPosition.buffer).setInt32(140, 0, true)
+    neighborNoPosition.fill(0, 100, 132)
+    neighborNoPosition.set(encoder.encode('Neighbor without position'), 100)
+    const neighborUnknown = neighborTwo.slice()
+    neighborUnknown.set([0xde, 0xad, 0xbe, 0xef], 1)
     const commands = []
     const queue = []
     let controller
@@ -63,12 +71,13 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
         if (command[0] === 22) emit(info)
         else if (command[0] === 1) emit(device)
         else if (command[0] === 4) {
-          emit([2, 5, 0, 0, 0])
+          emit([2, 6, 0, 0, 0])
           emit(target)
           emit(neighborOne)
           emit(neighborTwo)
           emit(neighborCollision)
           emit(neighborThree)
+          emit(neighborNoPosition)
           emit([4, 0, 0, 0, 0])
         } else if (command[0] === 26) {
           emit([6, 0, ...new Uint8Array(8)])
@@ -79,7 +88,11 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
           if (command[33] === 6) {
             const offset = command[36] + 256 * command[37]
             const pageSize = window.fixtureShortNeighborPage && offset === 0 ? 2 : 3
-            const entries = [neighborOne, neighborTwo, neighborThree, neighborCollision].slice(offset, offset + pageSize)
+            const allEntries = window.fixtureUnmappableNeighbors
+              ? [neighborUnknown, neighborNoPosition]
+              : window.fixtureMixedNeighbors ? [neighborOne, neighborUnknown, neighborNoPosition]
+                : [neighborOne, neighborTwo, neighborThree, neighborCollision]
+            const entries = allEntries.slice(offset, offset + pageSize)
             const rows = entries.flatMap((entry, index) => [...entry.slice(1, 33), 42 + index, 0, 0, 0, 0xec])
             emit([0x8c, 0, ...tag, 4, 0, entries.length, 0, ...rows])
             return
@@ -126,11 +139,36 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   const neighborKeys = page.getByRole('list', { name: 'Reported nearby repeater keys' })
   await neighborKeys.getByText(`${'1234abcd' + 'bc'.repeat(28)} · 42s · -5 dB`).waitFor()
   assert.equal(await neighborKeys.getByRole('listitem').count(), 3)
+  await neighborKeys.getByText(/Saved contact: Neighbor one/).waitFor()
+  await neighborKeys.getByText(/Saved contact: Neighbor two/).waitFor()
+  const beforeNeighborMap = await page.evaluate(() => window.fixtureCommands.length)
+  await page.getByRole('button', { name: 'Show this page on map' }).click()
+  const neighborMap = page.getByRole('region', { name: 'Displayed map points' })
+  await neighborMap.getByText('Reported neighbors of Fixture repeater (page offset 0)', { exact: true }).waitFor()
+  await neighborMap.getByText(/Discovery responses are unauthenticated; a full-key match does not prove identity/).waitFor()
+  await neighborMap.getByText(/Request tags can repeat after a radio restart/).waitFor()
+  await neighborMap.getByText(/Neighbor one.*reported age 42s at reply/).waitFor()
+  assert.equal(await neighborMap.locator('li').count(), 3)
+  assert.equal(await page.locator('.node-map path[stroke="#6047a6"][stroke-width="4"]').count(), 0)
+  assert.equal(await page.locator('.node-map path[stroke="#6047a6"][stroke-width="3"]').count(), 3)
+  assert.equal(await page.evaluate(() => window.fixtureCommands.length), beforeNeighborMap)
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await page.evaluate(() => { window.location.hash = 'contacts' })
+  await neighborKeys.waitFor()
   assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33, 40)),
     [6, 0, 3, 0, 0, 0, 32])
   await page.getByRole('button', { name: 'Request next page' }).click()
   await page.getByText(/Reported total: 4; page offset: 3/).waitFor()
   assert.equal(await neighborKeys.getByRole('listitem').count(), 1)
+  await neighborKeys.getByText(/Saved contact: Ambiguous neighbor/).waitFor()
+  await page.getByRole('button', { name: 'Show this page on map' }).click()
+  await neighborMap.getByText('Reported neighbors of Fixture repeater (page offset 3)', { exact: true }).waitFor()
+  assert.equal(await neighborMap.locator('li').count(), 1)
+  await neighborMap.getByText(/Ambiguous neighbor.*reported age 42s at reply/).waitFor()
+  await page.evaluate(() => { window.location.hash = 'contacts' })
+  await neighborKeys.waitFor()
   assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33, 40)),
     [6, 0, 3, 3, 0, 0, 32])
   await page.getByRole('button', { name: 'Request previous page' }).click()
@@ -145,6 +183,23 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByRole('button', { name: 'Request previous page' }).click()
   await page.getByText(/Reported total: 4; page offset: 0/).waitFor()
   assert.equal(await neighborKeys.getByRole('listitem').count(), 2)
+  await page.evaluate(() => { window.fixtureMixedNeighbors = true; window.fixtureShortNeighborPage = false })
+  await page.getByRole('button', { name: 'Request first neighbor page' }).click()
+  await neighborKeys.getByText(/Saved contact: Neighbor without position.*Position unavailable/).waitFor()
+  await neighborKeys.getByText(/Not in saved contacts/).waitFor()
+  await page.getByRole('button', { name: 'Show this page on map' }).click()
+  await neighborMap.getByText('Reported neighbors of Fixture repeater (page offset 0)', { exact: true }).waitFor()
+  assert.equal(await neighborMap.locator('li').count(), 1)
+  await neighborMap.getByText(/Neighbor one.*reported age 42s at reply/).waitFor()
+  await page.evaluate(() => { window.location.hash = 'contacts' })
+  await neighborKeys.waitFor()
+  await page.evaluate(() => { window.fixtureUnmappableNeighbors = true })
+  await page.getByRole('button', { name: 'Request first neighbor page' }).click()
+  await neighborKeys.getByText(/Not in saved contacts/).waitFor()
+  await neighborKeys.getByText(/Saved contact: Neighbor without position.*Position unavailable/).waitFor()
+  assert.equal(await page.getByRole('button', { name: 'Show this page on map' }).isDisabled(), true)
+  await page.getByText('No entries on this page have mappable saved contact positions.').waitFor()
+  await page.evaluate(() => { window.fixtureUnmappableNeighbors = false; window.fixtureMixedNeighbors = false })
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   await page.setViewportSize({ width: 1280, height: 720 })
