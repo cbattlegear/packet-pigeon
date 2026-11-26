@@ -60,5 +60,29 @@ test('CLI replies do not create message notifications', () => {
   }
   const entry = { id: 'cli', conversationId: `direct:${key.slice(0, 12)}`, sender: key.slice(0, 12),
     timestamp: 12000, text: directReceipt.text, receipt: directReceipt }
-  assert.equal(messageAlert({ ...data, contacts: [{ publicKey: key, name: 'Relay' }], messages: [entry] }, entry, ''), null)
+  const cached = { ...data, contacts: [{ publicKey: key, name: 'Relay', details: { type: 2 } }], messages: [entry] }
+  assert.equal(messageAlert(cached, entry, ''), null)
+  assert.equal(messageAlert({ ...cached, contacts: [{ publicKey: key, name: 'Contact', details: { type: 1 } }] },
+    entry, '').title, 'Contact')
+})
+
+test('routes room posts and sensor alerts and leaves management replies quiet', () => {
+  const room = 'ab'.repeat(32)
+  const sensor = 'cd'.repeat(32)
+  const contacts = [{ publicKey: room, name: 'Room', details: { type: 3 } },
+    { publicKey: sensor, name: 'Sensor', details: { type: 4 } }]
+  const entry = (publicKey, id, textType) => {
+    const prefix = publicKey.slice(0, 12)
+    return { id, conversationId: `direct:${prefix}`, sender: prefix, timestamp: 13_000, text: id,
+      receipt: { kind: 'direct-text', receiptId: id, senderKeyPrefix: prefix, signatureHex: textType === 2 ? 'fedcba98' : null,
+        textType, senderTimestamp: 13, text: id, pathLength: 0, snrDb: null } }
+  }
+  const post = entry(room, 'Room post', 2)
+  const alert = entry(sensor, 'Sensor alert', 0)
+  const reply = entry(room, 'Room management', 1)
+  const cached = { ...data, contacts, messages: [post, alert, reply] }
+  assert.deepEqual(messageAlert(cached, post, ''), { conversationId: `direct:${room}`, title: 'Room' })
+  assert.deepEqual(messageAlert(cached, alert, ''), { conversationId: `direct:${sensor}`, title: 'Sensor' })
+  assert.equal(messageAlert(cached, reply, ''), null)
+  assert.equal(messageAlert({ ...cached, mutedDirectConversations: [`direct:${room.slice(0, 12)}`] }, post, ''), null)
 })

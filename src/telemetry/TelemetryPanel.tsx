@@ -25,10 +25,10 @@ function telemetryError(error: unknown) {
   return error instanceof Error ? error.message : 'Could not load telemetry.'
 }
 
-export function ContactTelemetry({ active, ...reader }: ReaderProps & { active: boolean }) {
+export function ContactTelemetry({ active, label = 'Contact telemetry', ...reader }: ReaderProps & { active: boolean; label?: string }) {
   const [open, setOpen] = useState(false)
   return <details className="telemetry" onToggle={(event) => setOpen(event.currentTarget.open)}>
-    <summary>Contact telemetry</summary>
+    <summary>{label}</summary>
     {open && active && <TelemetryReader {...reader} />}
   </details>
 }

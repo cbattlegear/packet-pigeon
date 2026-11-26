@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { DirectMessages, DirectStatus } from '../integration/direct-messages.ts'
@@ -17,7 +17,7 @@ import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredConta
 import type { Coordinates } from '../map/nodes.ts'
 import { ComposerTools } from '../sharing/ComposerTools.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
-import { conversations, correlateChannelObservations, matchingChannelReceipts, messageDay, messageVisibility, oldestUnreadReceipt, receiptPathDescription, searchMessages, unreadReceipts } from './model.ts'
+import { conversations, correlateChannelObservations, matchingChannelReceipts, messageDay, messageVisibility, nodeMessageSender, oldestUnreadReceipt, receiptPathDescription, searchMessages, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import { ChatSearch } from './ChatSearch.tsx'
 import type { NamedRegion } from '../radio/channel-scope.ts'
@@ -26,9 +26,12 @@ import { channelMentionNames, channelMessageBody, channelReply, channelTextParts
 import { PathDetails } from '../paths/PathDetails.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
 import { contactPosition } from '../contacts/model.ts'
+import type { RemoteNodeLoginSession } from '../contacts/RemoteNodePanel.tsx'
+import { canPostToRoom, maxRoomTextBytes } from '../radio/node-access.ts'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
+const RemoteNodeLogin = lazy(async () => ({ default: (await import('../contacts/RemoteNodePanel.tsx')).RemoteNodeLogin }))
 
 type SearchTarget = { id: string }
 
@@ -41,6 +44,7 @@ type Props = {
   direct: DirectMessages
   status: DirectStatus
   cacheSaving: boolean
+  nodeSession: RemoteNodeLoginSession
   active: boolean
   preferences: AppPreferences
   locale: string
@@ -66,6 +70,9 @@ type ChatDisplay = {
   readChannelKey?: (channel: StoredChannel) => Promise<string>
   observationSource?: ChannelObservationSource
   canObserve: boolean
+  nodeSession: RemoteNodeLoginSession
+  nodeReady: boolean
+  nodeBusy: boolean
   regionNames: NamedRegion[] | null
   pathNodes: readonly PathNode[]
   onPathMap?: (path: MapPath) => void
@@ -123,7 +130,7 @@ function MessageContextActions({ context, onClose, children }: {
   </div>, document.body)
 }
 
-export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving,
+export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving, nodeSession,
   active, preferences, locale, readChannelKey, observationSource, mapPosition, navigationRequest, onActiveConversation,
   pathNodes, mapPathNodes = [], onPathMap }: Props) {
   const live = (snapshot.phase === 'ready' || snapshot.phase === 'syncing') && snapshot.device
@@ -267,6 +274,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
             display={{
               active, preferences, read, formatTime, formatDate, mapPosition, ownContact,
+              nodeSession, nodeReady: Boolean(live && live === radioKey && canSync),
+              nodeBusy: cacheSaving || messageStatus.syncing || messageStatus.pending || status.activeId !== null,
               contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
               readChannelKey: canSync && live && readChannelKey ? (channel) => readChannelKey(live, channel) : undefined,
               observationSource, canObserve: Boolean(live && canSync && framedTransport(snapshot.transport)), regionNames,
@@ -390,7 +399,9 @@ const noObservation = () => idleObservation
 
 function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted, searchTarget }: ConversationProps) {
   const { active, preferences, read, formatTime, formatDate, ownContact, contacts, channels, readChannelKey, mapPosition,
-    observationSource, canObserve, regionNames, pathNodes, onPathMap } = display
+    observationSource, canObserve, regionNames, pathNodes, onPathMap, nodeSession, nodeReady, nodeBusy } = display
+  const room = conversation.node?.type === 'room' ? conversation.node : undefined
+  const roomCanPost = !room || canPostToRoom(nodeSession.getRemoteNodeAccess(radioKey, room.publicKey))
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
   const [savingNotification, setSavingNotification] = useState(false)
@@ -437,13 +448,16 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     ? channelMentionNames(contacts, conversation.messages, conversation.channel.index) : [],
   [contacts, conversation.channel, conversation.messages])
   const selectedMention = mentionNames.includes(mentionName) ? mentionName : ''
-  let limit: number | null = isChannel ? null : maxDirectTextBytes
+  let limit: number | null = isChannel ? null : room ? maxRoomTextBytes : maxDirectTextBytes
   let invalid = ''
   try {
     if (isChannel && senderName !== null) {
       limit = channelTextLimit(senderName)
       if (draft) channelTextBytes(draft, senderName)
-    } else if (!isChannel && draft) directTextBytes(draft)
+    } else if (!isChannel && draft) {
+      if (room && bytes > maxRoomTextBytes) throw new Error(`Keep room posts within ${maxRoomTextBytes} UTF-8 bytes.`)
+      directTextBytes(draft)
+    }
   } catch (error) {
     invalid = errorText(error)
   }
@@ -536,6 +550,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!roomCanPost) return
     const text = draft
     setActionError('')
     try {
@@ -552,6 +567,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   }
 
   async function retry(message: StoredMessage) {
+    if (!roomCanPost) return
     setActionError('')
     try {
       await direct.retry(radioKey, message.id, options)
@@ -682,6 +698,10 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
         </label>}
         {conversation.id.startsWith('direct:') && <span>Mute applies to senders sharing this 12-character key prefix.</span>}
       </div>
+      {room && <Suspense fallback={null}>
+        <RemoteNodeLogin session={nodeSession} radioKey={radioKey} nodeKey={room.publicKey} type={3}
+          active={active} ready={nodeReady} busy={nodeBusy} />
+      </Suspense>}
       {isChannel && observer && <div className="chat-observation">
         <div className="chat-observation-actions">
           {observed.phase === 'active' || observed.phase === 'starting'
@@ -740,7 +760,8 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
               }}
               className={message.outgoing || message.channelOutgoing ? 'chat-message--outgoing' : undefined}>
               <div className="chat-message-header">
-                <strong>{message.outgoing || message.channelOutgoing ? 'You' : isChannel ? sender ?? 'Unknown sender' : conversation.title}</strong>
+                <strong>{message.outgoing || message.channelOutgoing ? 'You' : isChannel ? sender ?? 'Unknown sender'
+                  : nodeMessageSender(conversation, message, contacts)}</strong>
                 {timestamp(message.timestamp, formatTime)}
               </div>
               {message.text && <p>{isChannel ? <ChannelMessageText text={body} ownName={senderName} /> : body}</p>}
@@ -772,7 +793,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                   )}
                   {message.outgoing.error && <p>{message.outgoing.error}</p>}
                   {message.outgoing.status === 'failed' && (
-                    <button type="button" disabled={status.activeId !== null || status.pending > 0}
+                    <button type="button" disabled={!roomCanPost || status.activeId !== null || status.pending > 0}
                       aria-label={`Retry message: ${message.text.slice(0, 40)}`} onClick={() => void retry(message)}>Retry</button>
                   )}
                   {status.activeId === message.id && (
@@ -827,14 +848,14 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       }}>Jump to bottom</button>}
       {readError && <p className="chat-action-error" role="alert">{readError}</p>}
       {actionError && <p className="chat-action-error" role="alert">{actionError}</p>}
-      {(isChannel || conversation.id.startsWith('direct:')) && (
+      {(isChannel || conversation.id.startsWith('direct:')) && (conversation.node?.type !== 'sensor' || draft !== '') && (
         <form className="chat-composer" onSubmit={(event) => void send(event)}>
           <label htmlFor="chat-draft">Message</label>
           <textarea id="chat-draft" ref={composer} rows={3} value={draft} aria-describedby="chat-byte-count chat-draft-error"
             onChange={(event) => updateDraft(event.currentTarget.value)} onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !event.repeat) {
                 event.preventDefault()
-                if (draft && !invalid && status.activeId === null && (conversation.recipient || conversation.channel)) {
+                if (roomCanPost && draft && !invalid && status.activeId === null && (conversation.recipient || conversation.channel)) {
                   event.currentTarget.form?.requestSubmit()
                 }
               }
@@ -856,10 +877,11 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             <span id="chat-byte-count">{limit === null ? `${bytes} UTF-8 bytes; connect to check the limit` : `${bytes}/${limit} UTF-8 bytes`}</span>
             {active && <ComposerTools ownContact={ownContact} contacts={contacts} channels={channels}
               readChannelKey={readChannelKey} mapPosition={mapPosition} insert={insertInDraft} />}
-            <button type="submit" disabled={!draft || Boolean(invalid) || status.activeId !== null
-              || !(conversation.recipient || conversation.channel)}>Send message</button>
+            <button type="submit" disabled={!roomCanPost || !draft || Boolean(invalid) || status.activeId !== null
+              || !(conversation.recipient || conversation.channel)}>{room ? 'Post message' : 'Send message'}</button>
           </div>
           <p id="chat-draft-error" className="chat-action-error">{invalid}</p>
+          {room && !roomCanPost && <p>Sign in with posting access to send. You can still edit your draft.</p>}
           {!conversation.recipient && !conversation.channel && <p>Sending is unavailable for this cached conversation. Your draft is still editable.</p>}
           <p>{isChannel
             ? 'The radio adds its sender name. Sending scope is configured in Channels. A channel message is a broadcast and cannot be recalled.'

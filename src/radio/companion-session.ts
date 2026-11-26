@@ -32,6 +32,10 @@ import type { AdvancedDeviceEdits, DeviceEdits, DeviceSaveResult } from './devic
 import { assertScopeSupported, channelScopeCommand, validateChannelScope, writeChannelScope } from './channel-scope.ts'
 import type { ChannelScope } from './channel-scope.ts'
 import { requestOwnTelemetry, requestRemoteTelemetry, telemetryProtocolVersion } from './telemetry.ts'
+import { canPostToRoom, maxRoomTextBytes } from './node-access.ts'
+import type { RemoteNodeAccess } from './node-access.ts'
+import type { RemoteNodeAdmin } from './remote-nodes.ts'
+import { decodeSensorSummary } from './cayenne-lpp.ts'
 import { repeaterRequest, UncertainRepeaterRequestError } from './repeater-management.ts'
 import type { RepeaterLogin, RepeaterStatus } from './repeater-management.ts'
 import { allocateRepeaterCliTag, repeaterCliCommand, sendRepeaterCli } from './repeater-cli.ts'
@@ -75,6 +79,8 @@ interface Attempt {
   recovering?: boolean
   scopePending?: boolean
   maintenance?: boolean
+  remoteAccess?: Map<string, RemoteNodeAccess>
+  unconfirmedNodeLogins?: Set<string>
 }
 
 type SelectedTransport =
@@ -476,6 +482,97 @@ export class CompanionSession {
     }
     return target
   }
+
+  readonly getRemoteNodeAccess = (radioKey: string, nodeKey: string) =>
+    this.snapshot.phase === 'ready' && this.snapshot.device?.publicKey === radioKey
+      ? this.attempt?.remoteAccess?.get(nodeKey) : undefined
+
+  private withRemoteNode<T>(radioKey: string, nodeKey: string, signal: AbortSignal,
+    action: (link: SerialLink, contact: CompanionContact & { type: 3 | 4 }, attempt: Attempt, active: AbortSignal) => Promise<T>) {
+    const key = contactPublicKey(nodeKey)
+    return this.runRadioCommand(radioKey, async (link) => {
+      const attempt = this.attempt!
+      const disconnected = new AbortController()
+      const stop = this.subscribe(() => {
+        if (this.attempt !== attempt || this.snapshot.phase !== 'ready') {
+          disconnected.abort(new Error('The radio disconnected before the node command completed.'))
+        }
+      })
+      const active = AbortSignal.any([signal, disconnected.signal])
+      try {
+        active.throwIfAborted()
+        const contacts = await this.readContacts(link)
+        active.throwIfAborted()
+        this.update({ contacts })
+        // The companion's in-flight login match uses four key bytes.
+        const matches = contacts.filter((contact) => contact.publicKey.slice(0, 8) === key.slice(0, 8))
+        const contact = matches.length === 1 && matches[0].publicKey === key ? matches[0] : undefined
+        if (!contact || (contact.type !== 3 && contact.type !== 4)) {
+          throw new Error('Select a saved room server or sensor with a unique key prefix.')
+        }
+        return await action(link, { ...contact, type: contact.type }, attempt, active)
+      } finally { stop() }
+    })
+  }
+
+  readonly loginNode = (radioKey: string, nodeKey: string, password: string, signal: AbortSignal) =>
+    this.withRemoteNode(radioKey, nodeKey, signal, async (link, { publicKey }, attempt, active) => {
+      if (attempt.unconfirmedNodeLogins?.has(publicKey)) {
+        throw new Error('The previous login may still reply. Reconnect before trying this node again. A late reply is still possible after reconnecting.')
+      }
+      const access = attempt.remoteAccess ??= new Map()
+      if (access.delete(publicKey)) this.update({})
+      const { loginRemoteNode, RemoteLoginUnconfirmed } = await import('./remote-nodes.ts')
+      try {
+        const login = await loginRemoteNode(link, publicKey, password, this.subscribeToPushes, active)
+        access.set(publicKey, login)
+        this.update({})
+        return login
+      } catch (error) {
+        if (error instanceof RemoteLoginUnconfirmed) (attempt.unconfirmedNodeLogins ??= new Set()).add(publicKey)
+        throw error
+      }
+    })
+
+  readonly readRoomStatus = (radioKey: string, nodeKey: string, signal: AbortSignal) =>
+    this.withRemoteNode(radioKey, nodeKey, signal, async (link, { publicKey, type }, attempt, active) => {
+      if (type !== 3 || !attempt.remoteAccess?.has(publicKey)) throw new Error('Sign in to the room server before requesting its status.')
+      const { parseRoomStatus, requestRemoteNodeData } = await import('./remote-nodes.ts')
+      return parseRoomStatus(await requestRemoteNodeData(link, publicKey, Uint8Array.of(1), this.subscribeToPushes, active))
+    })
+
+  readonly readNodeClients = (radioKey: string, nodeKey: string, signal: AbortSignal) =>
+    this.withRemoteNode(radioKey, nodeKey, signal, async (link, { publicKey }, attempt, active) => {
+      if (attempt.remoteAccess?.get(publicKey)?.role !== 'admin') throw new Error('Administrator access is required to read permissions.')
+      const { parseRemoteNodeClients, requestRemoteNodeData } = await import('./remote-nodes.ts')
+      return parseRemoteNodeClients(await requestRemoteNodeData(link, publicKey, Uint8Array.of(5, 0, 0), this.subscribeToPushes, active))
+    })
+
+  readonly readSensorHistory = (radioKey: string, nodeKey: string, seconds: number, signal: AbortSignal) =>
+    this.withRemoteNode(radioKey, nodeKey, signal, async (link, { publicKey, type }, attempt, active) => {
+      const role = attempt.remoteAccess?.get(publicKey)?.role
+      if (type !== 4 || !role || role === 'guest') throw new Error('Sign in with sensor history access before requesting readings.')
+      if (!Number.isInteger(seconds) || seconds < 1 || seconds > 0xffffffff) throw new Error('Select a valid history window.')
+      const request = new Uint8Array(11)
+      request[0] = 4
+      new DataView(request.buffer).setUint32(1, seconds, true)
+      const { requestRemoteNodeData } = await import('./remote-nodes.ts')
+      return decodeSensorSummary(await requestRemoteNodeData(link, publicKey, request, this.subscribeToPushes, active))
+    })
+
+  readonly administerNode = (radioKey: string, nodeKey: string, action: RemoteNodeAdmin, signal: AbortSignal) =>
+    this.withRemoteNode(radioKey, nodeKey, signal, async (link, { publicKey, type }, attempt, active) => {
+      if (attempt.remoteAccess?.get(publicKey)?.role !== 'admin') throw new Error('Sign in as an administrator before changing node settings.')
+      const { remoteNodeAdminText, sendRemoteNodeAdmin } = await import('./remote-nodes.ts')
+      const text = remoteNodeAdminText(action, type)
+      active.throwIfAborted()
+      const route = await sendRemoteNodeAdmin(link, publicKey, text)
+      if (action.kind === 'client-permissions' && contactPublicKey(action.publicKey) === radioKey) {
+        attempt.remoteAccess?.delete(publicKey)
+        this.update({})
+      }
+      return route
+    })
 
   readonly manageRepeater = async (
     radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
@@ -1307,7 +1404,7 @@ export class CompanionSession {
   private async withDirectContact<T>(
     radioKey: string,
     recipient: string,
-    command: (link: SerialLink) => Promise<T>,
+    command: (link: SerialLink, contact: CompanionContact) => Promise<T>,
     signal?: AbortSignal,
   ) {
     const key = contactPublicKey(recipient)
@@ -1334,7 +1431,7 @@ export class CompanionSession {
         throw new Error('Direct messages require a companion or room contact.')
       }
       if (signal?.aborted) throw new Error('The direct-message command was cancelled before transmission.')
-      return await command(link)
+      return await command(link, matches[0])
     } finally {
       this.directCommandPending = false
     }
@@ -1344,7 +1441,13 @@ export class CompanionSession {
     radioKey: string, recipient: string, timestamp: number, attempt: number, text: string, signal?: AbortSignal,
   ) => {
     const command = directMessageCommand(recipient, timestamp, attempt, text)
-    return this.withDirectContact(radioKey, recipient, async (link) => {
+    return this.withDirectContact(radioKey, recipient, async (link, contact) => {
+      if (contact.type === 3 && !canPostToRoom(this.getRemoteNodeAccess(radioKey, contact.publicKey))) {
+        throw new Error('Sign in to the room with posting access before sending a message.')
+      }
+      if (contact.type === 3 && command.length - 13 > maxRoomTextBytes) {
+        throw new Error(`Keep room posts within ${maxRoomTextBytes} UTF-8 bytes.`)
+      }
       const result = await link.request<{ error: Uint8Array } | { receipt: DirectSendReceipt }>(command, (frame) => {
         if (frame[0] === Response.error || frame[0] === Response.disabled) return { value: { error: frame } }
         return { value: { receipt: decodeDirectSent(frame) } }
