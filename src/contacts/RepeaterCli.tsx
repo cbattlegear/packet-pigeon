@@ -7,7 +7,7 @@ import {
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
   repeaterRegionRemoveCommand,
   repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
-  repeaterLimitedAccessCommand, repeaterLimitedAccessWarning,
+  repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -62,6 +62,7 @@ const interferenceWarning = 'Changing this can affect collisions, transmission d
 
 const managementForms = {
   regions: { title: 'Inspect repeater regions', terms: 'region get region home region put region remove region allowf region denyf region save region list region default' },
+  removeNeighbor: { title: 'Remove a cached neighbor', terms: 'neighbor.remove neighbors' },
   floodLimit: { title: 'Change flood hop limits', terms: 'set flood.max set flood.max.unscoped set flood.max.advert get flood.max get flood.max.unscoped get flood.max.advert' },
   loopDetection: { title: 'Change flood loop detection', terms: 'set loop.detect get loop.detect' },
   pathHash: { title: 'Change advert path hash size', terms: 'set path.hash.mode get path.hash.mode' },
@@ -107,6 +108,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [guestPassword, setGuestPassword] = useState('')
+  const [neighborKey, setNeighborKey] = useState('')
   const [accessKey, setAccessKey] = useState('')
   const [adminAccessKey, setAdminAccessKey] = useState('')
   const [limitedAccessKey, setLimitedAccessKey] = useState('')
@@ -456,6 +458,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitRemoveNeighbor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterRemoveNeighborCommand(neighborKey)
+      void send(command.command, `${command.description} for ${command.neighborTarget}`,
+        command.confirm, command.warning, command.command, () => setNeighborKey(''))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid neighbor public key.')
+    }
+  }
+
   function submitGrantAdmin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -555,6 +569,19 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }}>Sync messages for replies</button>
       <button type="button" disabled={!history.length || pending} onClick={() => setHistory([])}>Clear CLI history</button>
     </div>
+    <details data-cli-section="removeNeighbor">
+      <summary>{managementForms.removeNeighbor.title}</summary>
+      <p>{repeaterRemoveNeighborWarning} Enter the full 64-character hexadecimal public key, not the prefix in
+        the neighbor list. Sync the reply and request the neighbor list separately after removal.</p>
+      <form className="contact-actions" onSubmit={submitRemoveNeighbor}>
+        <label>Neighbor full public key
+          <input type="text" required value={neighborKey} autoComplete="off" spellCheck={false}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setNeighborKey(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Remove cached neighbor</button>
+      </form>
+    </details>
     <details data-cli-section="regions">
       <summary>{managementForms.regions.title}</summary>
       <p>The read controls do not change regions. Changes below affect the active map. The tree reply
@@ -1074,6 +1101,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">An OK reply does not prove a broadcast occurred or that any neighbors replied.
               Discovery responses are unauthenticated and do not prove identity. Wait up to 60 seconds, then request neighbors
               separately; old entries may remain and the list can be incomplete.</p>}
+          {item.command.startsWith('neighbor.remove ') && item.reply !== null &&
+            <p className="contact-status">An OK reply does not prove an entry matched. The neighbor can reappear;
+              older snapshots and maps remain stale, and a new neighbor list can be incomplete.</p>}
           {item.command.startsWith('setperm ') && item.command.endsWith(' 0') && item.reply !== null &&
             <p className="contact-status">An OK reply does not verify persistence. Firmware v1.14.1 may misdirect the reply,
               and absence from the access list does not prove removal.</p>}

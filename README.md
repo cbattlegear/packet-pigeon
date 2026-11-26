@@ -566,6 +566,13 @@ and evict older entries. Discovery responses are unauthenticated and do not
 prove identity. An `OK` reply does not prove a broadcast occurred or that any
 neighbors replied. Wait up to 60 seconds, then request `neighbors` separately.
 Old entries may remain, and the reported list can be incomplete.
+Administrators can confirm removal of a neighbor from the repeater's cache
+using its full public key. The four-byte prefixes in neighbor replies can
+collide and do not establish the full identity; verify the key independently.
+Removal does not block access or rediscovery, and the neighbor can reappear
+when heard again. In repeater firmware v1.14.1, `OK` does not prove an entry
+matched. Older snapshots and maps remain stale; request a new list separately,
+but it can be incomplete. Support varies by firmware.
 **Inspect repeater regions** offers explicit read-only tree, home, default-scope,
 and individual region queries. The region-tree reply can be truncated silently
 and is not a complete inventory. `F` marks flood permission, `^` the home

@@ -4,7 +4,7 @@ import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
   repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand, repeaterRemoveAccessCommand,
-  repeaterGrantAdminCommand, repeaterLimitedAccessCommand,
+  repeaterGrantAdminCommand, repeaterLimitedAccessCommand, repeaterRemoveNeighborCommand,
   parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
@@ -46,6 +46,26 @@ test('neighbor discovery requires confirmation and only accepts the exact comman
   assert.match(action.warning, /old entries may remain and the list can be incomplete/)
   for (const command of ['discover.neighbors ', 'discover.neighbors extra', 'discover.neighbors\nreboot']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('neighbor removal requires a full key and warns that removal is not a block', () => {
+  const key = 'dd'.repeat(32)
+  const action = repeaterRemoveNeighborCommand(key.toUpperCase())
+  assert.equal(action.command, `neighbor.remove ${key}`)
+  assert.equal(action.neighborTarget, key)
+  assert.equal(action.confirm, true)
+  assert.match(action.warning, /four-byte prefixes, which can collide/)
+  assert.match(action.warning, /not access or future discovery/)
+  assert.match(action.warning, /even if no entry matched/)
+  assert.match(action.warning, /Older snapshots and maps remain stale/)
+  assert.equal(repeaterCliCommand(`neighbor.remove ${key}`).confirm, true)
+  for (const command of [`neighbor.remove ${key.slice(0, 8)}`, 'neighbor.remove ',
+    `neighbor.remove ${key} `, `neighbor.remove ${key} extra`, `neighbor.remove ${key}\nreboot`]) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+  for (const value of ['dd'.repeat(4), 'gg'.repeat(32), 'dd'.repeat(33)]) {
+    assert.throws(() => repeaterRemoveNeighborCommand(value), /64-character hex public key/)
   }
 })
 

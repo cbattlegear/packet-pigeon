@@ -145,6 +145,21 @@ export function repeaterGuestPasswordCommand(value: string) {
   return repeaterCliCommand(`set guest.password ${value}`)
 }
 
+export const repeaterRemoveNeighborWarning = 'The neighbor list shows only four-byte prefixes, which can collide; verify the full public key independently. ' +
+  'This removes matching entries from the repeater neighbor cache, not access or future discovery. The neighbor can reappear when heard again. ' +
+  'In repeater firmware v1.14.1, OK is returned even if no entry matched. Older snapshots and maps remain stale; a new neighbor list can be incomplete. Firmware support varies.'
+
+export function repeaterRemoveNeighborCommand(value: string) {
+  const key = contactPublicKey(value)
+  return {
+    command: `neighbor.remove ${key}`,
+    description: 'Remove neighbor from repeater cache',
+    confirm: true as const,
+    neighborTarget: key,
+    warning: repeaterRemoveNeighborWarning,
+  }
+}
+
 export function repeaterRemoveAccessCommand(value: string) {
   const accessTarget = contactPublicKey(value)
   return {
@@ -270,6 +285,8 @@ function validatePosition(axis: 'lat' | 'lon', value: string) {
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
+  const removeNeighbor = /^neighbor\.remove ([0-9a-f]{64})$/i.exec(command)
+  if (removeNeighbor && removeNeighbor[0] === command) return repeaterRemoveNeighborCommand(removeNeighbor[1])
   const removeAccess = /^setperm ([0-9a-f]{64}) 0$/i.exec(command)
   if (removeAccess && removeAccess[0] === command) return repeaterRemoveAccessCommand(removeAccess[1])
   const grantAdmin = /^setperm ([0-9a-f]{64}) 3$/i.exec(command)
