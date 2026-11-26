@@ -34,6 +34,20 @@ test('neighbor replies parse exact firmware records and reject malformed or unsa
   }
 })
 
+test('neighbor discovery requires confirmation and only accepts the exact command', () => {
+  const action = repeaterCliCommand('discover.neighbors')
+  assert.equal(action.confirm, true)
+  assert.match(action.warning, /zero-hop discovery request/)
+  assert.match(action.warning, /nearby repeaters may also transmit replies/)
+  assert.match(action.warning, /replaces any discovery already in progress/)
+  assert.match(action.warning, /responses are unauthenticated and do not prove identity/)
+  assert.match(action.warning, /does not prove a broadcast occurred/)
+  assert.match(action.warning, /old entries may remain and the list can be incomplete/)
+  for (const command of ['discover.neighbors ', 'discover.neighbors extra', 'discover.neighbors\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('owner information is bounded, supports line breaks and rejects unsafe text', () => {
   assert.equal(repeaterOwnerInfoCommand('Line one\nLine two').command, 'set owner.info Line one|Line two')
   assert.equal(repeaterOwnerInfoCommand('').command, 'set owner.info ')

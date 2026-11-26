@@ -399,6 +399,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {!choices.length && <p>No commands match.</p>}
     {selected === 'neighbors' && <p>Each reply line is a four-byte key prefix, seconds since heard, and SNR multiplied by 4, separated by colons.
       The list is limited by the repeater. Only unique matches with saved coordinates can be mapped; separate dots do not imply a route.</p>}
+    {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
         if (action) sendChoice(action)
@@ -787,6 +788,10 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.command === 'get radio.rxgain' && item.reply !== null &&
             <p className="contact-status">An on/off reply reports the current preference, not the applied radio setting or successful persistence.
               Some unsupported builds return radio parameters instead of a gain result.</p>}
+          {item.command === 'discover.neighbors' && item.reply !== null &&
+            <p className="contact-status">An OK reply does not prove a broadcast occurred or that any neighbors replied.
+              Discovery responses are unauthenticated and do not prove identity. Wait up to 60 seconds, then request neighbors
+              separately; old entries may remain and the list can be incomplete.</p>}
           {item.command === 'neighbors' && item.reply !== null &&
             <NeighborReport reply={item.reply.text} syncedAt={item.reply.syncedAt} name={name} repeaterPosition={repeaterPosition}
               nodes={neighborNodes} onMap={onMap} />}
