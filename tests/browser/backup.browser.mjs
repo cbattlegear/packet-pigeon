@@ -39,27 +39,47 @@ test('backs up selected settings, restores data and identity, and guards mainten
     const decode = new TextDecoder()
     const bytes = (hex) => Uint8Array.from(hex.match(/../g), (pair) => parseInt(pair, 16))
     const commands = []
-    const contacts = new Map()
+    let contacts = new Map()
     const existing = new Uint8Array(148)
     existing.set([3, ...bytes(existingKey), 2, 0, 255])
     existing.set(encoder.encode('Existing relay'), 100)
     contacts.set(existingKey, existing)
+    let flashContacts = new Map(contacts)
+    let signedMessageCursor = 0
+    let flashSignedMessageCursor = 0
+    let bootedAt = performance.now() - 60_000
+    let rebootGate
     const slots = [{ name: 'Public', key: new Uint8Array(16).fill(0x15) }, null, null]
     let identity = current
     let storedName = 'Backup fixture'
     let region = null
     window.backupCommands = commands
     window.savedContactKeys = () => [...contacts.keys()]
+    window.receiveSignedMessage = (cursor) => { signedMessageCursor = cursor }
+    window.readSignedMessageCursor = () => signedMessageCursor
+    window.readExistingContact = () => decode.decode(contacts.get(existingKey).subarray(100, 132)).split('\0')[0]
+    window.updateExistingContact = (name) => {
+      const updated = contacts.get(existingKey).slice()
+      updated.fill(0, 100, 132)
+      updated.set(encoder.encode(name), 100)
+      contacts.set(existingKey, updated)
+    }
+    window.deferReboot = () => { rebootGate = new Promise((release) => { window.releaseReboot = release }) }
     function openPort() {
       let controller
       const send = (frame) => controller.enqueue(Uint8Array.of(0x3e, frame.length, 0, ...frame))
       return Object.assign(new EventTarget(), {
         readable: new ReadableStream({ start(incoming) { controller = incoming } }),
-        writable: new WritableStream({ write(packet) {
+        writable: new WritableStream({ async write(packet) {
           const data = packet.slice(3)
           const [code, slot] = data
           commands.push(code)
           if (code === 22) send([13, 14, 1, slots.length, ...new Uint8Array(78)])
+          else if (code === 56) {
+            const stats = Uint8Array.of(24, 0, ...new Uint8Array(11))
+            new DataView(stats.buffer).setUint32(4, Math.floor((performance.now() - bootedAt) / 1_000), true)
+            send(stats)
+          }
           else if (code === 1) {
             const self = Uint8Array.of(5, 1, 7, 20, ...bytes(identity.publicKey), ...new Uint8Array(22), ...encoder.encode(storedName))
             const view = new DataView(self.buffer)
@@ -86,7 +106,8 @@ test('backs up selected settings, restores data and identity, and guards mainten
           else if (code === 24 && data.slice(1).every((byte, index) => byte === bytes(target.secret)[index])) {
             identity = target
             // Identity replacement reloads contacts and drops recent edits that have not reached flash.
-            for (const key of contacts.keys()) if (key !== existingKey) contacts.delete(key)
+            contacts = new Map(flashContacts)
+            signedMessageCursor = flashSignedMessageCursor
             send([0])
           } else if (code === 31) {
             const channel = slots[slot]
@@ -105,7 +126,14 @@ test('backs up selected settings, restores data and identity, and guards mainten
             region = data.length > 1 ? data.slice(1) : null
             send([0])
           } else if (code === 64) send(region ? [28, ...region] : [28])
-          else if (code === 19 || code === 51) {
+          else if (code === 19) {
+            if (window.ignoreReboot) return
+            await rebootGate
+            flashContacts = new Map(contacts)
+            flashSignedMessageCursor = signedMessageCursor
+            contacts = new Map(flashContacts)
+            bootedAt = performance.now()
+          } else if (code === 51) {
             // These requests may close the transport before a response.
           } else throw new Error(`Unexpected backup command ${code}`)
         } }),
@@ -124,9 +152,13 @@ test('backs up selected settings, restores data and identity, and guards mainten
   assert.equal(await exported.getByLabel('Private identity key', { exact: true }).isChecked(), false)
   await exported.getByRole('button', { name: 'Deselect all export sections' }).click()
   await exported.getByLabel('Radio name', { exact: true }).check()
-  const download = page.waitForEvent('download')
+  const download = page.waitForEvent('download', { timeout: 45_000 })
   await exported.getByRole('button', { name: 'Download configuration' }).click()
-  const file = await download
+  const file = await download.catch(async (error) => {
+    const status = await panel.getByRole('status').allTextContents()
+    const alerts = await panel.getByRole('alert').allTextContents()
+    throw new Error(`Name export did not start a download. ${[...status, ...alerts].join(' ')}`, { cause: error })
+  })
   assert.deepEqual(JSON.parse(await readFile(await file.path(), 'utf8')), {
     name: 'Backup fixture', public_key: current.publicKey, packet_pigeon: { version: 1 },
   })
@@ -197,20 +229,50 @@ test('backs up selected settings, restores data and identity, and guards mainten
   await preview.getByRole('button', { name: 'Deselect all restore sections' }).click()
   await preview.getByLabel(/^Private identity key/).check()
   await preview.getByLabel(/^Contacts/).check()
-  await restore.click()
-  assert.equal(await page.evaluate(() => window.backupCommands.includes(24)), false)
+  const prepare = preview.getByRole('button', { name: 'Prepare identity recovery' })
+  await prepare.click()
+  assert.equal(await page.evaluate(() => window.backupCommands.includes(19)), false)
+  await page.evaluate(() => { window.ignoreReboot = true })
+  page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
+  await prepare.click()
+  await panel.getByText(/Radio reboot requested to save pending contacts/).waitFor()
+  await page.getByRole('button', { name: 'Connect USB' }).click()
+  await panel.getByText(/Connected radio Restored node/).waitFor()
   page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
   await restore.click()
-  await panel.getByRole('button', { name: 'Stop after current command' }).click()
-  await panel.getByText(/Operation stopped/).waitFor()
+  await panel.getByText(/The radio restart could not be verified/).waitFor()
+  assert.equal(await page.evaluate(() => window.backupCommands.includes(24)), false)
+
+  await page.evaluate(() => {
+    window.ignoreReboot = false
+    window.deferReboot()
+  })
+  page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
+  await prepare.click()
+  await page.waitForFunction(() => window.backupCommands.filter((code) => code === 19).length === 2)
+  await page.evaluate(() => {
+    window.updateExistingContact('Edit while reboot is pending')
+    window.receiveSignedMessage(123)
+    window.releaseReboot()
+  })
+  await panel.getByText(/Radio reboot requested to save pending contacts/).waitFor()
+  assert.equal(await page.evaluate(() => window.backupCommands.includes(24)), false)
+  await page.getByRole('button', { name: 'Connect USB' }).click()
+  await panel.getByText(/Connected radio Restored node/).waitFor()
+  assert.equal(await page.evaluate(() => window.readExistingContact()), 'Edit while reboot is pending')
+  await page.evaluate(() => window.updateExistingContact('Edit after reconnect'))
+  await restore.click()
   assert.equal(await page.evaluate(() => window.backupCommands.includes(24)), false)
   page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
   await restore.click()
   await panel.getByText(/Reconnect and verify the public key/).waitFor()
   assert.ok(await page.evaluate(() => window.backupCommands.lastIndexOf(9) > window.backupCommands.lastIndexOf(24)))
+  assert.ok(await page.evaluate(() => window.backupCommands.lastIndexOf(19) > window.backupCommands.lastIndexOf(9)))
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await panel.getByText(/Restored identity verified/).waitFor()
   assert.deepEqual(await page.evaluate(() => window.savedContactKeys()), [existingKey, contactKey])
+  assert.equal(await page.evaluate(() => window.readExistingContact()), 'Edit after reconnect')
+  assert.equal(await page.evaluate(() => window.readSignedMessageCursor()), 123)
   const restoredName = await page.evaluate(async ({ publicKey, contactKey }) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()

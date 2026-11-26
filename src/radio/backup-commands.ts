@@ -9,6 +9,13 @@ type ChannelBackup = { name: string; secret: string }
 type ChannelResult = BackupWrite & { source: ChannelBackup; channel?: CompanionChannel }
 type BackupContact = Omit<CompanionContact, 'lastModifiedAt'>
 type ContactResult = BackupWrite & { publicKey: string }
+type ContactBackupTarget = {
+  ownKey: string
+  firmware: number
+  capacity: number
+  connected: () => boolean
+  readContacts: () => Promise<readonly CompanionContact[]>
+}
 type Slot = { channel: CompanionChannel; secret: Uint8Array } | null
 
 function failure(error: unknown) {
@@ -108,13 +115,8 @@ export async function restoreBackupChannels(link: SerialLink, capacity: number, 
   }
 }
 
-export async function restoreBackupContacts(link: SerialLink, entries: readonly BackupContact[], signal: AbortSignal, target: {
-  ownKey: string
-  firmware: number
-  capacity: number
-  connected: () => boolean
-  readContacts: () => Promise<readonly CompanionContact[]>
-}) {
+export async function restoreBackupContacts(link: SerialLink, entries: readonly BackupContact[], signal: AbortSignal,
+  target: ContactBackupTarget) {
   if (!entries.length) return []
   const current = signal.aborted || !target.connected() ? [] : await target.readContacts().catch(() => null)
   if (!current) {
@@ -143,6 +145,39 @@ export async function restoreBackupContacts(link: SerialLink, entries: readonly 
       const status = writeStatus(error)
       if (status === 'uncertain') knownKeys.add(publicKey)
       results.push({ label, publicKey, status, reason: failure(error) })
+    }
+  }
+  return results
+}
+
+function pendingContactChanges(before: readonly CompanionContact[], loaded: readonly CompanionContact[]) {
+  const byKey = new Map(loaded.map((contact) => [contact.publicKey, contact]))
+  return before.filter((contact) => {
+    const persisted = byKey.get(contact.publicKey)
+    if (!persisted) return true
+    if (persisted.lastModifiedAt > contact.lastModifiedAt) return false
+    return persisted.flags !== contact.flags || persisted.name !== contact.name || persisted.type !== contact.type ||
+      persisted.pathLength !== contact.pathLength || persisted.pathHex !== contact.pathHex ||
+      persisted.latitude !== contact.latitude || persisted.longitude !== contact.longitude ||
+      persisted.lastAdvertisedAt !== contact.lastAdvertisedAt
+  })
+}
+
+export async function restoreContactsAfterIdentity(link: SerialLink, before: readonly CompanionContact[],
+  contacts: readonly BackupContact[], signal: AbortSignal, target: ContactBackupTarget, reboot: Uint8Array) {
+  // The firmware reloads contacts from flash when the identity changes.
+  const loaded = await target.readContacts()
+  const pending = pendingContactChanges(before, loaded).filter((contact) => contact.publicKey !== target.ownKey)
+  // Complete preservation even if the user stops the remaining selected imports.
+  const preservation = new AbortController()
+  const preserved = await restoreBackupContacts(link, pending, preservation.signal, { ...target, readContacts: async () => loaded })
+  const results = preserved.map(({ label, ...result }) => ({ ...result, publicKey: '', label: `Preserve ${label}` }))
+  results.push(...await restoreBackupContacts(link, contacts, signal, target))
+  if (results.some(({ status }) => status === 'saved')) {
+    try { await link.sendWithoutReply(reboot) }
+    catch {
+      results.push({ publicKey: '', label: 'Save pending contacts', status: 'uncertain',
+        reason: 'Reconnect and verify the restored contacts before powering off the radio.' })
     }
   }
   return results

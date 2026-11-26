@@ -30,6 +30,7 @@ import { assertScopeSupported, channelScopeCommand, validateChannelScope, writeC
 import type { ChannelScope } from './channel-scope.ts'
 import { requestOwnTelemetry, requestRemoteTelemetry, telemetryProtocolVersion } from './telemetry.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
+import type { IdentityRecoveryPreparation } from './identity-backup.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -1021,13 +1022,13 @@ export class CompanionSession {
   }
 
   private async runMaintenance(radioKey: string, write: (link: SerialLink) => Promise<void>,
-    prepare?: () => Promise<void>) {
+    prepare?: (link: SerialLink) => Promise<void>) {
     const generation = this.generation
     let disconnect = false
     try {
       await this.runRadioCommand(radioKey, async (link) => {
         const attempt = this.attempt!
-        if (prepare) await prepare()
+        if (prepare) await prepare(link)
         if (this.attempt !== attempt) throw new Error('The radio disconnected before maintenance started.')
         attempt.maintenance = true
         disconnect = true
@@ -1046,25 +1047,61 @@ export class CompanionSession {
     }
   }
 
+  readonly prepareIdentityRecovery = async (radioKey: string, signal: AbortSignal) => {
+    const { maintenanceCommand, readBootTime } = await import('./identity-backup.ts')
+    if ((this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0) < 8) {
+      throw new Error('Identity recovery requires firmware that can verify a reboot before replacing the key.')
+    }
+    let bootTime = 0
+    let preparation: IdentityRecoveryPreparation | undefined
+    try {
+      await this.runMaintenance(radioKey, async (link) => {
+        const requestedAt = performance.now()
+        await link.sendWithoutReply(maintenanceCommand('reboot'))
+        preparation = { radioKey, bootTime, requestedAt }
+      }, async (link) => {
+        bootTime = await readBootTime(link)
+        signal.throwIfAborted()
+      })
+    } catch (error) {
+      if (!preparation) throw error
+    }
+    return preparation!
+  }
+
+  readonly verifyIdentityRecovery = async (radioKey: string, preparation: IdentityRecoveryPreparation, signal: AbortSignal) => {
+    const { readBootTime, verifyRebootTime } = await import('./identity-backup.ts')
+    if (preparation.radioKey !== radioKey) throw new Error('Reconnect the radio prepared for identity recovery.')
+    const bootTime = await this.runRadioCommand(radioKey, readBootTime)
+    signal.throwIfAborted()
+    verifyRebootTime(preparation, bootTime)
+  }
+
   readonly restoreDeviceIdentity = async (radioKey: string, key: Uint8Array, expectedPublicKey: string,
     contacts: readonly Omit<CompanionContact, 'lastModifiedAt'>[], signal: AbortSignal) => {
-    const { waitForPendingContactSave, writeBackupIdentity } = await import('./identity-backup.ts')
-    const { restoreBackupContacts } = await import('./backup-commands.ts')
+    const { maintenanceCommand, writeBackupIdentity } = await import('./identity-backup.ts')
+    const { restoreContactsAfterIdentity } = await import('./backup-commands.ts')
     if (radioKey === expectedPublicKey) return []
     let identitySaved = false
-    let results: Awaited<ReturnType<typeof restoreBackupContacts>> = []
+    let before: readonly CompanionContact[] = []
+    let results: Awaited<ReturnType<typeof restoreContactsAfterIdentity>> = []
     try {
       await this.runMaintenance(radioKey, async (link) => {
         const { firmwareProtocolVersion: firmware, maxContacts: capacity } = this.snapshot.device!.capabilities
         await writeBackupIdentity(link, key, expectedPublicKey)
         identitySaved = true
-        // The firmware reloads contacts from flash after replacing the identity.
         const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
-        results = await restoreBackupContacts(link, contacts, signal, { ownKey: expectedPublicKey, firmware, capacity,
-          connected, readContacts: () => this.readContacts(link) })
-      }, () => waitForPendingContactSave(signal))
+        results = await restoreContactsAfterIdentity(link, before, contacts, signal,
+          { ownKey: expectedPublicKey, firmware, capacity, connected, readContacts: () => this.readContacts(link) },
+          maintenanceCommand('reboot'))
+      }, async (link) => {
+        before = await this.readContacts(link)
+        signal.throwIfAborted()
+      })
     } catch (error) {
       if (!identitySaved) throw error
+      if (!results.length) results.push({ publicKey: '', label: 'Verify contacts', status: 'uncertain',
+        reason: 'Reconnect and verify the radio’s contacts after the identity change.' })
     }
     return results
   }

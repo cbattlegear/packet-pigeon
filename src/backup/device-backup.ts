@@ -3,12 +3,14 @@ import type { RadioData, RadioKey, RadioUpdate } from '../storage/index.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import type { DeviceEdits, DeviceSaveResult } from '../radio/device-settings.ts'
 import type { BackupWrite } from '../radio/backup-commands.ts'
+import type { IdentityRecoveryPreparation } from '../radio/identity-backup.ts'
 import { regionKey } from '../radio/channel-scope.ts'
 import { secretHex } from '../radio/channel-commands.ts'
 import { backupJson, retentionDays } from './model.ts'
 import type { BackupChannel, BackupData, BackupSection } from './model.ts'
 
 export type BackupSession = Pick<CompanionSession, 'getSnapshot' | 'exportDeviceIdentity' | 'restoreDeviceIdentity'
+  | 'prepareIdentityRecovery' | 'verifyIdentityRecovery'
   | 'exportBackupChannels' | 'exportBackupContacts' | 'importBackupChannels' | 'importBackupContacts'
   | 'exportBackupDefaultRegion' | 'importBackupDefaultRegion'
   | 'getAutoAdd' | 'setAutoAdd' | 'saveDevicePreferences' | 'sendMaintenance' | 'whileRadioDisconnected'>
@@ -125,7 +127,7 @@ export async function exportBackup(session: BackupSession, key: RadioKey, sectio
 }
 
 export async function restoreBackup(session: BackupSession, key: RadioKey, backup: BackupData, sections: ReadonlySet<BackupSection>,
-  signal: AbortSignal) {
+  signal: AbortSignal, preparation?: IdentityRecoveryPreparation) {
   const results: BackupResult[] = []
   const savedContacts = new Set<string>()
   let restoredChannels: RestoredChannels | undefined
@@ -135,6 +137,10 @@ export async function restoreBackup(session: BackupSession, key: RadioKey, backu
   const snapshot = session.getSnapshot()
   const device = sections.size === 1 && sections.has('regions') &&
     (snapshot.phase !== 'ready' || snapshot.device?.publicKey !== key) ? null : connectedDevice(session, key)
+  if (sections.has('identity') && backup.identity && backup.identity.publicKey !== key) {
+    if (!preparation) throw new Error('Reboot the connected radio before replacing its identity.')
+    await session.verifyIdentityRecovery(key, preparation, signal)
+  }
 
   async function restore(section: BackupSection, label: string, operation: () => Promise<void>) {
     if (!sections.has(section)) return

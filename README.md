@@ -310,11 +310,13 @@ need a free slot. Backups preserve default sending scope and indefinite
 retention. Imported retention also supports 1, 7, 30, or 90 days. Results show
 skipped, failed, and unconfirmed changes.
 
-Replacing an identity requires typing the current radio's key prefix. Reconnect
-afterward to verify the recovered public key. Identity export and import depend
-on firmware support. **Local archive and radio maintenance** offers a separate
-download of cached chats and drafts, cache clearing for a disconnected radio,
-and confirmations for radio reboot and factory reset.
+Identity recovery first reboots the selected radio to save pending contacts.
+Reconnect the same radio and type its current key prefix to confirm replacement.
+The radio restarts again if contacts were written. Reconnect to verify the
+recovered public key. Recovery requires firmware with identity import and reboot
+verification. **Local archive and radio maintenance** offers a separate download
+of cached chats and drafts, cache clearing for a disconnected radio, and
+confirmations for radio reboot and factory reset.
 
 ## Telemetry
 

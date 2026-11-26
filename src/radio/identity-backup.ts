@@ -4,6 +4,8 @@ import { expectResponse } from './serial-link.ts'
 import type { SerialLink } from './serial-link.ts'
 import { writeSettingsCommand } from './setup-commands.ts'
 
+export type IdentityRecoveryPreparation = { radioKey: string; bootTime: number; requestedAt: number }
+
 export function backupPublicKey(privateKey: Uint8Array) {
   if (privateKey.length !== 64 || (privateKey[0] & 7) !== 0 || (privateKey[31] & 0xc0) !== 0x40) {
     throw new Error('The backup does not contain a valid MeshCore expanded identity key.')
@@ -38,12 +40,19 @@ export async function writeBackupIdentity(link: SerialLink, key: Uint8Array, exp
   }
 }
 
-export async function waitForPendingContactSave(signal: AbortSignal) {
-  // The firmware defers contact saves for five seconds and reloads them during identity import.
-  signal.throwIfAborted()
-  const settled = AbortSignal.any([signal, AbortSignal.timeout(5_100)])
-  await new Promise<void>((resolve) => settled.addEventListener('abort', () => resolve(), { once: true }))
-  signal.throwIfAborted()
+export async function readBootTime(link: SerialLink) {
+  const frame = await link.request(Uint8Array.of(56, 0), (reply) => ({ value: reply }))
+  expectResponse(frame, 24)
+  if (frame.length < 13 || frame[1] !== 0) throw new Error('The radio did not report its uptime.')
+  const uptime = new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(4, true)
+  return performance.now() - uptime * 1_000
+}
+
+export function verifyRebootTime(preparation: IdentityRecoveryPreparation, bootTime: number) {
+  // Uptime is reported in whole seconds. Allow for rounding and transport latency.
+  if (bootTime <= preparation.bootTime + 1_500 || bootTime < preparation.requestedAt - 1_500) {
+    throw new Error('The radio restart could not be verified. Reboot and reconnect it before replacing its identity.')
+  }
 }
 
 export function maintenanceCommand(action: 'reboot' | 'reset') {

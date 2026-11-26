@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CompanionSnapshot } from '../radio/companion-session.ts'
+import type { IdentityRecoveryPreparation } from '../radio/identity-backup.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioKey } from '../storage/index.ts'
 import { exportBackup, exportLocalArchive, restoreBackup } from './device-backup.ts'
@@ -74,6 +75,7 @@ export default function BackupPanel({ snapshot, session, radioBusy, canPurge, on
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [preparation, setPreparation] = useState<IdentityRecoveryPreparation>()
   const [expectedIdentity, setExpectedIdentity] = useState<string>()
   const parsed = useRef<BackupData | null>(null)
   const operation = useRef<AbortController | null>(null)
@@ -89,6 +91,8 @@ export default function BackupPanel({ snapshot, session, radioBusy, canPurge, on
     .filter((section) => preview?.fields[section] !== undefined && (liveKey !== null || section === 'regions'))
   const selectedExport = new Set(exportable.filter((section) => exportSelection.has(section)))
   const selectedImport = new Set(availableImport.filter((section) => importSelection.has(section)))
+  const replacingIdentity = selectedImport.has('identity') && preview?.fields.identity !== liveKey
+  const needsPreparation = replacingIdentity && preparation?.radioKey !== liveKey
   const knownCache = key !== null && keys.includes(key)
 
   useEffect(() => {
@@ -118,6 +122,7 @@ export default function BackupPanel({ snapshot, session, radioBusy, canPurge, on
     const version = ++fileVersion.current
     parsed.current?.identity?.privateKey.fill(0)
     parsed.current = null
+    setPreparation(undefined)
     setPreview(null)
     setImportSelection(new Set())
     setResults([])
@@ -178,13 +183,25 @@ export default function BackupPanel({ snapshot, session, radioBusy, canPurge, on
   function applySelected() {
     const data = parsed.current
     if (!key || !data || !selectedImport.size) return
-    if (selectedImport.has('identity') && data.identity && data.identity.publicKey !== key) {
-      if (!confirmKey(`Apply the selected settings and replace the identity of ${selectedLabel}? Reconnect afterward to verify the new public key.`)) return
+    if (needsPreparation) {
+      if (!confirmKey(`Reboot ${selectedLabel} to save pending contacts before identity recovery? Reconnect to continue the restore.`)) return
+      void run(async (signal) => {
+        setPreparation(await session.prepareIdentityRecovery(key, signal))
+        setNotice('Radio reboot requested to save pending contacts. Reconnect the same radio to continue recovery.')
+      })
+      return
+    }
+    if (replacingIdentity) {
+      if (!confirmKey(`Apply the selected settings and replace the identity of ${selectedLabel}? The radio may restart to save contacts. Reconnect afterward to verify the new public key.`)) return
     } else if (!window.confirm(`Restore the selected sections for ${selectedLabel}? Matching contact details and selected browser settings can be replaced. Existing radio channel keys stay in place.`)) return
     void run(async (signal) => {
-      const applied = await restoreBackup(session, key, data, selectedImport, signal)
+      const applied = await restoreBackup(session, key, data, selectedImport, signal, preparation).catch((error: unknown) => {
+        if (replacingIdentity) setPreparation(undefined)
+        throw error
+      })
       setResults(applied.results)
       setExpectedIdentity(applied.transferredIdentity)
+      if (applied.transferredIdentity) setPreparation(undefined)
       if (!applied.results.length) setNotice('No entries were selected for writing.')
       onCacheChanged(key)
       if (applied.transferredIdentity) onCacheChanged(radioKeyFromPublicKey(applied.transferredIdentity))
@@ -272,7 +289,9 @@ export default function BackupPanel({ snapshot, session, radioBusy, canPurge, on
           <ul className="backup-names">{preview.names.map((name, index) => <li key={index}>{name}</li>)}</ul>
         </details>}
         <p>Contacts with matching public keys are updated. New channels use free slots. Matching channels can receive browser scope and retention settings.</p>
-        <button type="button" disabled={!selectedImport.size} onClick={applySelected}>Restore selected sections</button>
+        <button type="button" disabled={!selectedImport.size} onClick={applySelected}>
+          {needsPreparation ? 'Prepare identity recovery' : 'Restore selected sections'}
+        </button>
       </fieldset>}
     </details>
     <details>
