@@ -71,8 +71,10 @@ unplug/replug on every supported browser.
 Use **Sync messages** in Chats to request queued receipts. Each receipt,
 including an unsupported or malformed response's raw bytes, is saved before
 requesting another; receipts are stored individually and are not deduplicated
-by their contents. An optional filter hides possible repeats without deleting
-them; they may be distinct messages. Unrecognized or malformed responses are
+by their contents. The workspace sync status shows how many receipts have been
+saved during the current sync; the radio does not report a queue total. An
+optional filter hides possible repeats without deleting them; they may be
+distinct messages. Unrecognized or malformed responses are
 saved as raw bytes and stop the sync for inspection; they can also be device
 errors rather than receipts. If saving fails, syncing stops and the receipt stays
 in memory for retry. Keep the tab open until it has been saved. Radio ownership
