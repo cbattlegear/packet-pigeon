@@ -71,8 +71,10 @@ unplug/replug on every supported browser.
 Use **Sync messages** in Chats to request queued receipts. Each receipt,
 including an unsupported or malformed response's raw bytes, is saved before
 requesting another; receipts are stored individually and are not deduplicated
-by their contents. An optional filter hides possible repeats without deleting
-them; they may be distinct messages. Unrecognized or malformed responses are
+by their contents. The workspace sync status shows how many receipts have been
+saved during the current sync; the radio does not report a queue total. An
+optional filter hides possible repeats without deleting them; they may be
+distinct messages. Unrecognized or malformed responses are
 saved as raw bytes and stop the sync for inspection; they can also be device
 errors rather than receipts. If saving fails, syncing stops and the receipt stays
 in memory for retry. Keep the tab open until it has been saved. Radio ownership
@@ -496,9 +498,11 @@ available when supported by firmware. Browsing adverts and path lookup use
 passive adverts and local cache lookups, not active mesh requests.
 
 The live noise-floor monitor starts only when requested and polls local radio
-statistics every two seconds over USB on companion protocol v8 or newer. It
-does not transmit a mesh request. Stop polling or leave Discovery to prevent
-further reads; a read already in flight must finish or time out.
+statistics every two seconds over USB or Bluetooth on companion protocol v8 or
+newer. It does not transmit a mesh request. Bluetooth notifications can be
+split or dropped; malformed or missing replies stop polling. Stop polling or
+leave Discovery to prevent further reads; a read already in flight must finish
+or time out.
 
 **Send nearby discovery** explicitly transmits one zero-hop discovery broadcast
 and listens for 20 seconds. It requires companion protocol v8 or newer.
