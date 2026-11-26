@@ -25,6 +25,7 @@ import type { AutoAddPolicy, NearbyNode, RepeaterDetails } from './discovery-com
 import { channelName, makeChannelSecret, readChannelSlot, secretHex, writeChannelSlot } from './channel-commands.ts'
 import { channelMessageCommand } from './channel-message.ts'
 import { writeSetupPathWidth, writeSetupRadioSettings } from './setup-commands.ts'
+import type { AdvancedDeviceEdits, DeviceEdits, DeviceSaveResult } from './device-settings.ts'
 import { assertScopeSupported, channelScopeCommand, validateChannelScope, writeChannelScope } from './channel-scope.ts'
 import type { ChannelScope } from './channel-scope.ts'
 import { requestOwnTelemetry, requestRemoteTelemetry, telemetryProtocolVersion } from './telemetry.ts'
@@ -913,6 +914,44 @@ export class CompanionSession {
         this.update({ device: { ...device, capabilities: { ...device.capabilities, pathHashMode: width - 1 } } })
       }
     })
+
+  readonly getDeviceDetails = async (radioKey: string) => {
+    const { readDeviceDetails } = await import('./device-settings.ts')
+    return this.runRadioCommand(radioKey, (link) => readDeviceDetails(link, this.snapshot.device!.capabilities.firmwareProtocolVersion))
+  }
+
+  readonly saveDevicePreferences = async (radioKey: string, edits: DeviceEdits, advanced: AdvancedDeviceEdits = {}) => {
+    const { advancedDeviceOperations, deviceOperations } = await import('./device-settings.ts')
+    const results: DeviceSaveResult[] = []
+    try {
+      await this.runRadioCommand(radioKey, async (link) => {
+        const device = this.snapshot.device!
+        const operations = [...deviceOperations(device, edits),
+          ...await advancedDeviceOperations(device.capabilities.firmwareProtocolVersion, advanced)]
+        const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
+        for (const operation of operations) {
+          if (!connected()) {
+            results.push({ label: operation.label, status: 'skipped', reason: 'The radio disconnected.' })
+            continue
+          }
+          try {
+            await operation.write(link)
+            if (operation.update && connected()) this.update({ device: operation.update(this.snapshot.device!) })
+            results.push({ label: operation.label, status: 'saved' })
+          } catch (error) {
+            const uncertain = error instanceof CompanionError && ['timeout', 'disconnected', 'serial-io', 'protocol'].includes(error.code)
+            results.push({
+              label: operation.label, status: uncertain ? 'uncertain' : 'failed',
+              reason: error instanceof Error ? error.message : 'The radio setting could not be saved.',
+            })
+          }
+        }
+      })
+    } catch (error) {
+      if (!results.length) throw error
+    }
+    return results
+  }
 
   private async withDirectContact<T>(
     radioKey: string,

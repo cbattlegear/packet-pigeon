@@ -66,12 +66,23 @@ export type RadioParameters = {
   codingRate: number
 }
 
+export type DevicePreferences = {
+  readonly txPowerDbm: number
+  readonly maxTxPowerDbm: number
+  readonly latitude: number
+  readonly longitude: number
+  readonly advertLocation: boolean | null
+  readonly telemetryPolicy: number | null
+  readonly extraAcknowledgements: boolean | null
+}
+
 export interface CompanionDevice {
   readonly publicKey: string
   readonly name: string
   readonly type: number
   readonly contactMode: number
   readonly capabilities: DeviceCapabilities
+  readonly preferences: DevicePreferences
   readonly radioParameters?: RadioParameters
 }
 
@@ -173,6 +184,15 @@ export function decodeSelf(frame: Uint8Array, capabilities: DeviceCapabilities):
     type: frame[1],
     contactMode: frame[47],
     capabilities,
+    preferences: {
+      txPowerDbm: data.getInt8(2),
+      maxTxPowerDbm: data.getInt8(3),
+      latitude: data.getInt32(36, true) / 1e6,
+      longitude: data.getInt32(40, true) / 1e6,
+      advertLocation: frame[45] <= 1 ? frame[45] === 1 : null,
+      telemetryPolicy: capabilities.firmwareProtocolVersion >= 5 ? frame[46] : null,
+      extraAcknowledgements: capabilities.firmwareProtocolVersion >= 7 && frame[44] <= 1 ? frame[44] === 1 : null,
+    },
     ...(frequency > 0 && bandwidth > 0 ? { radioParameters: {
       frequencyMHz: frequency / 1_000, bandwidthKHz: bandwidth / 1_000,
       spreadingFactor: frame[56], codingRate: frame[57],

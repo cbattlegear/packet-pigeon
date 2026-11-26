@@ -358,6 +358,91 @@ function contactInfo() {
   return frame
 }
 
+test('validates changes before writing and preserves successful settings across a rejected write', async (t) => {
+  const key = 'ab'.repeat(32)
+  const writes = []
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: {
+        const self = selfInfo()
+        self.set([7, 20], 2)
+        self.set([1, 0x91], 46)
+        const data = new DataView(self.buffer)
+        data.setUint32(48, 915000, true)
+        data.setUint32(52, 62500, true)
+        self.set([7, 5], 56)
+        serial.emit(...self)
+        break
+      }
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 60: {
+        const frame = new Uint8Array(9)
+        frame[0] = 26
+        const data = new DataView(frame.buffer)
+        data.setUint32(1, 918000, true)
+        data.setUint32(5, 918000, true)
+        serial.emit(...frame)
+        break
+      }
+      default: {
+        writes.push(command)
+        if (command[0] === 12) serial.emit(1, 6)
+        else serial.emit(0)
+      }
+    }
+  })
+  const session = sessionWith(port)
+  t.after(() => session.disconnect())
+  await session.connect()
+  await assert.rejects(session.saveDevicePreferences(key, { name: 'Would write', txPower: 50 }), /must be between/)
+  await assert.rejects(session.saveDevicePreferences(key, { name: 'Would write' }, { pin: '01' }), /six-digit BLE PIN/)
+  assert.deepEqual(writes, [])
+  const results = await session.saveDevicePreferences(key, {
+    name: 'New Pigeon', position: { latitude: -34.25, longitude: 151.125 }, txPower: 16, pathWidth: 3,
+    telemetry: { environment: 2 }, extraAcknowledgements: true,
+  })
+  assert.deepEqual(results.map(({ status }) => status), ['saved', 'saved', 'failed', 'saved', 'saved'])
+  assert.deepEqual(writes.map(([code]) => code), [8, 14, 12, 61, 38])
+  const position = Buffer.from(writes[1])
+  assert.equal(position.readInt32LE(1), -34_250_000)
+  assert.equal(position.readInt32LE(5), 151_125_000)
+  assert.deepEqual(writes.at(-1), [38, 0x91, 33, 0, 1])
+  const device = session.getSnapshot().device
+  assert.equal(device.name, 'New Pigeon')
+  assert.equal(device.preferences.txPowerDbm, 7)
+  assert.equal(device.preferences.latitude, -34.25)
+  assert.equal(device.capabilities.pathHashMode, 2)
+  assert.deepEqual((await session.saveDevicePreferences(key, { repeat: true })).map(({ status }) => status), ['failed'])
+  assert.ok(!writes.some(([code]) => code === 11))
+})
+
+test('reports an unconfirmed setting and stops writes after a disconnect', async (t) => {
+  const key = 'ab'.repeat(32)
+  const writes = []
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: {
+        const device = selfInfo()
+        device.set([7, 20], 2)
+        serial.emit(...device)
+        break
+      }
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 8: writes.push(8); serial.emit(0); break
+      case 12: writes.push(12); serial.dispatchEvent(new Event('disconnect')); break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  t.after(() => session.disconnect())
+  await session.connect()
+  const changes = await session.saveDevicePreferences(key, { name: 'Saved name', txPower: 15, pathWidth: 3 })
+  assert.deepEqual(changes.map(({ status }) => status), ['saved', 'uncertain', 'skipped'])
+  assert.deepEqual(writes, [8, 12])
+})
+
 test('reads local and remote telemetry and ignores pushes outside the selected request', async (t) => {
   const key = 'ab'.repeat(32)
   const contact = 'bc'.repeat(32)
