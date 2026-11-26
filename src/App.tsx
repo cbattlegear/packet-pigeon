@@ -7,7 +7,7 @@ import { ChatPanel } from './chats/ChatPanel.tsx'
 import { ContactsPanel } from './contacts/ContactsPanel.tsx'
 import { DiscoveryPanel } from './discovery/DiscoveryPanel.tsx'
 import { ChannelsPanel } from './channels/ChannelsPanel.tsx'
-import { discoveryEntries, discoveryMapNodes, discoveryPosition } from './discovery/model.ts'
+import { discoveryEntries, discoveryMapNodes, discoveryPathNodes } from './discovery/model.ts'
 import { useRadioDiscoveries } from './discovery/use-radio-discoveries.ts'
 import { storedContact } from './integration/contact-record.ts'
 import { mapRadioContacts, readSavedMapNodes } from './map/nodes.ts'
@@ -106,21 +106,20 @@ function App() {
   const directStatus = useSyncExternalStore(directMessages.subscribe, directMessages.getSnapshot)
   const discoveryConnected = snapshot.phase === 'syncing' || snapshot.phase === 'ready'
   const discovery = useRadioDiscoveries(snapshot.device?.publicKey, discoveryConnected,
-    hasOpenedDiscovery || hasOpenedMap || hasOpenedDiagnostics, cacheStatus.saving)
+    hasOpenedDiscovery || hasOpenedMap || hasOpenedDiagnostics || hasOpenedContacts, cacheStatus.saving)
   const radioContacts = useMemo(() => snapshot.contacts.map(storedContact), [snapshot.contacts])
   const adverts = useMemo(() => discoveryEntries(discovery.data,
     discoveryConnected && snapshot.progress?.stage !== 'contacts' ? radioContacts : undefined),
   [discovery.data, discoveryConnected, radioContacts, snapshot.progress?.stage])
   const radioNodes = useMemo(() => [...mapRadioContacts(snapshot.contacts), ...discoveryMapNodes(adverts)],
     [snapshot.contacts, adverts])
+  const discoveredHops = useMemo(() => discoveryPathNodes(adverts), [adverts])
   const pathNodes = useMemo(() => [
     ...radioContacts.map(({ publicKey, name, details }) => ({
       publicKey, name, position: contactPosition(details), role: contactRole(details?.type),
     })),
-    ...(discovery.key === snapshot.device?.publicKey ? adverts.map((entry) => ({
-      publicKey: entry.publicKey, name: entry.displayName, position: discoveryPosition(entry), role: entry.role,
-    })) : []),
-  ], [adverts, discovery.key, radioContacts, snapshot.device?.publicKey])
+    ...(discovery.key === snapshot.device?.publicKey ? discoveredHops : []),
+  ], [discoveredHops, discovery.key, radioContacts, snapshot.device?.publicKey])
   const mapPathNodes = useMemo(() => [...mapData.local, ...mapData.public], [mapData])
   const knownPathNodes = useMemo(() => [...pathNodes, ...mapPathNodes], [pathNodes, mapPathNodes])
   const usbSupport = getWebSerialSupport()
@@ -364,6 +363,7 @@ function App() {
                 onImport={() => setShareDialog({ kind: 'import' })}
                 onShare={(link) => setShareDialog({ kind: 'export', link })}
                 mapPathNodes={mapPathNodes} onPathMap={showPathOnMap}
+                discoveredHops={discovery.data ? discoveredHops : undefined} discoveredRadio={discovery.key}
                 onMap={(position, terrain) => {
                   setContactFocus({ position, terrain })
                   window.location.hash = terrain ? 'tools' : 'map'

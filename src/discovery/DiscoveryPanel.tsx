@@ -5,7 +5,7 @@ import type { CompanionSession } from '../radio/index.ts'
 import { advertCachePrefixLength } from '../radio/discovery-commands.ts'
 import type { AutoAddPolicy } from '../radio/discovery-commands.ts'
 import type { RadioKey, StoredContact } from '../storage/index.ts'
-import { discoveryPosition, exportDiscoveries, filterDiscoveries, importDiscoveries } from './model.ts'
+import { discoveryPathNodes, discoveryPosition, exportDiscoveries, filterDiscoveries, importDiscoveries } from './model.ts'
 import type { DiscoveryEntry } from './model.ts'
 import type { useRadioDiscoveries } from './use-radio-discoveries.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
@@ -254,9 +254,7 @@ function DiscoveryBrowser({
             </dl>
             {detail.path && <PathDetails title="Advert path" width={detail.path.width}
               hashes={detail.path.hex.match(new RegExp(`.{${detail.path.width * 2}}`, 'g')) ?? []}
-              nodes={[...entries.map((entry) => ({
-                publicKey: entry.publicKey, name: entry.displayName, position: discoveryPosition(entry),
-              })), ...(ready ? radioContacts : view.data?.contacts ?? []).map((entry) => ({
+              nodes={[...discoveryPathNodes(entries), ...(ready ? radioContacts : view.data?.contacts ?? []).map((entry) => ({
                 publicKey: entry.publicKey, name: entry.name, position: contactPosition(entry.details),
               })), ...mapPathNodes]} onMap={onPathMap} />}
             <div className="contact-actions">

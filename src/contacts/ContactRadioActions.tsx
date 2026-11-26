@@ -26,7 +26,7 @@ type Props = {
   firmware: number
   busy: boolean
   onMap?: (path: MapPath) => void
-  mapPathNodes?: readonly PathNode[]
+  additionalPathNodes?: readonly PathNode[]
 }
 
 const permissionLabels = {
@@ -40,13 +40,14 @@ function radioError(error: unknown) {
   return error instanceof Error ? error.message : 'The radio action failed.'
 }
 
-export function ContactRadioActions({ session, contact, contacts, radioKey, ready, usb, firmware, busy, onMap, mapPathNodes = [] }: Props) {
+export function ContactRadioActions({ session, contact, contacts, radioKey, ready, usb, firmware, busy, onMap,
+  additionalPathNodes = [] }: Props) {
   const key = contact.publicKey
   const details = contact.details
   const saved = details ? decodeContactPath(details.pathLength, details.pathHex) : null
   const pathNodes = [...contacts.map((entry) => ({
     publicKey: entry.publicKey, name: entry.displayName, position: contactPosition(entry.details),
-  })), ...mapPathNodes]
+  })), ...additionalPathNodes]
   const [width, setWidth] = useState<ContactPathWidth>(() => saved?.width ?? 1)
   const [text, setText] = useState(() => saved?.hops.join(' ') ?? '')
   const [repeaterKey, setRepeaterKey] = useState('')
