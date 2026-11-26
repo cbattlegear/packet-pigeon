@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import {
-  compareRepeaterPublicKey, parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
+  compareRepeaterPublicKey, parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterCliQuery, repeaterNameCommand, repeaterOwnerInfoCommand,
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
   repeaterRegionRemoveCommand,
   repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
@@ -202,6 +202,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [error, setError] = useState('')
   const request = useRef<AbortController | null>(null)
   const panel = useRef<HTMLDetailsElement | null>(null)
+  const queryInput = useRef<HTMLInputElement>(null)
   const syncStatus = useSyncExternalStore(messageSync.subscribe, messageSync.getSnapshot)
   const term = query.trim().toLowerCase()
   const choices = repeaterCliCommands.filter((item) => `${item.command} ${item.description}`.toLowerCase().includes(term))
@@ -303,6 +304,19 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   function sendChoice(item: (typeof repeaterCliCommands)[number]) {
     void send(item.command, item.description, 'confirm' in item && item.confirm,
       'warning' in item ? item.warning : '')
+  }
+
+  function submitQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    const text = queryInput.current?.value ?? ''
+    if (queryInput.current) queryInput.current.value = ''
+    try {
+      const command = repeaterCliQuery(text)
+      void send(command.command, command.description, false)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid CLI query.')
+    }
   }
 
   function submitInterval(event: FormEvent<HTMLFormElement>) {
@@ -710,6 +724,16 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       Replies are saved with other messages when you sync; history here lasts while this repeater stays selected.</p>
     <p>Companion firmware v1.11 and earlier may cause CLI commands to be ignored. Upgrade the companion firmware if commands do not receive replies.</p>
     <p>Reply tags help match responses, but a delayed reply from an earlier browser session can still be mistaken for a new one.</p>
+    <p>Enter a supported read-only query such as <code>get freq</code> or <code>region get #North</code>.
+      This is not an unrestricted console: use the management controls for changes, and do not enter passwords or private keys.
+      The field clears on submission; synced replies are saved with messages.</p>
+    <form className="contact-actions" onSubmit={submitQuery}>
+      <label>Read-only CLI query
+        <input ref={queryInput} type="text" autoComplete="off" spellCheck={false} required
+          disabled={!ready || busy || pending || syncStatus.syncing} />
+      </label>
+      <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Send read-only query</button>
+    </form>
     <label>Search CLI commands, forms, and history
       <input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
     </label>
@@ -741,6 +765,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'get bootloader.ver' && <p>{bootloaderDiagnosticHelp}</p>}
     {selected === 'get radio' && <p>In v1.14.1 this reports preferences, not active radio settings or proof of persistence.
       Frequency uses floating-point precision; bandwidth is rounded to three decimals. Replies can be delayed.</p>}
+    {selected === 'get freq' && <p>In v1.14.1 this reports the frequency preference, not the active frequency or proof of persistence.
+      The value uses floating-point precision; replies may be delayed and firmware support varies.</p>}
     {powerDiagnosticHelp(selected) && <p>{powerDiagnosticHelp(selected)} Firmware and hardware support vary; replies may be delayed.</p>}
     {bridgeDiagnosticHelp(selected) && <p>{bridgeDiagnosticHelp(selected)} Firmware and build support vary; replies may be delayed or unsupported.</p>}
     {selected === 'sensor get gps' && <p>This reads the reported GPS activity setting, not a fix or hardware power state.
@@ -1538,6 +1564,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.command === 'get radio' && item.reply !== null &&
             <p className="contact-status">This reports preferences, not active radio settings or proof of persistence.
               In v1.14.1 frequency uses floating-point precision and bandwidth is rounded to three decimals.</p>}
+          {item.command === 'get freq' && item.reply !== null &&
+            <p className="contact-status">This reports a frequency preference, not the active frequency or proof of persistence.
+              In v1.14.1 the value uses floating-point precision; firmware support varies.</p>}
           {item.command.startsWith('set radio ') && item.reply !== null &&
             <p className="contact-status">A reply does not prove persistence or successful application. Read preferences separately;
               they can apply on reboot or when a temporary radio override expires, and a delayed change may arrive after a later change.</p>}

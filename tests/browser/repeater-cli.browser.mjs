@@ -152,6 +152,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
   await page.getByText(/Login reported guest access/).waitFor()
   assert.equal(await page.getByText('Administrator CLI', { exact: true }).count(), 0)
+  assert.equal(await page.getByLabel('Read-only CLI query').count(), 0)
   assert.equal(await page.getByText('Inspect repeater access', { exact: true }).count(), 0)
   assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).length), 0)
   await page.getByText('Inspect nearby repeater keys', { exact: true }).click()
@@ -2827,6 +2828,38 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     await sync.click()
     await history.getByText(reply, { exact: true }).waitFor()
     await history.getByText(/does not verify the current logging state/).waitFor()
+  }
+  await page.evaluate(() => { window.fixtureUnconfirmed = false })
+  const typedQuery = page.getByLabel('Read-only CLI query')
+  const sendTypedQuery = page.getByRole('button', { name: 'Send read-only query' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  const beforeTyped = await page.evaluate(() => window.fixtureCommands.length)
+  for (const invalid of ['set guest.password typed-secret', 'get guest.password', 'reboot',
+    'get bridge.secret', 'region get bad name', 'unknown']) {
+    await typedQuery.fill(invalid)
+    await sendTypedQuery.click()
+    assert.equal(await typedQuery.inputValue(), '')
+    assert.equal(await page.evaluate(() => window.fixtureCommands.length), beforeTyped)
+    assert.equal(await page.locator('.repeater-cli-history').innerText().then((text) => text.includes(invalid)), false)
+    assert.equal((await page.locator('[role="alert"]').allTextContents()).some((text) => text.includes('typed-secret')), false)
+  }
+  for (const [command, reply] of [['get freq', '> 915.000'], ['region get #North', '> #North']]) {
+    const beforeFill = await page.evaluate(() => window.fixtureCommands.length)
+    const beforeSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+    await typedQuery.fill(command)
+    assert.equal(await page.evaluate(() => window.fixtureCommands.length), beforeFill)
+    await sendTypedQuery.click()
+    assert.equal(await typedQuery.inputValue(), '')
+    assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+      window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), command)
+    const history = page.locator('.repeater-cli-history li').filter({ hasText: command }).first()
+    await history.getByText(/Accepted by radio/).waitFor()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeSync)
+    await page.evaluate((value) => window.queueRepeaterReply(value), reply)
+    await sync.click()
+    await history.getByText(reply, { exact: true }).waitFor()
+    if (command === 'get freq') await history.getByText(/not the active frequency or proof of persistence/).waitFor()
   }
   assert.ok(await page.locator('.repeater-cli-history li').count() > 0)
   const beforeFinalEnd = await page.evaluate(() => window.fixtureCommands.length)

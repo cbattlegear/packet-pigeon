@@ -688,6 +688,12 @@ restoration; `get radio` reports preferences, not active settings. A delayed
 command may still arrive later. Firmware support varies.
 Search also finds supported management forms by name or command and can open
 them without sending anything; the forms retain their separate confirmations.
+Administrators can also type a supported read-only CLI query, including
+`region get <name>` and `get freq`; this is not an unrestricted console.
+Use management controls for changes and do not enter passwords or private
+keys. The field clears on submission, and synced replies are saved with other
+messages. The frequency query reports the preference, not the active radio
+frequency or proof of persistence; v1.14.1 uses floating-point precision.
 The confirmed `discover.neighbors` action asks the repeater to broadcast a
 zero-hop discovery request; nearby repeaters may also transmit replies. It
 replaces any discovery already in progress. Supported by repeater firmware
