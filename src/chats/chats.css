@@ -22,6 +22,23 @@
   font-weight: 600;
 }
 
+.chat-list-controls {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.chat-list-controls label:last-child,
+.chat-search {
+  display: grid;
+  gap: 5px;
+}
+
+.chat-search {
+  padding: 8px 28px;
+  font-size: 0.875rem;
+}
+
 .chat-workspace .conversation-heading span {
   display: block;
   overflow-wrap: anywhere;
@@ -117,6 +134,26 @@
 .chat-message-list li {
   max-width: min(100%, 48rem);
   background: var(--surface);
+}
+
+.received-messages.chat-message-list .chat-divider {
+  justify-self: center;
+  padding: 4px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-align: center;
+}
+
+.received-messages.chat-message-list .chat-divider--unread {
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.chat-workspace .chat-jump {
+  align-self: center;
+  margin: 4px;
 }
 
 .chat-message-list .chat-observed-paths li {
@@ -291,6 +328,8 @@
   .chat-workspace .conversation-heading,
   .chat-observation,
   .chat-repeat-filter,
+  .chat-search,
+  .chat-jump,
   .chat-composer,
   .chat-retry-settings {
     flex-shrink: 0;
