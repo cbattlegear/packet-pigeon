@@ -519,6 +519,15 @@ change commands. Sync the reply and read the wildcard state before saving.
 The separate confirmed save writes the entire current region map, including
 unrelated changes by other administrators. Radio acceptance does not prove a
 change or save succeeded.
+Administrators can add a named region under the wildcard or move an existing
+exact name there, with confirmation. Names differing only by a leading `#`
+match the same entry. New regions deny floods by default; moved entries retain
+their permissions. Changing the hierarchy may affect routing or remote access.
+Check the region first, but prefix-based queries and a potentially truncated
+tree cannot prove a name is absent. Unprefixed names are limited to 29 UTF-8
+bytes; names beginning with `#` or `$` to 30. Sync the reply and read the
+region again; save the whole map separately to persist changes. Private `$`
+regions require keys, which this action does not configure.
 Administrators can also change the home-region marker to a named region or the
 wildcard with confirmation. Firmware may resolve an incomplete prefix to a
 different region; compare the reply and read the home setting again. The change

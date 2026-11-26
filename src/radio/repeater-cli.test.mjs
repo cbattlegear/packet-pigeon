@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
-  repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, parseRepeaterNeighbors,
+  repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -228,6 +228,21 @@ test('named region flood changes are validated and require confirmation', () => 
       assert.throws(() => repeaterRegionFloodCommand(name, allow), /region name or prefix/)
       assert.throws(() => repeaterCliCommand(`region ${action} ${name}`), /region name or prefix/)
     }
+  }
+})
+
+test('region put validates names and always requires confirmation', () => {
+  for (const name of ['#North', '$private', 'North', 'a'.repeat(29), `#${'a'.repeat(29)}`,
+    `$${'a'.repeat(29)}`, `${'a'.repeat(27)}é`, `#${'a'.repeat(27)}é`]) {
+    const command = repeaterRegionPutCommand(name)
+    assert.equal(command.command, `region put ${name}`)
+    assert.equal(repeaterCliCommand(command.command).confirm, true)
+    assert.match(command.warning, /moved rather than created/)
+  }
+  for (const name of ['', '*', '#', 'bad/name', 'North root', 'a'.repeat(30), `${'a'.repeat(28)}é`,
+    `#${'a'.repeat(30)}`, `$${'a'.repeat(30)}`, 'North\nregion save']) {
+    assert.throws(() => repeaterRegionPutCommand(name), /region name|named region/)
+    assert.throws(() => repeaterCliCommand(`region put ${name}`), /region name|named region/)
   }
 })
 

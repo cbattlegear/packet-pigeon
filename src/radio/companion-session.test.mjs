@@ -616,6 +616,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set path.hash.mode 2', true), /administrator/)
   await assert.rejects(send('region'), /administrator/)
   await assert.rejects(send('region home #North', true), /administrator/)
+  await assert.rejects(send('region put #North', true), /administrator/)
   await assert.rejects(send('region denyf #North', true), /administrator/)
   await assert.rejects(send('region denyf *', true), /administrator/)
   await assert.rejects(send('region save', true), /administrator/)
@@ -680,6 +681,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('powersaving off extra', true), /supported repeater CLI command/)
   await assert.rejects(send('gps advert share extra', true), /supported repeater CLI command/)
   await assert.rejects(send('region denyf North'), /Confirm/)
+  await assert.rejects(send('region put #North'), /Confirm/)
+  await assert.rejects(send('region put North\nregion save', true), /region name or prefix/)
   await assert.rejects(send('region allowf North'), /Confirm/)
   await assert.rejects(send('region denyf North\nregion save', true), /region name or prefix/)
   await assert.rejects(send('region home #North'), /Confirm/)
@@ -771,6 +774,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const guestPasswordFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(guestPasswordFrame.slice(13))),
     `${guestPassword.tag}|set guest.password Guest-123`)
+  const regionPut = await send('region put #North', true)
+  const regionPutFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(regionPutFrame.slice(13))), `${regionPut.tag}|region put #North`)
 })
 
 test('confirmed reboot invalidates repeater access after acceptance or uncertain dispatch', async (t) => {

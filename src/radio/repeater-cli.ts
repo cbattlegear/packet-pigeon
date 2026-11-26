@@ -165,6 +165,21 @@ export function repeaterRegionFloodCommand(value: string, allow: boolean) {
   }
 }
 
+export function repeaterRegionPutCommand(value: string) {
+  validateRegionName(value)
+  if (value === '*') throw new Error('Enter a named region, not the wildcard.')
+  // Firmware prepends '#' in a fixed-size buffer when matching unprefixed names.
+  if (!value.startsWith('#') && !value.startsWith('$') && new TextEncoder().encode(value).length > 29) {
+    throw new Error('An unprefixed region name must be at most 29 UTF-8 bytes.')
+  }
+  return {
+    command: `region put ${value}`,
+    description: `Add or move region ${value} under the wildcard`,
+    confirm: true as const,
+    warning: 'An existing exact name, including one differing only by a leading #, is moved rather than created. New regions deny floods by default; existing permissions are preserved. Changes can affect routing and remote access. This change is not saved until the separate region-map save, which saves the entire map.',
+  }
+}
+
 function validatePosition(axis: 'lat' | 'lon', value: string) {
   const maximum = axis === 'lat' ? 90 : 180
   const coordinate = Number(value)
@@ -182,6 +197,8 @@ export function repeaterCliCommand(command: string) {
   if (command.startsWith(homeRegionPrefix)) return repeaterHomeRegionCommand(command.slice(homeRegionPrefix.length))
   const regionPrefix = 'region get '
   if (command.startsWith(regionPrefix)) return repeaterRegionQuery(command.slice(regionPrefix.length))
+  const regionPutPrefix = 'region put '
+  if (command.startsWith(regionPutPrefix)) return repeaterRegionPutCommand(command.slice(regionPutPrefix.length))
   const regionFlood = /^region (allowf|denyf) ([\s\S]*)$/.exec(command)
   if (regionFlood) return repeaterRegionFloodCommand(regionFlood[2], regionFlood[1] === 'allowf')
   const namePrefix = 'set name '
