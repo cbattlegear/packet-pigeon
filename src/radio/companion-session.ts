@@ -24,6 +24,7 @@ import { channelMessageCommand } from './channel-message.ts'
 import { writeSetupPathWidth, writeSetupRadioSettings } from './setup-commands.ts'
 import { assertScopeSupported, channelScopeCommand, validateChannelScope, writeChannelScope } from './channel-scope.ts'
 import type { ChannelScope } from './channel-scope.ts'
+import { requestOwnTelemetry, requestRemoteTelemetry, telemetryProtocolVersion } from './telemetry.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 
 export interface SyncProgress {
@@ -529,6 +530,37 @@ export class CompanionSession {
       }
       return contactPermissionsUpdate(frame, permissions)
     })
+
+  readonly readTelemetry = async (radioKey: string, contactKey: string | null, signal: AbortSignal) => {
+    const key = contactKey === null ? radioKey : contactPublicKey(contactKey)
+    signal.throwIfAborted()
+    return this.runRadioCommand(radioKey, async (link) => {
+      if ((this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0) < telemetryProtocolVersion) {
+        throw new Error('This companion firmware does not support telemetry.')
+      }
+      if (contactKey === null) return requestOwnTelemetry(link, key, signal)
+      if (key === radioKey) throw new Error('Use radio telemetry for the connected device.')
+      const abort = new AbortController()
+      const stopWatching = this.subscribe(() => {
+        if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') {
+          abort.abort(new Error('The radio disconnected while waiting for telemetry.'))
+        }
+      })
+      const request = AbortSignal.any([signal, abort.signal])
+      try {
+        const contacts = await this.readContacts(link)
+        request.throwIfAborted()
+        if (!contacts.some(({ publicKey }) => publicKey === key)) throw new Error('The radio no longer has this contact.')
+        const prefix = key.slice(0, 12)
+        if (radioKey.startsWith(prefix) || contacts.some(({ publicKey }) => publicKey !== key && publicKey.startsWith(prefix))) {
+          throw new Error('This contact shares a telemetry reply prefix with another known radio.')
+        }
+        return await requestRemoteTelemetry(link, key, this.subscribeToPushes, request)
+      } finally {
+        stopWatching()
+      }
+    })
+  }
 
   readonly pingContact = async (radioKey: string, contactKey: string, width: PingHashWidth, signal: AbortSignal) => {
     const key = contactPublicKey(contactKey)

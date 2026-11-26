@@ -13,6 +13,24 @@ const message = {
   text: 'Hello',
 }
 
+test('keeps each radio’s newest telemetry per subject across later cache writes', async (t) => {
+  const storage = await openRadioStorage(new IDBFactory())
+  t.after(() => storage.close())
+  const payload = Uint8Array.of(1, 116, 1, 132)
+  const own = { subjectKey: firstRadio, receivedAt: 50, payload }
+  const contact = { subjectKey: secondRadio, receivedAt: 60, payload }
+  await Promise.all([
+    storage.update(firstRadio, { telemetry: own }),
+    storage.update(firstRadio, { telemetry: contact }),
+  ])
+  await storage.update(firstRadio, { telemetry: { ...contact, receivedAt: 49, payload: Uint8Array.of(0) } })
+  await storage.update(firstRadio, { contacts: [], channels: [], messages: [message] })
+  await storage.update(secondRadio, { telemetry: { ...contact, receivedAt: 80 } })
+  assert.deepEqual((await storage.read(firstRadio)).telemetry, [own, contact])
+  assert.deepEqual((await storage.read(secondRadio)).telemetry, [{ ...contact, receivedAt: 80 }])
+  await assert.rejects(storage.update(firstRadio, { telemetry: { ...own, payload: new Uint8Array(169) } }), /Invalid telemetry sample/)
+})
+
 test('channel notification modes survive sync and pause on slot reuse', async () => {
   const storage = await openRadioStorage(new IDBFactory())
   await storage.update(firstRadio, { channels: [{ index: 0, name: 'Public' }] })

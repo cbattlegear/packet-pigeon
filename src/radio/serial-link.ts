@@ -10,6 +10,7 @@ export interface CompanionLinkPort extends EventTarget {
 interface PendingCommand {
   receive(frame: Uint8Array): void
   reject(error: CompanionError): void
+  matchesPush?: (frame: Uint8Array) => boolean
 }
 
 export class SerialLink {
@@ -73,8 +74,11 @@ export class SerialLink {
         }
         for (const frame of decoder ? decoder.read(value) : value.length ? [value] : []) {
           if (this.stopped) return
-          if (frame[0] >= 0x80) this.onPush(frame)
-          else this.pending?.receive(frame)
+          if (frame[0] >= 0x80) {
+            const pending = this.pending
+            if (pending?.matchesPush?.(frame)) pending.receive(frame)
+            this.onPush(frame)
+          } else this.pending?.receive(frame)
         }
       }
     } catch (error) {
@@ -84,7 +88,11 @@ export class SerialLink {
     }
   }
 
-  request<T>(command: Uint8Array, receive: (frame: Uint8Array) => { value: T } | undefined): Promise<T> {
+  request<T>(
+    command: Uint8Array,
+    receive: (frame: Uint8Array) => { value: T } | undefined,
+    matchesPush?: (frame: Uint8Array) => boolean,
+  ): Promise<T> {
     if (this.stopped) return Promise.reject(new CompanionError('disconnected', 'The radio connection is closed.'))
     if (this.pending) return Promise.reject(new CompanionError('protocol', 'A companion command is already pending.'))
     const packet = this.transport === 'usb' ? encodeCommand(command) : command
@@ -108,6 +116,7 @@ export class SerialLink {
         }
       }
       const pending: PendingCommand = {
+        matchesPush,
         reject: (error) => {
           clear()
           reject(error)

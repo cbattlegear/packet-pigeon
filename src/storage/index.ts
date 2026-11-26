@@ -3,6 +3,7 @@ import { validSenderName } from '../channels/senders.ts'
 import { channelTextBytes } from '../radio/channel-message.ts'
 import { assertScopeSupported, validateChannelScope } from '../radio/channel-scope.ts'
 import type { ChannelScope } from '../radio/channel-scope.ts'
+import { maxTelemetryPayloadLength } from '../radio/telemetry.ts'
 
 declare const radioKeyBrand: unique symbol
 export type RadioKey = string & { readonly [radioKeyBrand]: true }
@@ -121,6 +122,12 @@ export type LocalPreferences = {
   selectedConversationId: string | null
 }
 
+export type StoredTelemetry = {
+  subjectKey: string
+  receivedAt: number
+  payload: Uint8Array
+}
+
 export type RadioData = {
   scopeRecovery?: boolean
   channelScopes?: ChannelScopeSetting[]
@@ -136,6 +143,7 @@ export type RadioData = {
   contactPreferences?: ContactPreference[]
   contactsCapturedAt?: number
   discoveries?: StoredDiscovery[]
+  telemetry?: StoredTelemetry[]
   directSendOptions?: DirectSendOptions
   lastDirectTimestamp?: number
   lastChannelTimestamp?: number
@@ -160,6 +168,7 @@ export type RadioUpdate = {
   contactPreference?: ContactPreferenceEdit
   contactsCapturedAt?: number
   discovery?: { upsert?: readonly StoredDiscovery[]; remove?: readonly string[] }
+  telemetry?: StoredTelemetry
   directSendOptions?: DirectSendOptions
   markRead?: readonly string[]
 }
@@ -339,6 +348,21 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
     }
     for (const key of discovery.remove ?? []) records.delete(radioKeyFromPublicKey(key))
     next.discoveries = [...records.values()].sort((a, b) => b.heardAt - a.heardAt).slice(0, 1_000)
+  }
+  if (update.telemetry) {
+    const { subjectKey, receivedAt, payload } = update.telemetry
+    const key = radioKeyFromPublicKey(subjectKey)
+    if (!Number.isFinite(receivedAt) || receivedAt < 0 || receivedAt > 8.64e15
+      || !(payload instanceof Uint8Array) || payload.length > maxTelemetryPayloadLength) {
+      throw new RadioStorageError('update', 'Invalid telemetry sample.')
+    }
+    const samples = current.telemetry ?? []
+    const previous = samples.find((sample) => sample.subjectKey === key)
+    if (!previous || receivedAt >= previous.receivedAt) {
+      next.telemetry = [...samples.filter((sample) => sample.subjectKey !== key), {
+        subjectKey: key, receivedAt, payload: payload.slice(),
+      }]
+    }
   }
   if (directSendOptions) next.directSendOptions = validateDirectOptions(directSendOptions)
   if (update.markRead?.length) {
