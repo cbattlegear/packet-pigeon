@@ -15,7 +15,7 @@ import type { MapPath, PathNode } from '../paths/model.ts'
 
 type Props = {
   session: Pick<CompanionSession, 'manageRepeater' | 'readRepeaterAccessList' | 'readRepeaterNeighbors' | 'sendRepeaterCommand' |
-    'hasRememberedRepeaterPassword' | 'forgetRepeaterPassword' | 'resumeRepeater'>
+    'hasRememberedRepeaterPassword' | 'forgetRepeaterPassword' | 'resumeRepeater' | 'clearRepeaterAccess'>
   messageSync: RepeaterMessageSync
   contact: ContactEntry
   radioKey: string
@@ -173,6 +173,24 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     {login && <p role="status">Login reported {login.role === 'guest-or-legacy' ? 'guest or legacy (admin not confirmed)' : login.role} access;
       the request used {login.route} routing.</p>}
     {login && <button type="button" disabled={!ready || busy || pending || cliPending} onClick={() => void run('status')}>Request status</button>}
+    {login && <div>
+      <button type="button" disabled={!ready || busy || pending || cliPending} onClick={() => {
+        try {
+          session.clearRepeaterAccess(radioKey, contact.publicKey)
+          if (password.current) password.current.value = ''
+          setLogin(null)
+          setStatus(null)
+          setClients(null)
+          setNeighbors(null)
+          setError('')
+        } catch (reason) {
+          setError(reason instanceof Error ? reason.message : 'Could not end local repeater access.')
+        }
+      }}>End local repeater access</button>
+      <p>This clears this tab's reported access, management-panel snapshots and CLI history without transmitting. It does not revoke the
+        repeater's access-list entry, clear remembered or encrypted passwords, affect other tabs, delete synced replies,
+        clear map views already opened, or recall commands already sent.</p>
+    </div>}
     {statsResetSent && <p role="status">A statistics reset was sent or may have been sent. Earlier status was cleared;
       the reset may still arrive after a new status request.</p>}
     {batteryCalibrationSent && <p role="status">A battery calibration change was sent or may have been sent. Earlier status was cleared;

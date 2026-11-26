@@ -586,6 +586,15 @@ export class CompanionSession {
     this.#repeaterPasswordRevisions.set(key, (this.#repeaterPasswordRevisions.get(key) ?? 0) + 1)
   }
 
+  readonly clearRepeaterAccess = (radioKey: string, contactKey: string) => {
+    const radio = contactPublicKey(radioKey)
+    const key = contactPublicKey(contactKey)
+    if (this.contactWritePending) throw new Error('Wait for the current radio action to finish before ending local access.')
+    const login = this.repeaterLogin
+    if (this.snapshot.device?.publicKey === radio && login && login.attempt === this.attempt &&
+      login.key === key) this.repeaterLogin = undefined
+  }
+
   readonly resumeRepeater = (
     radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string }, signal: AbortSignal,
   ) => {
