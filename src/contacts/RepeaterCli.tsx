@@ -10,7 +10,7 @@ import {
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
   repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning, repeaterTempRadioWarning,
-  repeaterClockCommand, repeaterClockWarning,
+  repeaterClockCommand, repeaterClockWarning, isRepeaterRebootCommand,
   UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -220,7 +220,13 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     afterConfirmation?: () => void,
   ) {
     if (!ready || busy || pending || syncStatus.syncing) return
-    const target = command === 'reboot' ? `${name} (${contactKey.slice(0, 12)})` : name
+    const reboots = isRepeaterRebootCommand(command)
+    const rebootLabel = command === 'clkreboot' ? 'Clock reset and reboot' : 'Reboot'
+    const rebootAction = command === 'clkreboot' ? 'clock reset and reboot' : 'reboot'
+    const rebootFollowup = command === 'clkreboot'
+      ? 'No reply is expected on repeater v1.14.1. Log in again when the repeater is available; a delayed clock reset and reboot may still arrive. Read and set the clock separately using a trusted time.'
+      : 'No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.'
+    const target = reboots ? `${name} (${contactKey.slice(0, 12)})` : name
     if (confirmed) {
       if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
       afterConfirmation?.()
@@ -235,8 +241,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       const result = await session.sendRepeaterCommand(radioKey, contactKey, route, command, confirmed, controller.signal)
       if (command === 'clear stats') onStatsReset()
       if (command.startsWith('set adc.multiplier ')) onBatteryCalibration()
-      if (command === 'reboot') {
-        onReboot(`Reboot accepted by the radio (${result.route}), but execution is unverified. No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.`)
+      if (reboots) {
+        onReboot(`${rebootLabel} accepted by the radio (${result.route}), but execution is unverified. ${rebootFollowup}`)
         return
       }
       const sentAt = Date.now()
@@ -246,13 +252,13 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         reply: null, unconfirmed: false,
       }])
     } catch (reason) {
-      if (command === 'reboot' && reason instanceof UncertainRepeaterCliError) {
-        onReboot('The radio may have sent the reboot but did not confirm it. No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.')
+      if (reboots && reason instanceof UncertainRepeaterCliError) {
+        onReboot(`The radio may have sent the ${rebootAction} but did not confirm it. ${rebootFollowup}`)
         return
       }
-      if (command === 'reboot') {
+      if (reboots) {
         const detail = reason instanceof Error ? reason.message : 'The repeater command failed.'
-        onReboot(`Reboot was not confirmed: ${detail} If sent, it may still arrive without a reply. Log in again when the repeater is available.`)
+        onReboot(`${rebootLabel} was not confirmed: ${detail} If sent, it may still arrive without a reply. Log in again when the repeater is available.`)
         return
       }
       if (reason instanceof UncertainRepeaterCliError) {
@@ -676,6 +682,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'gps sync' && gpsClockSync && <p>{gpsClockSync.warning}</p>}
     {selected === 'gps setloc' && gpsSetLocation && <p>{gpsSetLocation.warning}</p>}
     {selected === 'clear stats' && action && 'warning' in action && <p>{action.warning}</p>}
+    {selected === 'clkreboot' && action && 'warning' in action && <p>{action.warning}</p>}
     {selected === 'get adc.multiplier' && <p>In v1.14.1, a supported query returns the board-reported multiplier to three decimals,
       not whether it is the default or an override. Board and firmware support varies.</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}

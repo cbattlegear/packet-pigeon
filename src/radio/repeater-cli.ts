@@ -20,6 +20,8 @@ export const repeaterTempRadioWarning = 'This can quickly disrupt mesh routes an
 
 export const repeaterClockWarning = 'Verify this UTC time against a trusted clock. Repeater v1.14.1 only moves its clock forward; a clock set too far ahead may disrupt later commands and cannot be corrected backwards with this action. The specified time is fixed and can be behind by the time the command arrives. GPS or another administrator may also change the clock. Firmware support varies. Sync the reply and read the clock separately; a delayed change may still arrive later.'
 
+export const repeaterClockRebootWarning = 'Recovery action: repeater v1.14.1 attempts to set its clock to 2024-05-15 10:52:31 UTC, then reboot without a reply. This can move the clock backwards and disrupt time-sensitive messages, advertisements and remote access. The reboot can interrupt mesh traffic, lose unsaved access-list or region changes, and cancel temporary radio overrides. Check a local recovery method first. Firmware and clock hardware may behave differently; radio acceptance does not prove execution or that the clock stayed reset. A delayed command may still arrive later. Log in again, then read and set the clock separately using a trusted time; GPS or another administrator may change it again.'
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -110,9 +112,14 @@ export const repeaterCliCommands = [
   { command: 'get owner.info', description: 'Read operator information' },
   { command: 'reboot', description: 'Reboot the repeater', confirm: true,
     warning: 'The repeater may be unavailable and mesh traffic may be interrupted. No reply is expected; radio acceptance does not prove a reboot.' },
+  { command: 'clkreboot', description: 'Reset repeater clock and reboot', confirm: true, warning: repeaterClockRebootWarning },
   { command: 'advert', description: 'Send a flood advertisement', confirm: true },
   { command: 'advert.zerohop', description: 'Send a zero-hop advertisement', confirm: true },
 ] as const
+
+export function isRepeaterRebootCommand(command: string): boolean {
+  return command === 'reboot' || command === 'clkreboot'
+}
 
 export type RepeaterCliReceipt = {
   tag: string

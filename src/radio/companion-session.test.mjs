@@ -1111,7 +1111,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   }
 })
 
-test('confirmed reboot invalidates repeater access after acceptance or uncertain dispatch', async (t) => {
+for (const command of ['reboot', 'clkreboot']) test(`${command} invalidates repeater access after acceptance or uncertain dispatch`, async (t) => {
   const contact = contactInfo()
   contact[33] = 2
   contact[35] = 0
@@ -1138,26 +1138,30 @@ test('confirmed reboot invalidates repeater access after acceptance or uncertain
   const route = { pathLength: 0, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
   const signal = () => new AbortController().signal
   const send = (command, confirmed = false) => session.sendRepeaterCommand(radio, target, route, command, confirmed, signal())
-  await assert.rejects(send('reboot'), /Confirm/)
-  await assert.rejects(send('reboot', true), /administrator/)
+  await assert.rejects(send(command), /Confirm/)
+  await assert.rejects(send(command, true), /administrator/)
   await session.manageRepeater(radio, target, route, 'login', '', signal())
-  await assert.rejects(send('reboot', true), /administrator/)
+  await assert.rejects(send(command, true), /administrator/)
   assert.equal(port.commands.some(([code]) => code === 2), false)
   admin = true
   await session.manageRepeater(radio, target, route, 'login', '', signal())
+  contact[35] = 1
+  await assert.rejects(send(command, true), /route changed/)
+  assert.equal(port.commands.some(([code]) => code === 2), false)
+  contact[35] = 0
   confirmation = [1, 2]
-  await assert.rejects(send('reboot', true), { code: 'device-error' })
+  await assert.rejects(send(command, true), { code: 'device-error' })
   confirmation = [6, 0, ...new Uint8Array(8)]
   await send('ver')
   confirmation = [6, 0]
-  await assert.rejects(send('reboot', true), /may have sent/)
+  await assert.rejects(send(command, true), /may have sent/)
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(session.manageRepeater(radio, target, route, 'status', '', signal()), /Log in/)
   await session.manageRepeater(radio, target, route, 'login', '', signal())
   confirmation = [6, 0, ...new Uint8Array(8)]
-  const receipt = await send('reboot', true)
+  const receipt = await send(command, true)
   const frame = port.commands.filter(([code]) => code === 2).at(-1)
-  assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|reboot`)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(session.manageRepeater(radio, target, route, 'status', '', signal()), /Log in/)
 })
