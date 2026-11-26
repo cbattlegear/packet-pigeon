@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { loginRemoteNode, parseRemoteLogin, parseRemoteNodeClients, parseRoomStatus,
+import { loginRemoteNode, parseRemoteLogin, parseRemoteNodeClients, parseRoomStatus, RemoteLoginUnconfirmed,
   remoteNodeAdminText, requestRemoteNodeData } from './remote-nodes.ts'
 import { canPostToRoom } from './node-access.ts'
 import { decodeSensorSummary } from './cayenne-lpp.ts'
@@ -74,4 +74,28 @@ test('decodes scalar sensor history without treating truncated values as a readi
     { channel: 3, type: 104, label: 'Relative humidity', unit: '%', minimum: 40, maximum: 60, average: 50 },
   ] })
   assert.throws(() => decodeSensorSummary(data.subarray(0, -1)), /incomplete history reading/)
+})
+
+test('distinguishes a cancelled sent login from a definite rejection', async () => {
+  let push
+  const controller = new AbortController()
+  const subscribe = (receive) => {
+    push = receive
+    return () => {}
+  }
+  const sent = Uint8Array.of(6, 0, 11, 22, 33, 44, 0xd0, 7, 0, 0)
+  const cancelled = { async request(_command, receive) {
+    const response = receive(sent).value
+    controller.abort()
+    return response
+  } }
+  await assert.rejects(loginRemoteNode(cancelled, publicKey, '', subscribe, controller.signal), RemoteLoginUnconfirmed)
+
+  const rejected = { async request(_command, receive) {
+    const response = receive(sent).value
+    push({ code: 0x86, payload: Uint8Array.of(0, ...keyPrefix) })
+    return response
+  } }
+  await assert.rejects(loginRemoteNode(rejected, publicKey, '', subscribe, new AbortController().signal),
+    (error) => /rejected/.test(error.message) && !(error instanceof RemoteLoginUnconfirmed))
 })

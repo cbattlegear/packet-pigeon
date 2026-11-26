@@ -68,7 +68,11 @@ test('joins rooms with explicit roles, posts, shows sensor alerts, and gates nod
             const key = data[1] === 0xbc ? roomKey : sensorKey
             const permissions = decoder.decode(data.subarray(33)) === 'test-admin' ? (data[1] === 0xbc ? 3 : 0xc3) : 0
             accepted(key.subarray(0, 4))
-            reply([0x85, permissions & 3, ...key.subarray(0, 6), commands.length, 0, 0, 0, permissions, 1])
+            const access = [0x85, permissions & 3, ...key.subarray(0, 6), commands.length, 0, 0, 0, permissions, 1]
+            if (data[1] === 0xbc && window.holdRoomLogin) {
+              window.holdRoomLogin = false
+              window.releaseLateRoomLogin = () => reply(access)
+            } else reply(access)
             return
           }
           if (code === 50) {
@@ -144,6 +148,23 @@ test('joins rooms with explicit roles, posts, shows sensor alerts, and gates nod
     title === 'Packet Pigeon: Study room' && body === 'A second room post'))
   await page.evaluate(() => window.nodeAlerts.find(({ body }) => body === 'A second room post').onclick())
   await roomChat.getByText('A second room post', { exact: true }).waitFor()
+
+  await page.evaluate(() => { window.holdRoomLogin = true })
+  await access.getByLabel('Password').fill('test-admin')
+  await access.getByRole('button', { name: 'Sign in' }).click()
+  await page.waitForFunction(() => typeof window.releaseLateRoomLogin === 'function')
+  await access.getByRole('button', { name: 'Stop waiting for login' }).click()
+  const logins = await page.evaluate(() => window.nodeCommands.filter(({ code }) => code === 26).length)
+  await access.getByRole('button', { name: 'Sign in' }).click()
+  await access.getByText(/The previous login may still reply/).waitFor()
+  assert.equal(await page.evaluate(() => window.nodeCommands.filter(({ code }) => code === 26).length), logins)
+  await page.evaluate(() => window.releaseLateRoomLogin())
+  assert.equal(await access.getByText(/Administrator access/).count(), 0)
+  assert.equal(await post.isDisabled(), true)
+
+  await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+  await page.getByRole('button', { name: 'Connect USB' }).click()
+  await page.getByRole('banner').getByText('Connected', { exact: true }).waitFor()
   await access.getByLabel('Password').fill('test-admin')
   await access.getByRole('button', { name: 'Sign in' }).click()
   await access.getByText(/Administrator access/).waitFor()

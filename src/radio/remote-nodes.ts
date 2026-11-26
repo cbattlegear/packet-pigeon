@@ -12,6 +12,8 @@ export type RemoteNodeClient = { prefix: string; permissions: number; role: Remo
 
 type PushSubscription = (listener: (push: CompanionPush) => void) => () => void
 type Reply<T> = { value: T } | { error: unknown } | null
+class RemoteLoginRejected extends Error {}
+export class RemoteLoginUnconfirmed extends Error {}
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 const roles = ['guest', 'read-only', 'read-write', 'admin'] as const
@@ -29,7 +31,7 @@ export function nodeRole(permissions: number): RemoteNodeRole {
 }
 
 async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscribe: PushSubscription,
-  signal: AbortSignal, match: (push: CompanionPush, sent: DirectSendReceipt) => T | undefined) {
+  signal: AbortSignal, match: (push: CompanionPush, sent: DirectSendReceipt) => T | undefined, onSent?: () => void) {
   signal.throwIfAborted()
   let sent: DirectSendReceipt | undefined
   let settle!: (reply: Reply<T>) => void
@@ -47,7 +49,10 @@ async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscri
   try {
     const accepted = await link.request(command, (frame) => {
       // A confirmation and the remote push can arrive in the same read.
-      if (frame[0] === Response.sent) sent = decodeDirectSent(frame)
+      if (frame[0] === Response.sent) {
+        sent = decodeDirectSent(frame)
+        onSent?.()
+      }
       return { value: frame }
     })
     expectResponse(accepted, Response.sent)
@@ -69,7 +74,7 @@ async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscri
 export function parseRemoteLogin(push: CompanionPush, publicKey: string, route: DirectSendReceipt['route']): RemoteNodeAccess | undefined {
   const { code, payload } = push
   if ((code !== 0x85 && code !== 0x86) || payload.length < 7 || hex(payload.subarray(1, 7)) !== publicKey.slice(0, 12)) return
-  if (code === 0x86) throw new Error('The node rejected the login.')
+  if (code === 0x86) throw new RemoteLoginRejected('The node rejected the login.')
   const permissions = payload.length >= 13 ? payload[11] : null
   return { role: permissions === null ? null : nodeRole(permissions), permissions, firmware: payload[12] ?? null, route }
 }
@@ -82,9 +87,16 @@ export async function loginRemoteNode(link: SerialLink, publicKey: string, passw
       throw new Error('The node password must be at most 15 UTF-8 bytes without NUL characters.')
     }
     const command = Uint8Array.of(26, ...keyBytes(publicKey), ...bytes)
+    let queued = false
     try {
       return await requestWithPush(link, command, subscribe, signal,
-        (push, { route }) => parseRemoteLogin(push, publicKey, route))
+        (push, { route }) => parseRemoteLogin(push, publicKey, route), () => { queued = true })
+    } catch (error) {
+      if (queued && !(error instanceof RemoteLoginRejected)) {
+        throw new RemoteLoginUnconfirmed('The login reply is unconfirmed. Reconnect before trying this node again. A late reply is still possible after reconnecting.',
+          { cause: error })
+      }
+      throw error
     } finally { command.fill(0) }
   } finally { bytes.fill(0) }
 }

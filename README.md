@@ -210,7 +210,10 @@ To join a room, select its saved contact in **Chats** and use **Room access**.
 Leave the password empty to request access already granted to your radio. The
 server reports whether the current connection has read-only, posting, or
 administrator access. Reconnect and sign in again to refresh that access.
-Room posts can contain up to 150 UTF-8 bytes.
+Room posts can contain up to 150 UTF-8 bytes. A timed-out or canceled login
+that the companion queued blocks another login to that node on the current
+connection. The firmware matches replies by key prefix. Even after connecting
+again, an earlier reply may still arrive over the mesh.
 
 Choose **Sync messages** to fetch queued room posts and sensor alerts. The
 browser keeps received entries for history, search, unread markers, and optional

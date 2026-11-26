@@ -77,6 +77,7 @@ interface Attempt {
   scopePending?: boolean
   maintenance?: boolean
   remoteAccess?: Map<string, RemoteNodeAccess>
+  unconfirmedNodeLogins?: Set<string>
 }
 
 type SelectedTransport =
@@ -490,13 +491,21 @@ export class CompanionSession {
 
   readonly loginNode = (radioKey: string, nodeKey: string, password: string, signal: AbortSignal) =>
     this.withRemoteNode(radioKey, nodeKey, signal, async (link, { publicKey }, attempt, active) => {
+      if (attempt.unconfirmedNodeLogins?.has(publicKey)) {
+        throw new Error('The previous login may still reply. Reconnect before trying this node again. A late reply is still possible after reconnecting.')
+      }
       const access = attempt.remoteAccess ??= new Map()
       if (access.delete(publicKey)) this.update({})
-      const { loginRemoteNode } = await import('./remote-nodes.ts')
-      const login = await loginRemoteNode(link, publicKey, password, this.subscribeToPushes, active)
-      access.set(publicKey, login)
-      this.update({})
-      return login
+      const { loginRemoteNode, RemoteLoginUnconfirmed } = await import('./remote-nodes.ts')
+      try {
+        const login = await loginRemoteNode(link, publicKey, password, this.subscribeToPushes, active)
+        access.set(publicKey, login)
+        this.update({})
+        return login
+      } catch (error) {
+        if (error instanceof RemoteLoginUnconfirmed) (attempt.unconfirmedNodeLogins ??= new Set()).add(publicKey)
+        throw error
+      }
     })
 
   readonly readRoomStatus = (radioKey: string, nodeKey: string, signal: AbortSignal) =>
