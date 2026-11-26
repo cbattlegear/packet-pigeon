@@ -67,6 +67,30 @@ async function fixture(open) {
   return { factory, source, direct, openStorage }
 }
 
+test('reports cache read failures separately, retains prior data, and retries without losing other errors', async () => {
+  let fail = false
+  const { direct, source } = await fixture(async (factory) => {
+    if (fail) throw new Error('Storage unavailable')
+    return openRadioStorage(factory)
+  })
+  source.phase('idle')
+  await direct.send(key, recipient, 'Unsent', options)
+  const previous = direct.getSnapshot().data
+  const previousError = direct.getSnapshot().error
+  fail = true
+  await direct.load(key)
+  assert.deepEqual(direct.getSnapshot().cacheLoad, { state: 'error', message: 'Storage unavailable' })
+  assert.equal(direct.getSnapshot().data, previous)
+  assert.equal(direct.getSnapshot().error, previousError)
+  fail = false
+  await direct.load(key)
+  assert.deepEqual(direct.getSnapshot().cacheLoad, { state: 'ready' })
+  assert.equal(direct.getSnapshot().error, previousError)
+  await direct.load('cc'.repeat(32))
+  assert.deepEqual(direct.getSnapshot().cacheLoad, { state: 'ready' })
+  assert.equal(direct.getSnapshot().data, null)
+})
+
 test('a disconnected send reports an error and preserves the draft without creating a message', async () => {
   const { source, direct, openStorage } = await fixture()
   source.phase('idle')

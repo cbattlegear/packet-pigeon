@@ -9,6 +9,8 @@ per-radio local cache. Contacts supports offline browsing, and the map can
 show synced contacts from the current session. Chats supports direct messages,
 drafts, delivery tracking, and manually syncing received queue entries over USB
 or Bluetooth. Channel chats also support sending and local message actions.
+If a cached chat load fails, Chats offers a retry and retains any previously
+loaded data for that radio.
 
 ## Getting started
 

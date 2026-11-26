@@ -378,7 +378,8 @@ function App() {
 
       <main className="main-content" id="main-content" tabIndex={-1}>
         {(!usbSupport.supported || !bluetoothSupport.supported || snapshot.error || retention.error || retention.removed > 0
-          || cacheStatus.error || messageStatus.error || messageStatus.pending || directStatus.error || notificationError) && (
+          || cacheStatus.error || messageStatus.error || messageStatus.pending || directStatus.error
+          || directStatus.cacheLoad.state === 'error' || notificationError) && (
           <div className="notices">
             {retention.error && <p role="alert">Channel retention could not finish: {retention.error} Check the radio cache and channel settings, then reload to retry.</p>}
             {retention.removed > 0 && <p role="status">Channel retention removed {retention.removed} cached message{retention.removed === 1 ? '' : 's'}.</p>}
@@ -393,6 +394,14 @@ function App() {
                 {directStatus.pending > 0 && (
                   <button type="button" onClick={() => void directMessages.retrySaving()}>Retry saving message changes</button>
                 )}
+              </div>
+            )}
+            {directStatus.cacheLoad.state === 'error' && (
+              <div role="alert">
+                <p>Chats cache: {directStatus.cacheLoad.message}</p>
+                {directStatus.key && <button type="button" onClick={() => {
+                  if (directStatus.key) void directMessages.load(directStatus.key)
+                }}>Retry chat cache</button>}
               </div>
             )}
             {messageStatus.pending && (
