@@ -215,7 +215,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
     next.channels = channels.map(({ index, name }) => ({ index, name }))
     if (next.channelNotifications) {
       const slots = new Map(next.channels.map(({ index, name }) => [index, name]))
-      next.channelNotifications = next.channelNotifications.filter(({ index }) => slots.has(index)).map((entry) =>
+      next.channelNotifications = next.channelNotifications.map((entry) =>
         slots.get(entry.index) !== entry.channelName ? { ...entry, paused: true } : entry)
     }
     if (next.channelRetention) {

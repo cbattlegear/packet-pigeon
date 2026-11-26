@@ -5,7 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
-test('channel actions require a ready radio and disclose unsupported controls', async () => {
+test('channel actions require a ready radio and disclose local settings', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   try {
     const { ChannelsPanel } = await vite.ssrLoadModule(fileURLToPath(new URL('ChannelsPanel.tsx', import.meta.url)))
@@ -17,7 +17,7 @@ test('channel actions require a ready radio and disclose unsupported controls', 
     const ready = render('ready')
     assert.match(ready, /Public and hashtag keys are discoverable/)
     assert.match(ready, /Sending scopes are browser-local, per channel and radio/)
-    assert.match(ready, /Notification modes are not available yet/)
+    assert.match(ready, /Browser alert modes apply to manually synced messages while this app is open/)
     assert.match(ready, /Message retention/)
     assert.match(ready, /permanently deleted using the sender/)
     assert.match(ready, /Observed sender names/)

@@ -9,14 +9,25 @@ const receipt = {
 const message = { id: 'one', conversationId: 'channel:0', sender: '', timestamp: 12000, text: receipt.text, receipt }
 const data = { contacts: [], channels: [{ index: 0, name: 'Public' }], messages: [message], drafts: [], preferences: null }
 
-test('channel modes match exact mentions and suppress blocked senders', () => {
+test('channel modes match mentions without regard to case and suppress blocked senders', () => {
   const withMode = (mode) => ({ ...data, channelNotifications: [{ index: 0, channelName: 'Public', mode }] })
   assert.equal(messageAlert(withMode('all'), message, 'Pigeon').conversationId, 'channel:0')
   assert.equal(messageAlert(withMode('muted'), message, 'Pigeon'), null)
   assert.equal(messageAlert(withMode('mentions'), message, 'Pigeon').title, 'Public')
-  assert.equal(messageAlert(withMode('mentions'), message, 'pigeon'), null)
+  assert.equal(messageAlert(withMode('mentions'), message, 'pigeon').title, 'Public')
+  assert.equal(messageAlert(withMode('mentions'), message, 'Pígeon'), null)
   assert.equal(messageAlert({ ...data, blockedChannelSenders: ['Alice'] }, message, 'Pigeon'), null)
   assert.equal(messageAlert({ ...data, channelNotifications: [{ index: 0, channelName: 'Old', mode: 'all' }] }, message, 'Pigeon'), null)
+})
+
+test('a mention in the sender prefix is not a mention in the body', () => {
+  const text = '@[Pigeon]: hello'
+  const entry = { ...message, text, receipt: { ...receipt, text } }
+  const cached = { ...data, messages: [entry], channelNotifications: [{ index: 0, channelName: 'Public', mode: 'mentions' }] }
+  assert.equal(messageAlert(cached, entry, 'Pigeon'), null)
+  const bodyText = '@[Pigeon]: hello @[pigeon]'
+  const mentioned = { ...entry, text: bodyText, receipt: { ...receipt, text: bodyText } }
+  assert.equal(messageAlert({ ...cached, messages: [mentioned] }, mentioned, 'Pigeon').title, 'Public')
 })
 
 test('read and possible-repeat receipts do not alert, but a distinct receipt does', () => {

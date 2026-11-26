@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioData, RadioKey, RadioUpdate } from '../storage/index.ts'
 
@@ -11,6 +11,7 @@ export function useRadioDiscoveries(sessionKey: string | undefined, connected: b
   const [revision, setRevision] = useState(0)
   const lastKey = sessionKey ? radioKeyFromPublicKey(sessionKey) : null
   const key = connected ? lastKey : choice === null ? lastKey : choice || null
+  const selectRadio = useCallback((key: RadioKey) => setChoice(key), [])
 
   useEffect(() => {
     if (!enabled) return
@@ -51,6 +52,6 @@ export function useRadioDiscoveries(sessionKey: string | undefined, connected: b
   return {
     key, keys: view.keys, data: view.key === key ? view.data : null, error: view.error,
     choose: (value: string) => setChoice(view.keys.find((key) => key === value) ?? ''),
-    update, refresh,
+    update, refresh, selectRadio,
   }
 }

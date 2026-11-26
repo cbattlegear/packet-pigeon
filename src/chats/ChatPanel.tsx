@@ -18,7 +18,7 @@ import { ComposerTools } from '../sharing/ComposerTools.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { conversations, correlateChannelObservations, matchingChannelReceipts, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
-import { channelMentionNames, channelReply, channelTextParts, insertChannelMention, mentionableName } from './mentions.ts'
+import { channelMentionNames, channelMessageBody, channelReply, channelTextParts, insertChannelMention, isSelfMention, mentionableName } from './mentions.ts'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
@@ -535,7 +535,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
         }}>
           {visible.map((message) => {
             const sender = channelSender(message)
-            const body = sender ? message.text.slice(sender.length + 2) : message.text
+            const body = channelMessageBody(message)
             const matches = channelMatches.get(message.id)
             const correlation = correlations.get(message.id)
             return (
@@ -630,7 +630,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             onChange={(event) => updateDraft(event.currentTarget.value)} />
           {isChannel && <details className="chat-mention-picker" ref={mentionPicker}>
             <summary>Mention a name</summary>
-            <p>Mentions are plain text. Names are unverified and can be impersonated. This app does not notify on mentions.</p>
+            <p>Mentions are plain text. Names are unverified and can be impersonated. Browser alerts depend on your notification settings.</p>
             {mentionNames.length ? <div className="chat-mention-choice">
               <label>Name to mention
                 <select value={selectedMention} onChange={(event) => setMentionName(event.currentTarget.value)}>
@@ -661,7 +661,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
 function ChannelMessageText({ text, ownName }: { text: string; ownName: string | null }) {
   return channelTextParts(text).map((part, index) => {
     if (part.kind === 'text') return part.text
-    const self = ownName !== null && part.name.localeCompare(ownName, undefined, { sensitivity: 'accent' }) === 0
+    const self = isSelfMention(part.name, ownName)
     return <span key={index} className={self ? 'chat-mention chat-mention--self' : 'chat-mention'}
       title={self ? 'Matches this radio name; names are not verified.' : 'Mention uses an unverified name.'}>
       @[{part.name}]

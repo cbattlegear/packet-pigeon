@@ -20,7 +20,7 @@ import { useScreenWakeLock } from './preferences/use-screen-wake-lock.ts'
 import { ImportShare, ShareCode } from './sharing/ShareDialogs.tsx'
 import { formatCompanionSetup } from './sharing/setupLink.ts'
 import { RxInspector } from './diagnostics/RxInspector.tsx'
-import { openRadioStorage } from './storage/index.ts'
+import { openRadioStorage, radioKeyFromPublicKey } from './storage/index.ts'
 import type { RadioKey } from './storage/index.ts'
 import { messageAlert } from './chats/notification.ts'
 
@@ -79,6 +79,8 @@ function App() {
   const settings = useAppPreferences()
   const activeChat = useRef<{ key: RadioKey | null; id: string | null }>({ key: null, id: null })
   const [navigationRequest, setNavigationRequest] = useState<{ key: RadioKey; id: string; sequence: number } | null>(null)
+  const [radioNavigation, setRadioNavigation] = useState<{ key: RadioKey; section: 'Contacts' | 'Channels'; sequence: number } | null>(null)
+  const navigationSequence = useRef(0)
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
     () => typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
   )
@@ -112,6 +114,25 @@ function App() {
   const discoveryConnected = snapshot.phase === 'syncing' || snapshot.phase === 'ready'
   const discovery = useRadioDiscoveries(snapshot.device?.publicKey, discoveryConnected,
     hasOpenedDiscovery || hasOpenedMap, cacheStatus.saving)
+  const selectDiscoveryRadio = discovery.selectRadio
+  const clearRadioNavigation = useCallback(() => setRadioNavigation(null), [])
+  const navigateRadioAlert = useCallback((key: RadioKey, section: 'Chats' | 'Discovery' | 'Contacts' | 'Channels', id?: string) => {
+    const current = session.getSnapshot()
+    if (['choosing', 'opening', 'handshake', 'reconnecting', 'closing'].includes(current.phase)
+      || (['ready', 'syncing'].includes(current.phase) && current.device?.publicKey.toLowerCase() !== key)) {
+      setNotificationError('The alert belongs to a different radio or a connection is changing. Disconnect or finish connecting, then open the alert again.')
+      window.focus()
+      return false
+    }
+    setNotificationError('')
+    const sequence = ++navigationSequence.current
+    if (section === 'Chats' && id) setNavigationRequest({ key, id, sequence })
+    if (section === 'Discovery') selectDiscoveryRadio(key)
+    if (section === 'Contacts' || section === 'Channels') setRadioNavigation({ key, section, sequence })
+    window.location.hash = section.toLowerCase()
+    window.focus()
+    return true
+  }, [selectDiscoveryRadio])
   const radioContacts = useMemo(() => snapshot.contacts.map(storedContact), [snapshot.contacts])
   const adverts = useMemo(() => discoveryEntries(discovery.data,
     discoveryConnected && snapshot.progress?.stage !== 'contacts' ? radioContacts : undefined),
@@ -154,22 +175,12 @@ function App() {
     try {
       const notification = new Notification(`Packet Pigeon: ${alert.title}`, { body: message.text, tag: `packet-pigeon:${key}:${message.id}` })
       notification.onclick = () => {
-        const current = session.getSnapshot()
-        if ((current.phase === 'ready' || current.phase === 'syncing')
-          && current.device?.publicKey.toLowerCase() !== key) {
-          setNotificationError('The alert belongs to a different radio. Disconnect the current radio to open that conversation.')
-          window.focus()
-          return
-        }
-        setNavigationRequest((previous) => ({ key, id: alert.conversationId, sequence: (previous?.sequence ?? 0) + 1 }))
-        window.location.hash = 'chats'
-        window.focus()
-        notification.close()
+        if (navigateRadioAlert(key, 'Chats', alert.conversationId)) notification.close()
       }
     } catch (error) {
       setNotificationError(error instanceof Error ? `Could not show browser notification: ${error.message}` : 'Could not show browser notification.')
     }
-  }), [settings.preferences.syncedMessageAlerts, snapshot.device])
+  }), [settings.preferences.syncedMessageAlerts, snapshot.device, navigateRadioAlert])
 
   useEffect(() => cache.subscribeToDiscoveries((key, discovery) => {
     if (!settings.preferences.discoveredContactAlerts || typeof Notification === 'undefined'
@@ -180,18 +191,16 @@ function App() {
         tag: `packet-pigeon:discovery:${key}:${discovery.publicKey}`,
       })
       notification.onclick = () => {
-        window.location.hash = 'discovery'
-        window.focus()
-        notification.close()
+        if (navigateRadioAlert(key, 'Discovery')) notification.close()
       }
     } catch (error) {
       setNotificationError(error instanceof Error ? `Could not show browser notification: ${error.message}` : 'Could not show browser notification.')
     }
-  }), [settings.preferences.discoveredContactAlerts])
+  }), [settings.preferences.discoveredContactAlerts, navigateRadioAlert])
 
   useEffect(() => {
     if (snapshot.phase !== 'ready' || !snapshot.device) return
-    const key = snapshot.device.publicKey
+    const key = radioKeyFromPublicKey(snapshot.device.publicKey)
     const capacities = [
       ['contacts', snapshot.contacts.length, snapshot.device.capabilities.maxContacts],
       ['channels', snapshot.channels.length, snapshot.device.capabilities.maxChannels],
@@ -208,9 +217,7 @@ function App() {
             tag: `packet-pigeon:full:${id}`,
           })
           notification.onclick = () => {
-            window.location.hash = kind
-            window.focus()
-            notification.close()
+            if (navigateRadioAlert(key, kind === 'contacts' ? 'Contacts' : 'Channels')) notification.close()
           }
           fullStorageNotified.current.add(id)
         } catch (error) {
@@ -218,7 +225,7 @@ function App() {
         }
       }
     }
-  }, [settings.preferences.fullStorageAlerts, snapshot])
+  }, [settings.preferences.fullStorageAlerts, snapshot, navigateRadioAlert])
 
   function requestNotifications() {
     if (typeof Notification === 'undefined') return
@@ -427,6 +434,7 @@ function App() {
           <div className="section-pane">
             <div className="pane-heading"><h1>Channels</h1></div>
             <ChannelsPanel snapshot={snapshot} session={session} cache={cache} cacheSaving={cacheStatus.saving} messageSyncing={messageStatus.syncing}
+              radioNavigation={radioNavigation?.section === 'Channels' ? radioNavigation : null} onRadioNavigationHandled={clearRadioNavigation}
               onImport={() => setShareDialog({ kind: 'import' })}
               onBlockedSendersChanged={(key) => {
                 if (directMessages.getSnapshot().key === key) void directMessages.load(key)
@@ -438,6 +446,7 @@ function App() {
             <div className="section-pane">
               <div className="pane-heading"><h1>Contacts</h1><a href="#discovery">Browse discovered adverts</a></div>
               <ContactsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving}
+                radioNavigation={radioNavigation?.section === 'Contacts' ? radioNavigation : null} onRadioNavigationHandled={clearRadioNavigation}
                 messageSyncing={messageStatus.syncing} messageSending={directStatus.activeId !== null}
                 onImport={() => setShareDialog({ kind: 'import' })}
                 onShare={(link) => setShareDialog({ kind: 'export', link })}

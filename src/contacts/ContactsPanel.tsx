@@ -23,6 +23,8 @@ type ContactsProps = {
   onMap: (position: Coordinates, terrain: boolean) => void
   onImport?: () => void
   onShare?: (link: string) => void
+  radioNavigation?: { key: RadioKey; sequence: number } | null
+  onRadioNavigationHandled?: () => void
 }
 
 type CacheView = { keys: RadioKey[]; key: RadioKey | null; data: RadioData | null; error: string | null }
@@ -60,7 +62,8 @@ function exportContacts(contacts: readonly ContactEntry[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
-export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare }: ContactsProps) {
+export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare,
+  radioNavigation, onRadioNavigationHandled }: ContactsProps) {
   const live = snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [offlineChoice, setOfflineChoice] = useState<RadioKey | '' | null>(null)
@@ -76,6 +79,12 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
   const entries = useMemo(() => contactEntries(
     contacts, data?.contactPreferences ?? [], data?.messages ?? [],
   ), [contacts, data])
+
+  useEffect(() => {
+    if (!radioNavigation) return
+    setOfflineChoice(radioNavigation.key)
+    onRadioNavigationHandled?.()
+  }, [radioNavigation, onRadioNavigationHandled])
 
   useEffect(() => {
     let active = true

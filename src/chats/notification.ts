@@ -1,5 +1,5 @@
 import { conversations, possibleRepeats } from './model.ts'
-import { channelTextParts } from './mentions.ts'
+import { channelMessageBody, channelTextParts, isSelfMention } from './mentions.ts'
 import type { RadioData, StoredMessage } from '../storage/index.ts'
 
 export function messageAlert(data: RadioData, message: StoredMessage, ownName: string) {
@@ -14,8 +14,8 @@ export function messageAlert(data: RadioData, message: StoredMessage, ownName: s
     if (!channel) return null
     const setting = data.channelNotifications?.find((entry) => entry.index === channel.index)
     if (setting && (setting.paused || setting.channelName !== channel.name || setting.mode === 'muted')) return null
-    if (setting?.mode === 'mentions' && (!ownName || !channelTextParts(message.text)
-      .some((part) => part.kind === 'mention' && part.name === ownName))) return null
+    if (setting?.mode === 'mentions' && (!ownName || !channelTextParts(channelMessageBody(message))
+      .some((part) => part.kind === 'mention' && isSelfMention(part.name, ownName)))) return null
   }
   return { conversationId: conversation.id, title: conversation.title }
 }

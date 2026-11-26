@@ -28,9 +28,12 @@ type Props = {
   messageSyncing: boolean
   onBlockedSendersChanged: (key: RadioKey) => void
   onImport?: () => void
+  radioNavigation?: { key: RadioKey; sequence: number } | null
+  onRadioNavigationHandled?: () => void
 }
 
-export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSyncing, onBlockedSendersChanged, onImport }: Props) {
+export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSyncing, onBlockedSendersChanged, onImport,
+  radioNavigation, onRadioNavigationHandled }: Props) {
   const live = snapshot.phase === 'ready' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [choice, setChoice] = useState('')
@@ -46,6 +49,12 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
   const [kind, setKind] = useState<'private' | 'join' | 'public' | 'hashtag'>('private')
   const key = liveKey ?? choice
   if (share && share.key !== liveKey) setShare(null)
+
+  useEffect(() => {
+    if (!radioNavigation) return
+    setChoice(radioNavigation.key)
+    onRadioNavigationHandled?.()
+  }, [radioNavigation, onRadioNavigationHandled])
 
   useEffect(() => {
     let active = true
@@ -324,7 +333,7 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
           <label>Browser alerts
             <select aria-label={`Browser alerts for ${channel.name}`} value={notificationPaused ? 'paused' : notification?.mode ?? 'all'}
               disabled={!channelCached || busy} onChange={(event) => void setNotification(channel, event.currentTarget.value)}>
-              {notificationPaused && <option value="paused" disabled>Paused: slot name changed</option>}
+              {notificationPaused && <option value="paused" disabled>Paused: slot changed</option>}
               <option value="all">All messages</option>
               <option value="mentions">Mentions only</option>
               <option value="muted">Muted</option>
@@ -385,7 +394,7 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
       <button type="submit" disabled={!live || busy}>Save channel</button>
     </form>
     <p>Renaming keeps the existing key; hashtag channels cannot be renamed. Reusing a slot can associate its old cached messages with the new channel.</p>
-    <p>Browser alert modes apply to manually synced messages while this app is open. Mentions match the radio name exactly; names are unverified. A changed slot name pauses alerts until a mode is chosen. A replacement with the same name cannot be distinguished.</p>
+    <p>Browser alert modes apply to manually synced messages while this app is open. Mentions match the radio name without regard to case; names are unverified. A removed slot or changed slot name pauses alerts until a mode is chosen. A replacement with the same name without an observed removal cannot be distinguished.</p>
     <p>Sending scopes do not change the radio&apos;s saved default region.</p>
   </div>
 }

@@ -237,13 +237,14 @@ Browser notifications are opt-in in Settings and require browser permission.
 They alert for direct and channel text saved during manual message sync while
 the app remains open, not after closure or through background push. The Channels
 page offers all, mentions-only and muted modes per radio and channel. Mentions
-match the connected radio's name exactly and are not authenticated. Direct
+match the connected radio's name without regard to case and are not authenticated. Direct
 conversations can also be muted from their chat pane; this applies to any
 senders sharing their 12-character key prefix. Visible, focused conversations
 and already-read or possible-repeat receipts do not alert;
 possible repeats can be distinct messages. Clicking an alert opens its chat.
-Slot name changes pause a saved mode until it is chosen again; same-name
-replacement channels cannot be detected. Alert previews contain message text.
+Slot removals and name changes pause a saved mode until it is chosen again;
+same-name replacement channels cannot be detected without an observed removal.
+Alert previews contain message text.
 Optional discovered-contact alerts cover newly cached USB adverts, not BLE
 adverts or previously known contacts. Optional full-storage alerts use the
 connected radio's reported contact and channel counts and capacities. Room-server
