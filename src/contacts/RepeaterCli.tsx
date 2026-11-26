@@ -322,6 +322,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     try {
       const command = repeaterGuestPasswordCommand(guestPassword)
       const warning = 'This changes guest login access only, not the administrator password. Do not reuse the administrator password. ' +
+        'Changing the guest password does not revoke already-authorized guest identities; they may still access the repeater. ' +
         'The firmware returns OK without echoing the new value; do not query get guest.password because firmware returns it in plaintext. ' +
         'Clearing is not offered because a blank guest password could allow unauthenticated guest access. ' +
         'Sync the reply to confirm the setting was accepted.'
@@ -625,7 +626,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     </details>
     <details>
       <summary>Change guest login password</summary>
-      <p>Changes the password used for guest repeater access, not the administrator password. Firmware stores a
+      <p>Changes the password used for guest repeater access, not the administrator password. Changing it does not
+        revoke already-authorized guest identities; they may still access the repeater. Firmware stores a
         maximum of 15 printable ASCII characters. The value is sent only after confirmation, is cleared from the
         input when confirmation is accepted, and is redacted from this page's CLI history. Firmware returns <code>OK</code>
         for the command; do not query <code>get guest.password</code>, which returns the password in plaintext. Sync the

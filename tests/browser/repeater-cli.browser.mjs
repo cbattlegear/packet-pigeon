@@ -754,6 +754,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
 
   await page.getByText('Change guest login password', { exact: true }).click()
   await page.getByText(/do not query get guest.password/).waitFor()
+  await page.getByText(/does not revoke already-authorized guest identities/).waitFor()
   const guestPasswordInput = page.getByLabel('New guest password', { exact: true })
   assert.equal(await guestPasswordInput.getAttribute('type'), 'password')
   const setGuestPassword = page.getByRole('button', { name: 'Set guest password', exact: true })
@@ -766,6 +767,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   page.once('dialog', (dialog) => {
     assert.match(dialog.message(), /Change guest login password/)
     assert.match(dialog.message(), /guest login access only, not the administrator password/)
+    assert.match(dialog.message(), /does not revoke already-authorized guest identities; they may still access the repeater/)
     assert.match(dialog.message(), /do not query get guest.password because firmware returns it in plaintext/)
     assert.doesNotMatch(dialog.message(), /VerySecret9/)
     void dialog.dismiss()

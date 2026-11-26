@@ -631,7 +631,9 @@ not provide a safe read-back:
 available in the UI. Sync the reply to check acceptance; the reply does not
 verify the stored value. Clearing is not offered because a blank guest password
 could allow unauthenticated guest access. Choose a unique password; do not
-reuse the administrator password. Admin-password changes, identity changes,
+reuse the administrator password. Changing the guest password does not revoke
+already-authorized guest identities; they may still access the repeater.
+Admin-password changes, identity changes,
 and arbitrary commands are not supported. The radio's
 acceptance is not proof that the repeater executed a
 command. **Sync messages for replies**
