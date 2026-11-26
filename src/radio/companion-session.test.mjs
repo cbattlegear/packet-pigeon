@@ -764,6 +764,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('region denyf *', true), /administrator/)
   await assert.rejects(send('region save', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
+  await assert.rejects(send('sensor get gps'), /administrator/)
+  await assert.rejects(send('gps on', true), /administrator/)
   await assert.rejects(send('gps advert prefs', true), /administrator/)
   await assert.rejects(send('powersaving'), /administrator/)
   await assert.rejects(send('powersaving on', true), /administrator/)
@@ -821,6 +823,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('region allowf #North', true), /administrator/)
   await assert.rejects(send('region allowf *', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
+  await assert.rejects(send('sensor get gps'), /administrator/)
+  await assert.rejects(send('gps off', true), /administrator/)
   await assert.rejects(send('gps advert share', true), /administrator/)
   await assert.rejects(send('powersaving'), /administrator/)
   await assert.rejects(send('powersaving off', true), /administrator/)
@@ -898,6 +902,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   for (const policy of ['none', 'prefs', 'share']) {
     await assert.rejects(send(`gps advert ${policy}`), /Confirm/)
   }
+  await assert.rejects(send('gps on'), /Confirm/)
+  await assert.rejects(send('gps off'), /Confirm/)
   for (const command of ['powersaving on', 'powersaving off']) {
     await assert.rejects(send(command), /Confirm/)
   }
