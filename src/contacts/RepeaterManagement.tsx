@@ -6,6 +6,8 @@ import { decodeContactPath, pathUnknown } from '../radio/contact-path.ts'
 import type { ContactEntry } from './model.ts'
 import { contactPosition } from './model.ts'
 import { RepeaterCli } from './RepeaterCli.tsx'
+import { RepeaterCredentialStorage } from './RepeaterCredentialStorage.tsx'
+import { browserRepeaterCredentialVault } from '../radio/repeater-credentials.ts'
 import type { RepeaterMessageSync } from './RepeaterCli.tsx'
 import { mapPosition } from '../map/nodes.ts'
 import { resolvePath } from '../paths/model.ts'
@@ -59,7 +61,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
 
   useEffect(() => () => request.current?.abort(new Error('Stopped waiting for the repeater.')), [])
 
-  async function run(operation: 'login' | 'resume' | 'status', secret = '', remember = false) {
+  async function run(operation: 'login' | 'resume' | 'vault' | 'status', secret = '', remember = false) {
     if (!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)) return
     const controller = new AbortController()
     request.current = controller
@@ -70,7 +72,10 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
       const currentRoute = { pathLength: details.pathLength, pathHex: details.pathHex }
       const result = operation === 'resume'
         ? await session.resumeRepeater(radioKey, contact.publicKey, currentRoute, controller.signal)
-        : await session.manageRepeater(radioKey, contact.publicKey, currentRoute, operation, secret, controller.signal, remember)
+        : operation === 'vault'
+          ? await session.manageRepeater(radioKey, contact.publicKey, currentRoute, 'login',
+            await browserRepeaterCredentialVault().unlock(radioKey, contact.publicKey, secret, controller.signal), controller.signal)
+          : await session.manageRepeater(radioKey, contact.publicKey, currentRoute, operation, secret, controller.signal, remember)
       if (operation !== 'status' && 'role' in result) {
         setRemembered(session.hasRememberedRepeaterPassword(radioKey, contact.publicKey))
         setLogin(result)
@@ -138,8 +143,8 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     <summary>Repeater login and status</summary>
     <p>Current route: {route}. Login and status each send a remote request; no requests are automatic.</p>
     <p>A blank password can use the repeater's access list; a blank guest password may also grant guest access to a new radio.</p>
-    <p>Remembering is optional and keeps the password only in this tab's memory after a reported successful login, until forgotten or
-      the tab reloads or closes. The app does not save it to browser storage. Forgetting removes the remembered password but does not
+    <p>Tab-only remembering is optional and keeps the password only in this tab's memory after a reported successful login, until forgotten or
+      the tab reloads or closes. This option does not save it to browser storage. Forgetting removes the remembered password but does not
       revoke repeater access or cancel a request already started.
       Other scripts or extensions with access to this page may read it; the browser may retain copies after forgetting.</p>
     <p>After a cancelled, timed-out, or unconfirmed login or status request, requests to this repeater are blocked until reconnecting.
@@ -162,6 +167,9 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     </div>}
     {remembered && <p>Logging in with the remembered password sends a new request and clears any password typed above.
       Unchecking the remember option does not forget the saved password.</p>}
+    <RepeaterCredentialStorage radioKey={radioKey} contactKey={contact.publicKey}
+      disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}
+      onUnlock={(phrase) => { if (password.current) password.current.value = ''; void run('vault', phrase) }} />
     {login && <p role="status">Login reported {login.role === 'guest-or-legacy' ? 'guest or legacy (admin not confirmed)' : login.role} access;
       the request used {login.route} routing.</p>}
     {login && <button type="button" disabled={!ready || busy || pending || cliPending} onClick={() => void run('status')}>Request status</button>}

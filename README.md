@@ -503,6 +503,23 @@ remembered value, not the repeater's access-list entry, and does not cancel an
 already started request. Scripts or extensions with access to the page may read
 the password, and browser copies may remain after forgetting.
 Unchecking the option does not forget an existing remembered value.
+Alternatively, **Encrypted password in this browser** saves an encrypted
+password for a specific radio and repeater across reloads. Enter the password
+and a separate passphrase twice to save it; saving does not transmit or check
+the password. Use **Unlock and log in** and enter the passphrase to send a new
+route-verified login. The app does not store the passphrase or automatically
+restore authorization. Encryption uses AES-GCM with a key derived using
+PBKDF2-SHA-256 (600,000 iterations), with random salt and nonce. Use a long,
+unique, random passphrase distinct from the repeater password: anyone with the
+encrypted data can guess it offline. The radio and repeater public keys and approximate
+password length remain visible.
+Page scripts, extensions or malware with access to the page can read secrets
+while entered or used; the browser may retain copies. Losing the passphrase
+means the app cannot recover the password. Clearing site data removes it, though
+an in-progress save could write it again. Deletion does not clear a tab-only
+remembered password, revoke repeater access, cancel an already started login,
+or erase browser backups. Browser storage and Web Crypto with tab coordination
+are required.
 An interrupted, timed-out, or unconfirmed request
 blocks further login and status requests to that repeater for the current connection; a late
 reply cannot remove that block. Reconnect and log in again to retry. The
@@ -897,7 +914,7 @@ selected. Reply tags are unique within the tab, but a delayed reply from an
 earlier browser session can still be mistaken for a new response. Commands are
 never retried automatically.
 
-Saved credentials, session resumption, broader CLI commands, and the remaining
+Automatic session resumption, broader CLI commands, and the remaining
 repeater administration controls are not yet available.
 With USB connected, enter hex hops or append saved repeaters. An empty
 route sends directly with zero hops. Clearing the saved route allows the
