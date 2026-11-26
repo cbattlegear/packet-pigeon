@@ -18,6 +18,7 @@ import { ComposerTools } from '../sharing/ComposerTools.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { conversations, correlateChannelObservations, matchingChannelReceipts, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
+import { channelMentionNames, channelReply, channelTextParts, insertChannelMention, mentionableName } from './mentions.ts'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
@@ -260,7 +261,9 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   const [actionError, setActionError] = useState('')
   const [readError, setReadError] = useState('')
   const [hideRepeats, setHideRepeats] = useState(false)
+  const [mentionName, setMentionName] = useState('')
   const composer = useRef<HTMLTextAreaElement>(null)
+  const mentionPicker = useRef<HTMLDetailsElement>(null)
   const messageList = useRef<HTMLOListElement>(null)
   const positioned = useRef(false)
   const following = useRef(true)
@@ -280,6 +283,10 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   const unread = useMemo(() => unreadReceipts(visible, read), [visible, read])
   const bytes = new TextEncoder().encode(draft).length
   const isChannel = conversation.id.startsWith('channel:')
+  const mentionNames = useMemo(() => conversation.channel
+    ? channelMentionNames(contacts, conversation.messages, conversation.channel.index) : [],
+  [contacts, conversation.channel, conversation.messages])
+  const selectedMention = mentionNames.includes(mentionName) ? mentionName : ''
   let limit: number | null = isChannel ? null : maxDirectTextBytes
   let invalid = ''
   try {
@@ -406,15 +413,29 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     } catch (error) { setActionError(errorText(error)) }
   }
 
-  function reply(name: string) {
-    const text = `@[${name}] ${draft}`
-    updateDraft(text)
+  function reply(name: string, body: string) {
+    updateDraft(channelReply(name, body, draft))
+    setActionError('')
     composer.current?.focus()
+  }
+
+  function insertMention() {
+    if (!selectedMention) return
+    const selectionStart = composer.current?.selectionStart ?? draft.length
+    const selectionEnd = composer.current?.selectionEnd ?? selectionStart
+    const result = insertChannelMention(draft, selectedMention, selectionStart, selectionEnd)
+    updateDraft(result.text)
+    setActionError('')
+    if (mentionPicker.current) mentionPicker.current.open = false
+    requestAnimationFrame(() => {
+      composer.current?.focus()
+      composer.current?.setSelectionRange(result.cursor, result.cursor)
+    })
   }
 
   async function resend(message: StoredMessage) {
     if (!conversation.channel || !message.channelOutgoing
-      || !window.confirm('Resend this message? The original may already have reached others, and repeat tracking is unavailable.')) return
+      || !window.confirm('Resend this message? The original may already have reached others. Live observations, when enabled, are best effort and do not confirm delivery.')) return
     await direct.sendChannel(radioKey, conversation.channel.index, conversation.channel.name, message.text, preferences.saveDrafts, true)
   }
 
@@ -488,7 +509,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                 <strong>{message.outgoing || message.channelOutgoing ? 'You' : isChannel ? sender ?? 'Unknown sender' : conversation.title}</strong>
                 {timestamp(message.timestamp, formatTime)}
               </div>
-              {message.text && <p>{body}</p>}
+              {message.text && <p>{isChannel ? <ChannelMessageText text={body} ownName={senderName} /> : body}</p>}
               {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
               {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
               {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
@@ -551,9 +572,9 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                 <div className="chat-message-actions" role="group" aria-label="Channel message actions">
                   {message.text && <button type="button" onClick={() => void copy(message)}
                     aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
-                  {conversation.channel && sender && !sender.includes('[') && !sender.includes(']') && (
-                    <button type="button" onClick={() => reply(sender)} aria-label={`Reply to ${sender}`}>Reply</button>
-                  )}
+                  {conversation.channel && sender && (mentionableName(sender)
+                    ? <button type="button" onClick={() => reply(sender, body)} aria-label={`Reply to ${sender}`}>Reply</button>
+                    : <span className="chat-meta">Reply unavailable: the sender name contains a closing bracket (]).</span>)}
                   {sender && <button type="button" onClick={() => void block(sender)} aria-label={`Block sender name ${sender}`}>Block</button>}
                   <button type="button" disabled={message.channelOutgoing?.status === 'sending'}
                     aria-label={`Delete channel message: ${message.text.slice(0, 40)}`} onClick={() => void remove(message)}>Delete</button>
@@ -571,6 +592,19 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
           <label htmlFor="chat-draft">Message</label>
           <textarea id="chat-draft" ref={composer} rows={3} value={draft} aria-describedby="chat-byte-count chat-draft-error"
             onChange={(event) => updateDraft(event.currentTarget.value)} />
+          {isChannel && <details className="chat-mention-picker" ref={mentionPicker}>
+            <summary>Mention a name</summary>
+            <p>Mentions are plain text. Names are unverified and can be impersonated. This app does not notify on mentions.</p>
+            {mentionNames.length ? <div className="chat-mention-choice">
+              <label>Name to mention
+                <select value={selectedMention} onChange={(event) => setMentionName(event.currentTarget.value)}>
+                  <option value="">Select a name</option>
+                  {mentionNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                </select>
+              </label>
+              <button type="button" disabled={!selectedMention} onClick={insertMention}>Insert mention</button>
+            </div> : <p>No mentionable chat contacts or observed senders are available. You can type <code>@[name]</code> directly.</p>}
+          </details>}
           <div className="chat-compose-actions">
             <span id="chat-byte-count">{limit === null ? `${bytes} UTF-8 bytes; connect to check the limit` : `${bytes}/${limit} UTF-8 bytes`}</span>
             {active && <ComposerTools ownContact={ownContact} contacts={contacts} channels={channels}
@@ -586,6 +620,17 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       {conversation.recipient && <RetrySettings key={radioKey} radioKey={radioKey} current={options} direct={direct} />}
     </section>
   )
+}
+
+function ChannelMessageText({ text, ownName }: { text: string; ownName: string | null }) {
+  return channelTextParts(text).map((part, index) => {
+    if (part.kind === 'text') return part.text
+    const self = ownName !== null && part.name.localeCompare(ownName, undefined, { sensitivity: 'accent' }) === 0
+    return <span key={index} className={self ? 'chat-mention chat-mention--self' : 'chat-mention'}
+      title={self ? 'Matches this radio name; names are not verified.' : 'Mention uses an unverified name.'}>
+      @[{part.name}]
+    </span>
+  })
 }
 
 function RxObservationDetails({ correlation, outgoing, preferences, formatTime }: {
