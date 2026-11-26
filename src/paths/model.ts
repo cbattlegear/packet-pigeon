@@ -2,7 +2,7 @@ import type { Coordinates, MapNode } from '../map/nodes.ts'
 
 export type PathNode = Pick<MapNode, 'publicKey' | 'name' | 'position'>
 export type PathPoint = { label: string; position: Coordinates | null }
-export type MapPath = { title: string; points: PathPoint[]; connect?: boolean }
+export type MapPath = { title: string; points: PathPoint[]; connect?: boolean; description?: string }
 
 export function resolvePath(hashes: readonly string[], nodes: readonly PathNode[]) {
   const unique = new Map<string, PathNode>()

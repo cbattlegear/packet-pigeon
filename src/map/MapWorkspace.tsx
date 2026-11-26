@@ -273,6 +273,7 @@ export default function MapWorkspace({
           {displayPath && <section className="map-node-detail"
             aria-label={displayPath.connect === false ? 'Displayed map points' : 'Displayed route'}>
             <h4>{displayPath.title}</h4>
+            {displayPath.description && <p>{displayPath.description}</p>}
             <ol>{displayPath.points.map(({ label, position }, index) => <li key={index}>
               {label}{!mapPosition(position) && ' · Position unavailable'}
             </li>)}</ol>

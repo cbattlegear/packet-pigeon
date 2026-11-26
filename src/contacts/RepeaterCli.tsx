@@ -36,9 +36,11 @@ type HistoryEntry = {
   tag: string
   route: RepeaterCliReceipt['route'] | null
   deadline: number
-  reply: string | null
+  reply: { text: string; syncedAt: number } | null
   unconfirmed: boolean
 }
+
+const neighborTiming = 'Ages are seconds since heard when the repeater generated the reply; the reply may have been delayed before syncing.'
 
 export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
@@ -61,7 +63,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const term = query.trim().toLowerCase()
   const choices = repeaterCliCommands.filter((item) => `${item.command} ${item.description}`.toLowerCase().includes(term))
   const matchingHistory = history.filter((item) =>
-    `${item.command} ${item.description} ${item.reply ?? ''}`.toLowerCase().includes(term))
+    `${item.command} ${item.description} ${item.reply?.text ?? ''}`.toLowerCase().includes(term))
   const action = repeaterCliCommands.find((item) => item.command === selected)
 
   useEffect(() => messageSync.subscribeToSavedReceipts((key, message) => {
@@ -69,8 +71,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     if (key !== radioKey || receipt?.kind !== 'direct-text' || receipt.textType !== 1 ||
       receipt.senderKeyPrefix !== contactKey.slice(0, 12) || receipt.text[2] !== '|') return
     const tag = receipt.text.slice(0, 2)
+    const syncedAt = Date.now()
     setHistory((current) => current.map((item) => item.tag === tag && item.reply === null
-      ? { ...item, reply: receipt.text.slice(3).trimStart() } : item))
+      ? { ...item, reply: { text: receipt.text.slice(3).trimStart(), syncedAt } } : item))
   }), [messageSync, radioKey, contactKey])
 
   useEffect(() => {
@@ -298,31 +301,35 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         {[...matchingHistory].reverse().map((item) => <li key={item.tag}>
           <strong><code>{item.command}</code></strong>
           <span> · {item.unconfirmed ? 'Send unconfirmed' : `Accepted by radio (${item.route})`}</span>
-          {item.reply !== null ? <pre>{item.reply || '(empty reply)'}</pre> :
+          {item.reply !== null ? <pre>{item.reply.text || '(empty reply)'}</pre> :
             <p>{now >= item.deadline ? 'No reply synced before the deadline. It may still arrive.' :
               'Waiting for a reply. Sync messages to check.'}</p>}
           {item.command === 'neighbors' && item.reply !== null &&
-            <NeighborReport reply={item.reply} name={name} repeaterPosition={repeaterPosition}
+            <NeighborReport reply={item.reply.text} syncedAt={item.reply.syncedAt} name={name} repeaterPosition={repeaterPosition}
               nodes={neighborNodes} onMap={onMap} />}
         </li>)}
       </ol>}
   </details>
 }
 
-function NeighborReport({ reply, name, repeaterPosition, nodes, onMap }: {
+function NeighborReport({ reply, syncedAt, name, repeaterPosition, nodes, onMap }: {
   reply: string
+  syncedAt: number
   name: string
   repeaterPosition: Coordinates | null
   nodes: readonly PathNode[]
   onMap?: (path: MapPath) => void
 }) {
+  const date = new Date(syncedAt)
+  const syncTime = date.toLocaleString()
+  const timing = <p className="contact-status">Reply synced <time dateTime={date.toISOString()}>{syncTime}</time> (browser time). {neighborTiming}</p>
   let neighbors
   try {
     neighbors = parseRepeaterNeighbors(reply)
   } catch (reason) {
-    return <p className="contact-status">{reason instanceof Error ? reason.message : 'The neighbor list could not be read.'}</p>
+    return <>{timing}<p className="contact-status">{reason instanceof Error ? reason.message : 'The neighbor list could not be read.'}</p></>
   }
-  if (!neighbors.length) return <p className="contact-status">No neighbors were reported.</p>
+  if (!neighbors.length) return <>{timing}<p className="contact-status">No neighbors were reported.</p></>
 
   const resolved = neighbors.map((neighbor) => ({
     ...neighbor,
@@ -331,19 +338,21 @@ function NeighborReport({ reply, name, repeaterPosition, nodes, onMap }: {
   const mappedCount = resolved.filter(({ matches }) => matches.length === 1 && mapPosition(matches[0].position)).length
   const path: MapPath = {
     title: `Neighbors heard by ${name}`,
+    description: `Reply synced ${syncTime} (browser time). ${neighborTiming}`,
     connect: false,
     points: [
       { label: `${name} (repeater)`, position: repeaterPosition },
       ...resolved.map(({ keyPrefix, secondsAgo, snrQuarterDb, matches }) => ({
-        label: `${matches.length === 1 ? matches[0].name : `${keyPrefix} (${matches.length ? 'ambiguous prefix' : 'not in saved contacts'})`} · heard ${secondsAgo}s ago · SNR ${snrQuarterDb / 4} dB`,
+        label: `${matches.length === 1 ? matches[0].name : `${keyPrefix} (${matches.length ? 'ambiguous prefix' : 'not in saved contacts'})`} · reported age ${secondsAgo}s at reply · SNR ${snrQuarterDb / 4} dB`,
         position: matches.length === 1 ? matches[0].position : null,
       })),
     ],
   }
   return <div className="repeater-neighbor-report">
-    <ul aria-label="Recently heard neighbors">
+    {timing}
+    <ul aria-label="Neighbors in reply">
       {resolved.map(({ keyPrefix, secondsAgo, snrQuarterDb, matches }, index) => <li key={`${keyPrefix}:${index}`}>
-        {matches.length === 1 ? matches[0].name : keyPrefix} · {secondsAgo}s ago · {snrQuarterDb / 4} dB
+        {matches.length === 1 ? matches[0].name : keyPrefix} · reported age {secondsAgo}s at reply · {snrQuarterDb / 4} dB
         {matches.length > 1 ? ' · Ambiguous saved-contact prefix; not mapped'
           : matches.length === 0 ? ' · Not in saved contacts'
             : !mapPosition(matches[0].position) ? ' · Position unavailable' : ''}
