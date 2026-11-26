@@ -1,0 +1,9 @@
+.git
+.github
+.env*
+.npmrc
+*.local
+*.log
+node_modules
+dist
+dist-ssr

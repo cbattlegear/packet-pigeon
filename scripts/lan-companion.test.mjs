@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
-import { mkdtemp, rmdir, unlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,17 +9,16 @@ import { WebSocket } from 'ws'
 import { startLanBridge } from './lan-companion.mjs'
 import { lanProtocolHeader, lanSocketPath, lanSocketProtocol, lanStatusPath } from '../src/radio/lan-bridge.ts'
 
-test('serves the local app and bridges framed commands only for its own origin', async (t) => {
+async function fixtureDist(t) {
   const dist = await mkdtemp(join(tmpdir(), 'packet-pigeon-bridge-'))
-  const index = join(dist, 'index.html')
-  const asset = join(dist, 'asset.js')
-  t.after(async () => {
-    await unlink(index)
-    await unlink(asset)
-    await rmdir(dist)
-  })
-  await writeFile(index, '<html><head></head><body>Fixture</body></html>')
-  await writeFile(asset, 'export default 1')
+  t.after(() => rm(dist, { recursive: true }))
+  await writeFile(join(dist, 'index.html'), '<html><head></head><body>Fixture</body></html>')
+  await writeFile(join(dist, 'asset.js'), 'export default 1')
+  return dist
+}
+
+test('serves the local app and bridges framed commands only for its own origin', async (t) => {
+  const dist = await fixtureDist(t)
 
   const server = createServer()
   server.listen(0, '127.0.0.1')
@@ -79,4 +78,17 @@ test('serves the local app and bridges framed commands only for its own origin',
   closingClient.close(1000)
   assert.deepEqual((await lastCommand)[0], command)
   await ended
+})
+
+test('serves the app without advertising or enabling a bridge when no radio is configured', async (t) => {
+  const dist = await fixtureDist(t)
+  const app = await startLanBridge({ bindHost: '0.0.0.0', browserPort: 0, distDir: dist })
+  t.after(() => app.close())
+  assert.equal((await fetch(app.url)).status, 200)
+  const status = await fetch(`${app.url}${lanStatusPath}`)
+  assert.equal(status.status, 404)
+  assert.equal(status.headers.get(lanProtocolHeader), null)
+  assert.equal(status.headers.get('cache-control'), 'no-store')
+  const socketUrl = `${app.url.replace('http:', 'ws:')}${lanSocketPath}`
+  await assert.rejects(once(new WebSocket(socketUrl, lanSocketProtocol, { origin: app.url }), 'open'), /403/)
 })
