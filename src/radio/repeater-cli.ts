@@ -75,6 +75,8 @@ export const repeaterCliCommands = [
   { command: 'sensor get gps', description: 'Read GPS activity setting' },
   { command: 'gps on', description: 'Enable GPS receiver', confirm: true, warning: gpsWarning },
   { command: 'gps off', description: 'Disable GPS receiver', confirm: true, warning: gpsWarning },
+  { command: 'gps sync', description: 'Request GPS clock synchronization', confirm: true,
+    warning: 'This does not enable GPS. On repeater v1.14.1, an ok reply only acknowledges the request, not a fix or clock change; some providers do not apply it. A supported provider may change the clock later, even after a read-back, and may move it forwards or backwards, disrupting later commands. GPS may already adjust the clock automatically. Firmware and hardware support vary. Sync replies and read the clock separately.' },
   { command: 'gps setloc', description: 'Copy sensor coordinates to stored position', confirm: true,
     warning: 'This replaces both stored coordinates with the sensor values, which may be stale or zero even without a GPS fix or receiver. New advertisements can publish them when the policy is prefs. This does not send an advertisement or recall queued or sent locations. In v1.14.1, saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An ok reply does not prove a valid fix or persistence. Sync replies and read both stored coordinates separately.' },
   { command: 'gps advert', description: 'Read GPS advert policy' },

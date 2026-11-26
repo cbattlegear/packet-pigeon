@@ -96,7 +96,7 @@ const managementForms = {
   guestPassword: { title: 'Change guest login password', terms: 'set guest.password' },
   name: { title: 'Change repeater name', terms: 'set name get name' },
   owner: { title: 'Change owner information', terms: 'set owner.info' },
-  gps: { title: 'Manage GPS receiver', terms: 'gps on gps off sensor get gps activity' },
+  gps: { title: 'Manage GPS receiver', terms: 'gps on gps off gps sync clock sensor get gps activity' },
   position: { title: 'Change stored position', terms: 'set lat set lon gps setloc gps advert location' },
 } as const
 
@@ -134,6 +134,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const receiverGainCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set radio.rxgain on' || item.command === 'set radio.rxgain off')
   const gpsCommands = repeaterCliCommands.filter((item) => item.command === 'gps on' || item.command === 'gps off')
+  const gpsClockSync = repeaterCliCommands.find((item) => item.command === 'gps sync')
   const gpsSetLocation = repeaterCliCommands.find((item) => item.command === 'gps setloc')
   const multiAckCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set multi.acks 1' || item.command === 'set multi.acks 0')
@@ -579,6 +580,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {powerDiagnosticHelp(selected) && <p>{powerDiagnosticHelp(selected)} Firmware and hardware support vary; replies may be delayed.</p>}
     {selected === 'sensor get gps' && <p>This reads the reported GPS activity setting, not a fix or hardware power state.
       In v1.14.1, 1 means active and 0 inactive; null means the setting was not found. Other firmware may differ and replies may be stale.</p>}
+    {selected === 'gps sync' && gpsClockSync && <p>{gpsClockSync.warning}</p>}
     {selected === 'gps setloc' && gpsSetLocation && <p>{gpsSetLocation.warning}</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
     <div className="contact-actions">
@@ -1067,6 +1069,14 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       <p>Each action sends a separate command. Sync replies explicitly; request the activity setting again to check the reported state.
         In v1.14.1, 1 means active and 0 inactive; null means the setting was not found.
         The <code>gps</code> status command is not offered because repeater v1.14.1 may crash when a GPS receiver is not detected.</p>
+      <p>GPS clock synchronization does not enable GPS. An ok reply does not prove a fix or clock change; a change may happen later and can
+        disrupt commands. Some providers do not apply it. GPS may already adjust the clock automatically. Read the clock separately.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('clock', 'Read the repeater clock', false)}>Read repeater clock</button>
+        {gpsClockSync && <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => sendChoice(gpsClockSync)}>{gpsClockSync.description}</button>}
+      </div>
     </details>
     <details data-cli-section="position">
       <summary>{managementForms.position.title}</summary>
@@ -1142,6 +1152,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
               In v1.14.1, 1 means active and 0 inactive. A null or unsupported reply does not establish hardware support. Firmware and hardware support vary.</p>}
           {(item.command === 'gps on' || item.command === 'gps off') && item.reply !== null &&
             <p className="contact-status">An ok reply does not prove a fix, hardware state, or persistence. Request the GPS activity setting separately.</p>}
+          {item.command === 'gps sync' && item.reply !== null &&
+            <p className="contact-status">An ok reply does not prove a fix or clock change. Read the clock separately; it may still change later.</p>}
           {item.command === 'gps setloc' && item.reply !== null &&
             <p className="contact-status">An ok reply does not prove a valid fix or persistence. Read both stored coordinates separately; firmware support varies.</p>}
           {item.command === 'region' && item.reply !== null &&

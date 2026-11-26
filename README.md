@@ -722,6 +722,12 @@ prove a fix, hardware state, or persistence. In v1.14.1, `1` means active and
 `0` inactive; `null` means the setting was not found.
 The `gps` status command is not offered: repeater v1.14.1 may crash when a GPS
 receiver is not detected.
+Administrators can confirm a GPS clock synchronization request and read the
+repeater clock separately. It does not enable GPS. On v1.14.1, an `ok` reply
+only acknowledges the request: some providers do not apply it, while others may
+change the clock later, even after a read-back. The clock may move forwards or
+backwards and disrupt later commands; GPS may already adjust it automatically.
+Hardware and firmware support vary.
 Administrators can confirm copying sensor coordinates to both stored position
 fields. In v1.14.1, the command does not check for a receiver or a valid fix;
 the sensor values may be stale or zero. New advertisements can publish the
@@ -797,9 +803,10 @@ repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line
 breaks. The edit field starts empty; use `get owner.info` to read the current
 value before replacing it. The confirmed **clock sync** action
 uses the connected radio's clock, not the browser clock. Check the radio's clock
-in Settings first: the repeater cannot move backwards, and setting it too far
-ahead can disrupt later commands. Companion firmware v1.11 and earlier may
-forward a zero timestamp for CLI commands, which the repeater may ignore.
+in Settings first: this command cannot move the repeater clock backwards, and
+setting it too far ahead can disrupt later commands. Companion firmware v1.11
+and earlier may forward a zero timestamp for CLI commands, which the repeater
+may ignore.
 Neighbor replies contain short key prefixes, seconds since heard when the
 repeater generated the reply, and SNR multiplied by 4; the repeater limits the
 list. The displayed sync time is browser time, not the reply's generation time;
