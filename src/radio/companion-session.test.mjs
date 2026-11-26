@@ -610,6 +610,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set af 9', true), /administrator/)
   await assert.rejects(send('set txdelay 0.5', true), /administrator/)
   await assert.rejects(send('set tx 12', true), /administrator/)
+  await assert.rejects(send('set guest.password Guest-123', true), /administrator/)
   await assert.rejects(send('set flood.max 0', true), /administrator/)
   await assert.rejects(send('set loop.detect strict', true), /administrator/)
   await assert.rejects(send('set path.hash.mode 2', true), /administrator/)
@@ -646,7 +647,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('powersaving off', true), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
-  for (const command of ['get guest.password', 'set guest.password test', 'reboot now',
+  for (const command of ['get guest.password', 'password secret', 'reboot now',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
     await assert.rejects(send(command, true), /supported repeater CLI command/)
   }
@@ -661,6 +662,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set txdelay 0'), /Confirm/)
   await assert.rejects(send('set direct.txdelay 2'), /Confirm/)
   await assert.rejects(send('set tx 12'), /Confirm/)
+  await assert.rejects(send('set guest.password Guest-123'), /Confirm/)
   await assert.rejects(send('set flood.max.advert 0'), /Confirm/)
   await assert.rejects(send('set loop.detect strict'), /Confirm/)
   await assert.rejects(send('set loop.detect extreme', true), /supported repeater CLI command/)
@@ -765,6 +767,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const airtime = await send('set af 9', true)
   const airtimeFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(airtimeFrame.slice(13))), `${airtime.tag}|set af 9`)
+  const guestPassword = await send('set guest.password Guest-123', true)
+  const guestPasswordFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(guestPasswordFrame.slice(13))),
+    `${guestPassword.tag}|set guest.password Guest-123`)
 })
 
 test('confirmed reboot invalidates repeater access after acceptance or uncertain dispatch', async (t) => {

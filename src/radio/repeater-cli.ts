@@ -113,6 +113,19 @@ export function repeaterTransmitPowerCommand(value: string) {
   return repeaterCliCommand(`set tx ${value}`)
 }
 
+function validateGuestPassword(value: string) {
+  const bytes = new TextEncoder().encode(value)
+  if (!value || bytes.length > 15 || bytes.some((byte) => byte < 33 || byte > 126 || byte === 124) ||
+    new TextDecoder().decode(bytes) !== value) {
+    throw new Error('Enter a guest password of 1–15 printable ASCII characters without spaces or |.')
+  }
+}
+
+export function repeaterGuestPasswordCommand(value: string) {
+  validateGuestPassword(value)
+  return repeaterCliCommand(`set guest.password ${value}`)
+}
+
 export function repeaterNameCommand(value: string) {
   return repeaterCliCommand(`set name ${value}`)
 }
@@ -190,6 +203,11 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole repeater transmit power from 1 to 22 dBm.')
     }
     return { command, description: 'Set repeater transmit power', confirm: true as const }
+  }
+  const guestPasswordPrefix = 'set guest.password '
+  if (command.startsWith(guestPasswordPrefix)) {
+    validateGuestPassword(command.slice(guestPasswordPrefix.length))
+    return { command, description: 'Change guest login password', confirm: true as const }
   }
   const ownerPrefix = 'set owner.info '
   if (command.startsWith(ownerPrefix)) {

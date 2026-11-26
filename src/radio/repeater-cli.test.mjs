@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
-  repeaterTransmitPowerCommand, parseRepeaterNeighbors,
+  repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -73,7 +73,7 @@ test('advertised position updates enforce coordinate ranges and decimal precisio
 test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   let writes = 0
   const link = { async request() { writes++; throw new Error('unexpected write') } }
-  for (const command of ['get guest.password', 'set guest.password secret', 'get prv.key', 'reboot now', 'reboot\n', 'ver\nadvert',
+  for (const command of ['get guest.password', 'get prv.key', 'password secret', 'reboot now', 'reboot\n', 'ver\nadvert',
     'set repeat', 'set repeat true', 'set repeat off\n', 'set repeat off extra',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off',
     'set allow.read.only', 'set allow.read.only true', 'set allow.read.only off extra',
@@ -171,6 +171,20 @@ test('transmit power uses the documented whole dBm range and requires confirmati
     assert.throws(() => repeaterTransmitPowerCommand(value), /transmit power from 1 to 22/)
     assert.throws(() => repeaterCliCommand(`set tx ${value}`), /transmit power from 1 to 22/)
   }
+})
+
+test('guest password changes are bounded, confirmation-gated, and never expose the getter', () => {
+  for (const value of ['a', 'Guest-123', '!#$%&\'()*+,-.', 'x'.repeat(15)]) {
+    const command = repeaterGuestPasswordCommand(value)
+    assert.equal(command.command, `set guest.password ${value}`)
+    assert.equal(command.confirm, true)
+    assert.equal(repeaterCliCommand(command.command).confirm, true)
+  }
+  for (const value of ['', 'x'.repeat(16), 'with spaces', 'with|pipe', 'line\nbreak', 'café', '\u007f']) {
+    assert.throws(() => repeaterGuestPasswordCommand(value), /guest password/)
+    assert.throws(() => repeaterCliCommand(`set guest.password ${value}`), /guest password/)
+  }
+  assert.throws(() => repeaterCliCommand('get guest.password'), /supported/)
 })
 
 test('region inspection allows bounded names but rejects injected and unsupported commands', () => {

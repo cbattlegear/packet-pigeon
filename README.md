@@ -622,8 +622,20 @@ repeater generated the reply, and SNR multiplied by 4; the repeater limits the
 list. The displayed sync time is browser time, not the reply's generation time;
 the reply may have been delayed over the mesh or queued before syncing.
 Local intervals are 0 (disabled) or even minutes from 60 to 240; flood intervals
-are 0 or 3 to 168 hours. Changes affect future transmissions. Password, identity,
-and arbitrary commands are not supported. The radio's acceptance is not proof that the repeater executed a
+are 0 or 3 to 168 hours. Changes affect future transmissions. Administrators can
+set the guest login password to 1–15 printable ASCII characters; the form masks
+the value, clears it when confirmation is accepted, and redacts it from CLI
+history. Firmware returns `OK` without echoing the new guest password, but does
+not provide a safe read-back:
+`get guest.password` returns the password in plaintext and is deliberately not
+available in the UI. Sync the reply to check acceptance; the reply does not
+verify the stored value. Clearing is not offered because a blank guest password
+could allow unauthenticated guest access. Choose a unique password; do not
+reuse the administrator password. Changing the guest password does not revoke
+already-authorized guest identities; they may still access the repeater.
+Admin-password changes, identity changes,
+and arbitrary commands are not supported. The radio's
+acceptance is not proof that the repeater executed a
 command. **Sync messages for replies**
 explicitly drains and saves the ordinary message queue, including unrelated
 messages; nothing is synced automatically. CLI replies are saved in Chats; replies

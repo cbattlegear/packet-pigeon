@@ -5,6 +5,7 @@ import type { CompanionSession } from '../radio/companion-session.ts'
 import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
+  repeaterGuestPasswordCommand,
   repeaterTransmitPowerCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -62,6 +63,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [homeRegion, setHomeRegion] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
+  const [guestPassword, setGuestPassword] = useState('')
   const [advertPolicy, setAdvertPolicy] = useState('')
   const powerSavingCommands = repeaterCliCommands.filter((item) =>
     item.command === 'powersaving on' || item.command === 'powersaving off')
@@ -102,10 +104,16 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
 
   useEffect(() => () => request.current?.abort(new Error('Stopped waiting for the radio.')), [])
 
-  async function send(command: string, description: string, confirmed: boolean, warning = '') {
+  async function send(
+    command: string, description: string, confirmed: boolean, warning = '', historyCommand = command,
+    afterConfirmation?: () => void,
+  ) {
     if (!ready || busy || pending || syncStatus.syncing) return
     const target = command === 'reboot' ? `${name} (${contactKey.slice(0, 12)})` : name
-    if (confirmed && !window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
+    if (confirmed) {
+      if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
+      afterConfirmation?.()
+    }
     if (term && !`${command} ${description}`.toLowerCase().includes(term)) setQuery('')
     const controller = new AbortController()
     request.current = controller
@@ -121,7 +129,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       const sentAt = Date.now()
       setNow(sentAt)
       setHistory((current) => [...current.slice(-99), {
-        command, description, tag: result.tag, route: result.route, deadline: sentAt + result.timeoutMs,
+        command: historyCommand, description, tag: result.tag, route: result.route, deadline: sentAt + result.timeoutMs,
         reply: null, unconfirmed: false,
       }])
     } catch (reason) {
@@ -138,7 +146,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         const sentAt = Date.now()
         setNow(sentAt)
         setHistory((current) => [...current.slice(-99), {
-          command, description, tag: reason.tag, route: null, deadline: sentAt + 120_000,
+          command: historyCommand, description, tag: reason.tag, route: null, deadline: sentAt + 120_000,
           reply: null, unconfirmed: true,
         }])
       }
@@ -305,6 +313,24 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         'This changes the advertised name, not the public key. An advertisement is not sent automatically.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid repeater name.')
+    }
+  }
+
+  function submitGuestPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterGuestPasswordCommand(guestPassword)
+      const warning = 'This changes guest login access only, not the administrator password. Do not reuse the administrator password. ' +
+        'Changing the guest password does not revoke already-authorized guest identities; they may still access the repeater. ' +
+        'The firmware returns OK without echoing the new value; do not query get guest.password because firmware returns it in plaintext. ' +
+        'Clearing is not offered because a blank guest password could allow unauthenticated guest access. ' +
+        'Sync the reply to confirm the setting was accepted.'
+      void send(command.command, command.description, true,
+        warning,
+        'set guest.password [redacted]', () => setGuestPassword(''))
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid guest password.')
     }
   }
 
@@ -596,6 +622,25 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             onChange={(event) => setInterval(event.currentTarget.value)} />
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set interval</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change guest login password</summary>
+      <p>Changes the password used for guest repeater access, not the administrator password. Changing it does not
+        revoke already-authorized guest identities; they may still access the repeater. Firmware stores a
+        maximum of 15 printable ASCII characters. The value is sent only after confirmation, is cleared from the
+        input when confirmation is accepted, and is redacted from this page's CLI history. Firmware returns <code>OK</code>
+        for the command; do not query <code>get guest.password</code>, which returns the password in plaintext. Sync the
+        reply to check acceptance. This does not prove which value is stored. Clearing is not offered because a
+        blank guest password could allow unauthenticated guest access. Choose a unique password; do not reuse the
+        administrator password.</p>
+      <form className="contact-actions" onSubmit={submitGuestPassword}>
+        <label>New guest password
+          <input type="password" autoComplete="new-password" required value={guestPassword}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setGuestPassword(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set guest password</button>
       </form>
     </details>
     <details>
