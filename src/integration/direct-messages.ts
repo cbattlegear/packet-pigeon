@@ -30,6 +30,7 @@ type ActiveSend = {
 export type DirectStatus = {
   key: RadioKey | null
   data: RadioData | null
+  cacheLoad: { state: 'idle' | 'loading' | 'ready' } | { state: 'error'; message: string }
   activeId: string | null
   cancelling: boolean
   pending: number
@@ -58,7 +59,7 @@ export class DirectMessages {
   private readyKey: string | null = null
   private active?: ActiveSend
   private status: DirectStatus = {
-    key: null, data: null, activeId: null, cancelling: false, pending: 0, error: null,
+    key: null, data: null, cacheLoad: { state: 'idle' }, activeId: null, cancelling: false, pending: 0, error: null,
   }
 
   constructor(
@@ -171,18 +172,18 @@ export class DirectMessages {
     const version = ++this.loadVersion
     try {
       const key = radioKeyFromPublicKey(publicKey)
-      this.update({ key, data: this.status.key === key ? this.status.data : null })
+      this.update({ key, data: this.status.key === key ? this.status.data : null, cacheLoad: { state: 'loading' } })
       await this.serial(async () => {
         const storage = await this.openStorage()
         try {
           const data = await storage.read(key)
-          if (version === this.loadVersion && this.status.key === key) this.update({ data })
+          if (version === this.loadVersion && this.status.key === key) this.update({ data, cacheLoad: { state: 'ready' } })
         } finally {
           storage.close()
         }
       })
     } catch (error) {
-      if (version === this.loadVersion) this.update({ error: messageOf(error) })
+      if (version === this.loadVersion) this.update({ cacheLoad: { state: 'error', message: messageOf(error) } })
     }
   }
 

@@ -134,6 +134,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const [unreadOnly, setUnreadOnly] = useState(false)
   const radioKey = live ?? (offlineChoice === null ? last : offlineChoice || null)
   const data = status.key === radioKey ? status.data : null
+  const cacheLoad = status.key === radioKey ? status.cacheLoad : null
   const canSync = snapshot.phase === 'ready'
   const items = useMemo(() => data && status.key ? conversations(data, direct.inMemoryDraftIds(status.key)) : [],
     [data, direct, status])
@@ -237,23 +238,41 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             <p>Connect a radio or select a saved radio to browse chats.</p>
           </div>
         </section>
+      ) : cacheLoad?.state === 'error' && !data ? (
+        <section className="conversation-pane" aria-label="Conversation">
+          <div className="state-message" role="alert">
+            <h2>Could not load cached chats</h2>
+            <p>{cacheLoad.message}</p>
+            <button type="button" onClick={() => void direct.load(radioKey)}>Retry loading chats</button>
+          </div>
+        </section>
+      ) : !data && cacheLoad?.state === 'ready' ? (
+        <section className="conversation-pane" aria-label="Conversation">
+          <div className="state-message"><h2>No cached chats</h2><p>No cache is available for this radio.</p></div>
+        </section>
       ) : !data ? (
         <section className="conversation-pane" aria-label="Conversation">
           <div className="state-message" role="status"><h2>Loading cached chats</h2></div>
         </section>
       ) : (
-        <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} searchTarget={searchTarget}
-          senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
-          display={{
-            active, preferences, read, formatTime, formatDate, mapPosition, ownContact,
-            contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
-            readChannelKey: canSync && live && readChannelKey ? (channel) => readChannelKey(live, channel) : undefined,
-            observationSource, canObserve: Boolean(live && canSync && snapshot.transport === 'usb'), regionNames,
-            pathNodes: live && live === radioKey && pathNodes ? pathNodes : [
-              ...data.contacts.map(({ publicKey, name, details }) => ({ publicKey, name, position: contactPosition(details) })),
-              ...mapPathNodes,
-            ], onPathMap,
-          }} />
+        <div className="chat-pane-container">
+          {cacheLoad?.state === 'error' && <div className="chat-cache-error" role="alert">
+            <p>Could not refresh cached chats: {cacheLoad.message} Showing previously loaded data.</p>
+            <button type="button" onClick={() => void direct.load(radioKey)}>Retry loading chats</button>
+          </div>}
+          <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} searchTarget={searchTarget}
+            senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
+            display={{
+              active, preferences, read, formatTime, formatDate, mapPosition, ownContact,
+              contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
+              readChannelKey: canSync && live && readChannelKey ? (channel) => readChannelKey(live, channel) : undefined,
+              observationSource, canObserve: Boolean(live && canSync && snapshot.transport === 'usb'), regionNames,
+              pathNodes: live && live === radioKey && pathNodes ? pathNodes : [
+                ...data.contacts.map(({ publicKey, name, details }) => ({ publicKey, name, position: contactPosition(details) })),
+                ...mapPathNodes,
+              ], onPathMap,
+            }} />
+        </div>
       )}
     </div>
   )

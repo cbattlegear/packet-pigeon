@@ -61,6 +61,22 @@
   overflow-wrap: anywhere;
 }
 
+.chat-pane-container {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-pane-container > .conversation-pane {
+  flex: 1;
+}
+
+.chat-cache-error {
+  padding: 12px 28px;
+  color: var(--error);
+}
+
 .chat-conversation-list {
   display: grid;
   gap: 4px;

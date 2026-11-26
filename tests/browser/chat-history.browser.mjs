@@ -357,3 +357,37 @@ test('channel message context actions work offline alongside visible keyboard co
   await page.getByLabel('Search messages').click()
   assert.equal(await menu.count(), 0)
 })
+
+test('a failed cached chat load offers retry instead of an indefinite loading state', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  page.setDefaultTimeout(8000)
+  const radio = 'ab'.repeat(32)
+  await page.goto(`${url}#chats`)
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { await storage.update(radioKeyFromPublicKey(radio), { channels: [{ index: 0, name: 'Public' }] }) }
+    finally { storage.close() }
+  }, radio)
+  await page.reload()
+  await page.evaluate(() => {
+    const original = IDBObjectStore.prototype.get
+    window.failChatRead = true
+    IDBObjectStore.prototype.get = function (...args) {
+      if (window.failChatRead) throw new Error('Simulated read failure')
+      return original.apply(this, args)
+    }
+  })
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await page.getByRole('heading', { name: 'Could not load cached chats' }).waitFor()
+  assert.equal(await page.getByText('Loading cached chats').count(), 0)
+  await page.getByRole('region', { name: 'Conversation' }).getByText('Could not read the cached radio data.').waitFor()
+  await page.getByText('Chats cache: Could not read the cached radio data.').waitFor()
+  await page.evaluate(() => { window.failChatRead = false })
+  await page.getByRole('button', { name: 'Retry loading chats' }).click()
+  await page.getByRole('region', { name: 'Conversation with Public' }).waitFor()
+  assert.equal(await page.getByRole('heading', { name: 'Could not load cached chats' }).count(), 0)
+  assert.equal(await page.getByText('Chats cache: Could not read the cached radio data.').count(), 0)
+})
