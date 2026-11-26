@@ -65,7 +65,7 @@ test('renders matching receipt details without claiming delivery', async () => {
     ]
     const render = (pathMetadata) => renderToStaticMarkup(createElement(ChatPanel, {
       snapshot: { phase: 'ready', transport: 'usb', device: { publicKey: key, name: 'Me', type: 1 }, channels: [] },
-      messageSync: {}, messageStatus: {}, direct: { draft: () => '' },
+      messageSync: {}, messageStatus: {}, direct: { draft: () => '', inMemoryDraftIds: () => [] },
       status: { key, data: { contacts: [], channels: [{ index: 1, name: 'Test' }], messages, drafts: [], preferences: null } },
       cacheSaving: false, active: true, preferences: { ...defaultPreferences, pathMetadata }, locale: 'en',
     }))

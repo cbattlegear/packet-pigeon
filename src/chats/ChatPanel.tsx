@@ -82,7 +82,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const radioKey = live ?? (offlineChoice === null ? last : offlineChoice || null)
   const data = status.key === radioKey ? status.data : null
   const canSync = snapshot.phase === 'ready'
-  const items = useMemo(() => data ? conversations(data) : [], [data])
+  const items = useMemo(() => data && status.key ? conversations(data, direct.inMemoryDraftIds(status.key)) : [],
+    [data, direct, status])
   const read = useMemo(() => new Set(data?.readMessages), [data?.readMessages])
   const formatTime = useMemo(() => clockFormatter(locale, preferences.clock).format, [locale, preferences.clock])
   const formatDate = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format, [locale])

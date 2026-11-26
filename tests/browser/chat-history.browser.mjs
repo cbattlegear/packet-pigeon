@@ -110,3 +110,80 @@ test('cached chat navigation, search, unread markers, scrolling and keyboard dra
   }, radio)
   assert.ok(read.length > 1 && read.length < 41, `Only visible receipts should be read, got ${read.length}`)
 })
+
+test('session-only drafts remain accessible after their contact and channel are removed', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  page.setDefaultTimeout(5000)
+  const radio = 'ab'.repeat(32)
+  const otherRadio = 'cd'.repeat(32)
+  const contact = '01'.repeat(32)
+  await page.goto(`${url}#settings`)
+  await page.getByLabel('Save draft edits between visits').uncheck()
+  await page.evaluate(async ({ radio, otherRadio, contact }) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const details = { type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
+      latitude: 0, longitude: 0, lastModifiedAt: 0 }
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        contacts: [{ publicKey: contact, name: 'Friend', details }], channels: [{ index: 3, name: 'Field' }],
+      })
+      await storage.update(radioKeyFromPublicKey(otherRadio), { channels: [{ index: 3, name: 'Other radio' }] })
+    } finally { storage.close() }
+  }, { radio, otherRadio, contact })
+  await page.reload()
+  await page.getByRole('link', { name: 'Chats' }).click()
+  const radios = page.getByRole('combobox', { name: 'Cached radio' })
+  await radios.selectOption(radio)
+  await page.getByLabel('New chat').selectOption(`direct:${contact}`)
+  await page.getByRole('region', { name: 'Conversation with Friend' }).getByLabel('Message', { exact: true })
+    .fill('Unsent private draft')
+  await page.getByLabel('New chat').selectOption('channel:3')
+  await page.getByRole('region', { name: 'Conversation with Field' }).getByLabel('Message', { exact: true })
+    .fill('Unsent channel draft')
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { await storage.update(radioKeyFromPublicKey(radio), { contacts: [], channels: [] }) }
+    finally { storage.close() }
+  }, radio)
+  await radios.selectOption(otherRadio)
+  const other = page.getByRole('region', { name: 'Conversation with Other radio' })
+  await other.waitFor()
+  assert.equal(await other.getByLabel('Message', { exact: true }).inputValue(), '')
+  await other.getByLabel('Message', { exact: true }).fill('Another radio draft')
+  await radios.selectOption(radio)
+  const removedChannel = page.getByRole('region', { name: 'Conversation with Channel 3' })
+  await removedChannel.waitFor()
+  assert.equal(await removedChannel.getByLabel('Message', { exact: true }).inputValue(), 'Unsent channel draft')
+  assert.equal(await removedChannel.getByRole('button', { name: 'Send message' }).isDisabled(), true)
+  await page.getByRole('button', { name: /Unknown contact 010101010101/ }).click()
+  const removedContact = page.getByRole('region', { name: 'Conversation with Unknown contact 010101010101' })
+  assert.equal(await removedContact.getByLabel('Message', { exact: true }).inputValue(), 'Unsent private draft')
+  assert.equal(await removedContact.getByRole('button', { name: 'Send message' }).isDisabled(), true)
+  await page.getByRole('button', { name: /Channel 3/ }).click()
+  await removedChannel.getByLabel('Message', { exact: true }).clear()
+  await page.getByRole('button', { name: /Channel 3/ }).waitFor({ state: 'detached' })
+  await radios.selectOption(otherRadio)
+  await other.waitFor()
+  assert.equal(await other.getByLabel('Message', { exact: true }).inputValue(), 'Another radio draft')
+  await radios.selectOption(radio)
+  await removedContact.waitFor()
+  assert.equal(await removedContact.getByLabel('Message', { exact: true }).inputValue(), 'Unsent private draft')
+  const drafts = await page.evaluate(async ({ radio, otherRadio }) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try {
+      return [
+        (await storage.read(radioKeyFromPublicKey(radio))).drafts,
+        (await storage.read(radioKeyFromPublicKey(otherRadio))).drafts,
+      ]
+    } finally { storage.close() }
+  }, { radio, otherRadio })
+  assert.deepEqual(drafts, [[], []])
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await page.getByRole('heading', { name: 'No conversations' }).waitFor()
+})

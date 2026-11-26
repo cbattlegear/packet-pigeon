@@ -193,10 +193,28 @@ export class DirectMessages {
       ? this.status.data?.drafts.find((entry) => entry.conversationId === conversationId)?.text : undefined) ?? ''
   }
 
+  readonly inMemoryDraftIds = (key: RadioKey) => {
+    const prefix = `${key}:`
+    const ids = new Set<string>()
+    for (const [name, text] of this.draftEditsThisVisit) {
+      if (name.startsWith(prefix) && text) ids.add(name.slice(prefix.length))
+    }
+    for (const [name, draft] of this.pendingDrafts) {
+      if (draft.key === key && draft.text && !this.draftEditsThisVisit.has(name)) ids.add(draft.conversationId)
+    }
+    return [...ids]
+  }
+
+  private setVisitDraft(name: string, text: string) {
+    const previous = this.draftEditsThisVisit.get(name) ?? this.pendingDrafts.get(name)?.text ?? ''
+    this.draftEditsThisVisit.set(name, text)
+    if (Boolean(previous) !== Boolean(text)) this.update({})
+  }
+
   readonly saveDraft = (key: RadioKey, conversationId: string, text: string, persist = true) => {
     const name = `${key}:${conversationId}`
     if (!persist) {
-      this.draftEditsThisVisit.set(name, text)
+      this.setVisitDraft(name, text)
       return Promise.resolve()
     }
     this.draftEditsThisVisit.delete(name)
@@ -368,7 +386,7 @@ export class DirectMessages {
       }, false)
       if (!result.message?.outgoing) throw new Error('The outgoing message could not be saved.')
       const draftKey = `${key}:${conversationId}`
-      if (this.draftEditsThisVisit.get(draftKey) === text) this.draftEditsThisVisit.set(draftKey, '')
+      if (this.draftEditsThisVisit.get(draftKey) === text) this.setVisitDraft(draftKey, '')
       void this.run(active, result.message)
       return true
     } catch (error) {
@@ -398,7 +416,7 @@ export class DirectMessages {
       }, false)
       if (!result.message?.channelOutgoing) throw new Error('The outgoing channel message could not be saved.')
       const draftKey = `${key}:${conversationId}`
-      if (!resend && this.draftEditsThisVisit.get(draftKey) === text) this.draftEditsThisVisit.set(draftKey, '')
+      if (!resend && this.draftEditsThisVisit.get(draftKey) === text) this.setVisitDraft(draftKey, '')
       void this.runChannel(active, index, result.message)
       return true
     } catch (error) {

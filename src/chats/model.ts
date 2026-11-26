@@ -11,7 +11,7 @@ export type Conversation = {
   messages: StoredMessage[]
 }
 
-export function conversations(data: RadioData): Conversation[] {
+export function conversations(data: RadioData, inMemoryDraftIds: readonly string[] = []): Conversation[] {
   const contacts = new Map(data.contacts.map((contact) => [contact.publicKey.toLowerCase(), contact]))
   const prefixes = new Map<string, StoredContact[]>()
   for (const contact of data.contacts) {
@@ -60,6 +60,7 @@ export function conversations(data: RadioData): Conversation[] {
   }
   for (const channel of data.channels) add(`channel:${channel.index}`)
   for (const draft of data.drafts) add(draft.conversationId)
+  for (const id of inMemoryDraftIds) add(id)
   for (const message of data.messages) {
     let id = message.outgoing ? `direct:${message.outgoing.recipient}` : message.conversationId
     if (id.startsWith('direct:')) {
