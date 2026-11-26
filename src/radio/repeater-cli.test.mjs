@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
-  repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, parseRepeaterNeighbors,
+  repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -139,6 +139,10 @@ test('region inspection allows bounded names but rejects injected and unsupporte
   for (const command of ['region', 'region home', 'region default']) {
     assert.equal(repeaterCliCommand(command).command, command)
   }
+  for (const name of ['*', '#North', '$private', 'North-É']) {
+    assert.equal(repeaterHomeRegionCommand(name).command, `region home ${name}`)
+    assert.equal(repeaterCliCommand(`region home ${name}`).confirm, true)
+  }
   for (const name of ['*', '#North', '$private', 'North-É', 'é'.repeat(15)]) {
     assert.equal(repeaterRegionQuery(name).command, `region get ${name}`)
     assert.equal(repeaterCliCommand(`region get ${name}`).command, `region get ${name}`)
@@ -147,12 +151,15 @@ test('region inspection allows bounded names but rejects injected and unsupporte
     'a\u0085b', '\ud800', '*x', 'bad/name']) {
     assert.throws(() => repeaterRegionQuery(name), /region name or prefix/)
   }
-  for (const command of ['region load', 'region home North', 'region default North',
+  for (const command of ['region load', 'region default North',
     'region denyf North', 'region allowf #North', 'region denyf * extra',
     'region save extra', 'region get North\nregion save']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command|region name or prefix/)
   }
-  for (const command of ['region allowf *', 'region denyf *', 'region save']) {
+  for (const name of ['', '#', 'bad/name', 'a b', 'é'.repeat(16), 'North\nregion save']) {
+    assert.throws(() => repeaterHomeRegionCommand(name), /region name or prefix/)
+  }
+  for (const command of ['region allowf *', 'region denyf *', 'region save', 'region home *']) {
     assert.equal(repeaterCliCommand(command).confirm, true)
   }
 })

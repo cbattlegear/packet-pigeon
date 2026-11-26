@@ -4,7 +4,7 @@ import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
-  repeaterPositionCommand, repeaterRegionQuery, UncertainRepeaterCliError,
+  repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 import { mapPosition } from '../map/nodes.ts'
@@ -54,6 +54,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [loopDetection, setLoopDetection] = useState('')
   const [pathHashMode, setPathHashMode] = useState('')
   const [regionName, setRegionName] = useState('')
+  const [homeRegion, setHomeRegion] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [advertPolicy, setAdvertPolicy] = useState('')
@@ -230,6 +231,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitHomeRegion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterHomeRegionCommand(homeRegion)
+      void send(command.command, command.description, 'confirm' in command && command.confirm,
+        'warning' in command ? command.warning : '')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid home region.')
+    }
+  }
+
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -298,7 +311,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     </div>
     <details>
       <summary>Inspect repeater regions</summary>
-      <p>These queries do not change regions. The tree reply may be truncated without an indication, so it is not a
+      <p>The read controls do not change regions; setting the home region below changes the active map. The tree reply
+        may be truncated without an indication, so it is not a
         complete inventory. In the tree, <code>F</code> marks flood permission, <code>^</code> marks the home region,
         and <code>*</code> is the wildcard for unscoped floods. Other routing rules can still block forwarding.</p>
       <p>Individual queries use firmware prefix matching: an exact match is preferred, but an incomplete or ambiguous
@@ -318,6 +332,16 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             onChange={(event) => setRegionName(event.currentTarget.value)} />
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Read region</button>
+      </form>
+      <p>The home region is the entry marked <code>^</code> in the tree. Firmware prefers an exact name, but a prefix can select a different region;
+        compare the reply and read the home setting again. Setting <code>*</code> marks the wildcard as home. Changes are active but not saved
+        until you separately save the entire region map.</p>
+      <form className="contact-actions" onSubmit={submitHomeRegion}>
+        <label>Home region name or prefix (<code>*</code> for wildcard)
+          <input type="text" required value={homeRegion} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setHomeRegion(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set home region</button>
       </form>
       <p>Unscoped flood forwarding can be changed for the wildcard region only. Denying it can disrupt mesh routes
         and remote access. Other routing rules can still block forwarding when allowed. Changes affect the live map

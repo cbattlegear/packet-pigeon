@@ -254,7 +254,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   const treeReply = page.locator('.repeater-cli-history li').filter({ hasText: 'North^' })
   assert.equal(await treeReply.locator('pre').textContent(), '* F\n North^ F\n  South')
   await treeReply.getByText(/may be truncated without an indication/).waitFor()
-  const regionInput = page.getByLabel('Region name or prefix')
+  const regionInput = page.getByLabel('Region name or prefix', { exact: true })
   await regionInput.fill('bad/name')
   await page.getByRole('button', { name: 'Read region', exact: true }).click()
   await page.getByText(/valid region name or prefix/).waitFor()
@@ -268,6 +268,49 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   const regionReply = page.locator('.repeater-cli-history li').filter({ hasText: 'region get #North' })
   await regionReply.getByText('North F', { exact: true }).waitFor()
   await regionReply.getByText(/Firmware may match a prefix to a different region/).waitFor()
+
+  const homeRegionInput = page.getByLabel(/Home region name or prefix/)
+  const beforeHomeRegion = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  await homeRegionInput.fill('bad/name')
+  await page.getByRole('button', { name: 'Set home region', exact: true }).click()
+  await page.getByText(/valid region name or prefix/).waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeHomeRegion)
+  await homeRegionInput.fill('#North')
+  page.once('dialog', (dialog) => {
+    assert.match(dialog.message(), /Set repeater home region to #North/)
+    assert.match(dialog.message(), /incomplete prefix to a different region/)
+    assert.match(dialog.message(), /not saved until region save/)
+    void dialog.dismiss()
+  })
+  await page.getByRole('button', { name: 'Set home region', exact: true }).click()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeHomeRegion)
+  page.once('dialog', (dialog) => dialog.accept())
+  await page.getByRole('button', { name: 'Set home region', exact: true }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'region home #North')
+  await page.evaluate(() => window.queueRepeaterReply(' home is now #North'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'region home #North' }).getByText(/home is now #North/).waitFor()
+
+  await page.getByRole('button', { name: 'Read home region' }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'region home')
+  await page.evaluate(() => window.queueRepeaterReply(' home is #North'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'region home' }).first().getByText(/home is #North/).waitFor()
+
+  await homeRegionInput.fill('*')
+  await page.once('dialog', (dialog) => {
+    assert.match(dialog.message(), /Set home region to the wildcard/)
+    assert.match(dialog.message(), /entire region map/)
+    void dialog.accept()
+  })
+  await page.getByRole('button', { name: 'Set home region', exact: true }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'region home *')
+  await page.evaluate(() => window.queueRepeaterReply(' home is now *'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'region home *' }).getByText(/home is now \*/).waitFor()
 
   await page.getByText(/writes the entire current region map/).waitFor()
   const denyWildcard = page.getByRole('button', { name: 'Deny unscoped flood forwarding', exact: true })
