@@ -448,9 +448,6 @@ export class CompanionSession {
     if (!attempt?.link || this.snapshot.phase !== 'ready' || this.snapshot.device?.publicKey !== radioKey) {
       throw new CompanionError('disconnected', 'Connect the selected radio and wait for it to finish syncing.')
     }
-    if (this.snapshot.transport !== 'usb') {
-      throw new CompanionError('unsupported-transport', 'Connect over USB for active discovery.')
-    }
     if (this.snapshot.device.capabilities.firmwareProtocolVersion < 8) {
       throw new CompanionError('unsupported-firmware', 'Active discovery requires companion protocol v8 or newer.')
     }

@@ -55,6 +55,7 @@ test('active discovery sends only chosen requests and stops listening on navigat
       } }),
       async open() {}, async close() {},
     })
+
     Object.defineProperty(navigator, 'serial', { value: { async requestPort() { return port } } })
   })
   await page.goto(server.resolvedUrls.local[0] + '#discovery')
@@ -108,4 +109,59 @@ test('active discovery sends only chosen requests and stops listening on navigat
   assert(await send.isEnabled())
   assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code),
     [22, 1, 4, 55, 4, 57, 4, 57, 55, 4, 57])
+})
+
+test('Bluetooth discovery is opt-in and explains incomplete replies', async (t) => {
+  const server = await createServer({ server: { host: '127.0.0.1', port: 0 }, logLevel: 'silent' })
+  t.after(() => server.close())
+  await server.listen()
+  const browser = await chromium.launch({ channel: 'chrome' })
+  t.after(() => browser.close())
+  const page = await browser.newPage()
+  await page.addInitScript(() => {
+    window.commands = []
+    const tx = Object.assign(new EventTarget(), {
+      properties: { notify: true },
+      async startNotifications() { return this },
+    })
+    const emit = (bytes) => {
+      const frame = Uint8Array.from(bytes)
+      tx.value = new DataView(frame.buffer)
+      tx.dispatchEvent(new Event('characteristicvaluechanged'))
+    }
+    const rx = {
+      properties: { write: true },
+      async writeValueWithResponse(bytes) {
+        window.commands.push([...bytes])
+        if (bytes[0] === 22) emit([13, 14, 40, 0, ...new Uint8Array(78)])
+        else if (bytes[0] === 1) emit([5, 1, 0, 0, ...new Uint8Array(32).fill(0xab), ...new Uint8Array(22), ...new TextEncoder().encode('Fixture')])
+        else if (bytes[0] === 4) { emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]) }
+        else if (bytes[0] === 55) emit([0])
+        else throw Error(`Unexpected command ${bytes[0]}`)
+      },
+    }
+    const device = new EventTarget()
+    const gatt = {
+      connected: false,
+      async connect() { this.connected = true; return this },
+      disconnect() { this.connected = false; device.dispatchEvent(new Event('gattserverdisconnected')) },
+      async getPrimaryService() {
+        return { async getCharacteristic(uuid) { return uuid.startsWith('6e400002') ? rx : tx } }
+      },
+    }
+    device.gatt = gatt
+    Object.defineProperty(navigator, 'bluetooth', { value: { async requestDevice() { return device } } })
+  })
+  await page.goto(server.resolvedUrls.local[0] + '#discovery')
+  await page.getByRole('button', { name: 'Connect Bluetooth' }).click()
+  const send = page.getByRole('button', { name: 'Send nearby discovery' })
+  await send.waitFor({ state: 'visible' })
+  await page.getByText(/Bluetooth may split or drop replies/).waitFor()
+  assert(await send.isEnabled())
+  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4])
+  await send.click()
+  await page.getByText(/Listening for up to 20 seconds/).waitFor()
+  await page.getByRole('button', { name: 'Stop waiting' }).click()
+  await page.getByText('Stopped waiting. A transmitted request cannot be recalled.').waitFor()
+  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4, 55])
 })

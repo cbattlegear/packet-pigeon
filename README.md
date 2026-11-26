@@ -456,11 +456,13 @@ does not transmit a mesh request. Stop polling or leave Discovery to prevent
 further reads; a read already in flight must finish or time out.
 
 **Send nearby discovery** explicitly transmits one zero-hop discovery broadcast
-and listens for 20 seconds. It requires USB and companion protocol v8 or newer.
+and listens for 20 seconds. It requires companion protocol v8 or newer.
 Some nodes do not respond, and discovery replies are unsigned; names are local
 contact or advert matches, not verified identities. Results are temporary and
 do not add contacts. Stop waiting or leave Discovery to stop listening; a
 transmission already sent cannot be recalled.
+Bluetooth may split or drop replies, and truncated region or owner information
+can appear complete; use USB for more reliable results.
 
 Select a discovered repeater to explicitly request its regions or owner details.
 Each button sends a separate direct mesh request. To avoid changing radio state

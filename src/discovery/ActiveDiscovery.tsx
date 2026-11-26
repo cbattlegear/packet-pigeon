@@ -30,14 +30,14 @@ export function ActiveDiscovery({ radioKey, active, ready, usb, firmware, sessio
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
   const pending = useRef<AbortController | null>(null)
-  const supported = active && ready && usb && firmware >= 8
+  const supported = active && ready && firmware >= 8
   const selected = nodes.find(({ publicKey }) => publicKey === selectedKey)
   const contact = radioContacts.find(({ publicKey }) => publicKey === selectedKey)
   const path = contact?.details && decodeContactPath(contact.details.pathLength, contact.details.pathHex)
   const canRequestDetails = selected?.type === 2 && contact?.details?.type === 2 && path?.hops.length === 0
 
   useEffect(() => {
-    if (!active || !ready || !usb) {
+    if (!active || !ready) {
       pending.current?.abort(new Error('Stopped discovery after leaving the workspace or disconnecting.'))
     }
     return () => pending.current?.abort(new Error('Stopped discovery after leaving the workspace or disconnecting.'))
@@ -119,8 +119,8 @@ export function ActiveDiscovery({ radioKey, active, ready, usb, firmware, sessio
     <p>Send a zero-hop discovery broadcast to nearby nodes. Replies are not signed; names below are
       local contact or advert matches, not verified identities. Nothing is sent until you choose an action.</p>
     {!ready ? <p>Connect a radio and finish syncing to discover nearby nodes.</p>
-      : !usb ? <p>Connect over USB for active discovery; Bluetooth framing is not yet supported.</p>
-        : firmware < 8 ? <p>Active discovery requires companion protocol v8 or newer.</p> : null}
+      : firmware < 8 ? <p>Active discovery requires companion protocol v8 or newer.</p> : null}
+    {ready && !usb && <p>Bluetooth may split or drop replies. Results may be missing or appear complete when truncated.</p>}
     <div className="contact-actions">
       <button type="button" disabled={!supported || Boolean(activity)} onClick={() => void startScan()}>
         Send nearby discovery
