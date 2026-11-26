@@ -10,7 +10,7 @@ import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
 import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contactPublicKey, findContactFrame,
   readContactForEdit, readContactFrame, removeContactCommand, writeContactCommand } from './contact-commands.ts'
 import type { ContactPermissions, NewContact } from './contact-commands.ts'
-import { decodeContactPath, parseContactPath } from './contact-path.ts'
+import { decodeContactPath, parseContactPath, pathUnknown } from './contact-path.ts'
 import type { ContactPathWidth } from './contact-path.ts'
 import { contactPingWidth, parseTracePath, sendContactPing, sendPathTrace } from './contact-ping.ts'
 import type { PingHashWidth, TraceHashWidth } from './contact-ping.ts'
@@ -32,6 +32,8 @@ import type { AdvancedDeviceEdits, DeviceEdits, DeviceSaveResult } from './devic
 import { assertScopeSupported, channelScopeCommand, validateChannelScope, writeChannelScope } from './channel-scope.ts'
 import type { ChannelScope } from './channel-scope.ts'
 import { requestOwnTelemetry, requestRemoteTelemetry, telemetryProtocolVersion } from './telemetry.ts'
+import { repeaterRequest, UncertainRepeaterRequestError } from './repeater-management.ts'
+import type { RepeaterLogin, RepeaterStatus } from './repeater-management.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { IdentityRecoveryPreparation } from './identity-backup.ts'
 
@@ -123,6 +125,8 @@ export class CompanionSession {
   private contactWritePending = false
   private directCommandPending = false
   private nearbyDiscoveryPending = false
+  private repeaterLogin?: { attempt: Attempt; key: string; pathLength: number; pathHex: string; role: RepeaterLogin['role'] }
+  private readonly uncertainRepeaterRequests = new WeakMap<Attempt, Set<string>>()
   private readonly openScopeStorage: typeof openRadioStorage
   private scopeTail: Promise<void> = Promise.resolve()
 
@@ -450,6 +454,65 @@ export class CompanionSession {
   }
 
   readonly refreshContacts = (radioKey: string) => this.changeContacts(radioKey, (link) => this.readContacts(link))
+
+  readonly manageRepeater = async (
+    radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
+    operation: 'login' | 'status', password: string, signal: AbortSignal,
+  ): Promise<RepeaterLogin | RepeaterStatus> => {
+    const key = contactPublicKey(contactKey)
+    if (key === radioKey) throw new Error('Choose a different repeater from the connected radio.')
+    signal.throwIfAborted()
+    return this.runRadioCommand(radioKey, async (link) => {
+      const attempt = this.attempt!
+      const uncertain = this.uncertainRepeaterRequests.get(attempt) ?? new Set<string>()
+      this.uncertainRepeaterRequests.set(attempt, uncertain)
+      if (uncertain.has(key)) {
+        throw new Error('A previous reply may arrive late. Reconnect before requesting this operation again.')
+      }
+      const disconnected = new AbortController()
+      const stop = this.subscribe(() => {
+        if (this.attempt !== attempt || this.snapshot.phase !== 'ready') {
+          disconnected.abort(new Error('The radio disconnected while waiting for the repeater.'))
+        }
+      })
+      const request = AbortSignal.any([signal, disconnected.signal])
+      try {
+        const contacts = await this.readContacts(link)
+        request.throwIfAborted()
+        const target = contacts.find((contact) => contact.publicKey === key)
+        if (!target || target.type !== 2 || target.pathLength !== expectedRoute.pathLength || target.pathHex !== expectedRoute.pathHex) {
+          throw new Error('The saved repeater or its route changed. Refresh Contacts before retrying.')
+        }
+        if (target.pathLength !== pathUnknown && !decodeContactPath(target.pathLength, target.pathHex)) {
+          throw new Error('The saved repeater route is invalid. Refresh Contacts before retrying.')
+        }
+        if (radioKey.startsWith(key.slice(0, 8)) || contacts.some((contact) =>
+          contact.publicKey !== key && contact.publicKey.startsWith(key.slice(0, 8)))) {
+          throw new Error('This repeater shares a response prefix with another known radio.')
+        }
+        if (operation === 'status' && (!this.repeaterLogin || this.repeaterLogin.attempt !== attempt ||
+          this.repeaterLogin.key !== key || this.repeaterLogin.pathLength !== target.pathLength ||
+          this.repeaterLogin.pathHex !== target.pathHex)) {
+          throw new Error('Log in to this repeater on its current route before requesting status.')
+        }
+        if (operation === 'login') this.repeaterLogin = undefined
+        try {
+          const result = await repeaterRequest(link, key, operation, password, this.subscribeToPushes, request)
+          if (operation === 'login' && 'role' in result) {
+            this.repeaterLogin = { attempt, key, pathLength: target.pathLength, pathHex: target.pathHex, role: result.role }
+          }
+          return result
+        } catch (error) {
+          if (error instanceof UncertainRepeaterRequestError) {
+            uncertain.add(key)
+          }
+          throw error
+        }
+      } finally {
+        stop()
+      }
+    })
+  }
 
   readonly advertPath = (radioKey: string, contactKey: string) => (
     this.runRadioCommand(radioKey, (link) => {

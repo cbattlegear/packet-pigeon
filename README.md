@@ -425,6 +425,18 @@ selected** for a JSON copy or **Copy public key** from a contact's details.
 Exports include public keys and any advertised positions.
 
 Open **Saved route and repeater hops** to inspect each known hash match.
+For a saved repeater, **Repeater login and status** sends a login using its
+current saved route (or flood if no route is known). The reported guest or
+admin role comes from the repeater. Status is requested separately and never
+automatically. Passwords are not remembered; closing the view does not revoke
+the repeater's access list. An interrupted, timed-out, or unconfirmed request
+blocks further login and status requests to that repeater for the current connection; a late
+reply cannot remove that block. Reconnect and log in again to retry. The
+firmware does not tag these replies, so even after
+reconnecting a delayed reply cannot be conclusively distinguished from a new
+one. The reported role is not a guarantee of current authorization. CLI, saved
+credentials, session resumption and repeater administration controls are not
+yet available.
 With USB connected, enter hex hops or append saved repeaters. An empty
 route sends directly with zero hops. Clearing the saved route allows the
 firmware to use flood routing. Newer firmware supports two- and three-byte
