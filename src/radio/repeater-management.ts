@@ -18,11 +18,16 @@ export type RepeaterNeighborPage = {
   entries: { publicKey: string; secondsAgo: number; snrDb: number }[]
 }
 
-export function repeaterNeighborRequest(offset: number) {
+export const repeaterNeighborOrders = ['newest', 'oldest', 'strongest', 'weakest'] as const
+export type RepeaterNeighborOrder = typeof repeaterNeighborOrders[number]
+
+export function repeaterNeighborRequest(offset: number, order: RepeaterNeighborOrder) {
   if (!Number.isInteger(offset) || offset < 0 || offset > 0xffff) {
     throw new Error('Choose a valid neighbor page offset.')
   }
-  const request = Uint8Array.of(6, 0, 3, offset & 0xff, offset >> 8, 0, 32, 0, 0, 0, 0)
+  const orderCode = repeaterNeighborOrders.indexOf(order)
+  if (orderCode < 0) throw new Error('Choose a valid neighbor order.')
+  const request = Uint8Array.of(6, 0, 3, offset & 0xff, offset >> 8, orderCode, 32, 0, 0, 0, 0)
   crypto.getRandomValues(request.subarray(7))
   return request
 }

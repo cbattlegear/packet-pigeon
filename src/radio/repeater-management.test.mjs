@@ -87,10 +87,13 @@ test('status decodes detailed counters and only complete optional fields', async
 })
 
 test('full-key neighbor request and page parsing enforce bounds and preserve signed SNR', () => {
-  const request = repeaterNeighborRequest(258)
-  assert.deepEqual([...request.slice(0, 7)], [6, 0, 3, 2, 1, 0, 32])
-  assert.equal(request.length, 11)
-  for (const offset of [-1, 65536, 1.5, NaN]) assert.throws(() => repeaterNeighborRequest(offset), /offset/)
+  for (const [order, code] of [['newest', 0], ['oldest', 1], ['strongest', 2], ['weakest', 3]]) {
+    const request = repeaterNeighborRequest(258, order)
+    assert.deepEqual([...request.slice(0, 7)], [6, 0, 3, 2, 1, code, 32])
+    assert.equal(request.length, 11)
+  }
+  for (const offset of [-1, 65536, 1.5, NaN]) assert.throws(() => repeaterNeighborRequest(offset, 'newest'), /offset/)
+  for (const order of ['', 'invalid', 4, undefined]) assert.throws(() => repeaterNeighborRequest(0, order), /order/)
   const row = Uint8Array.of(...new Uint8Array(32).fill(0xdd), 0x78, 0x56, 0x34, 0x12, 0xec)
   const reply = Uint8Array.of(7, 0, 1, 0, ...row)
   assert.deepEqual(parseRepeaterNeighborPage(reply, 3), {

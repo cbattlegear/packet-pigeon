@@ -346,7 +346,7 @@ test('repeater login and explicit status use verified routes and distinguish rep
   assert.equal(session.hasRememberedRepeaterPassword(key, target), true)
   await assert.rejects(session.manageRepeater(key, target, route, 'status', '', signal()), /Log in/)
   await assert.rejects(session.readRepeaterAccessList(key, target, route, signal()), /Log in/)
-  await assert.rejects(session.readRepeaterNeighbors(key, target, route, 0, signal()), /Log in/)
+  await assert.rejects(session.readRepeaterNeighbors(key, target, route, 0, 'newest', signal()), /Log in/)
   await assert.rejects(session.sendRepeaterCommand(key, target, route, 'ver', false, signal()), /Log in/)
   assert.equal(port.commands.filter(([code]) => [2, 26, 27, 50].includes(code)).length, 3)
   assert.deepEqual(await session.resumeRepeater(key, target, route, signal()), { role: 'admin', route: 'direct' })
@@ -745,7 +745,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const signal = () => new AbortController().signal
   const send = (command, confirmed = false) => session.sendRepeaterCommand(key, target, route, command, confirmed, signal())
   const readAccess = () => session.readRepeaterAccessList(key, target, route, signal())
-  const readNeighbors = () => session.readRepeaterNeighbors(key, target, route, 0, signal())
+  const readNeighbors = (order = 'newest') => session.readRepeaterNeighbors(key, target, route, 0, order, signal())
   await assert.rejects(readAccess(), /administrator/)
   await assert.rejects(readNeighbors(), /Log in/)
   await assert.rejects(send('ver'), /administrator/)
@@ -822,12 +822,17 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     total: 1, entries: [{ publicKey: 'dd'.repeat(32), secondsAgo: 42, snrDb: -5 }],
   })
   assert.deepEqual(port.commands.filter(([code]) => code === 50).at(-1).slice(33, 40), [6, 0, 3, 0, 0, 0, 32])
+  await readNeighbors('strongest')
+  assert.deepEqual(port.commands.filter(([code]) => code === 50).at(-1).slice(33, 40), [6, 0, 3, 0, 0, 2, 32])
+  const beforeInvalidOrder = port.commands.filter(([code]) => code === 50).length
+  await assert.rejects(readNeighbors('invalid'), /neighbor order/)
+  assert.equal(port.commands.filter(([code]) => code === 50).length, beforeInvalidOrder)
   badNeighbor = true
   await assert.rejects(readNeighbors(), /invalid neighbor page/)
   badNeighbor = false
   holdNeighbor = true
   const cancelNeighbor = new AbortController()
-  const pendingNeighbor = session.readRepeaterNeighbors(key, target, route, 0, cancelNeighbor.signal)
+  const pendingNeighbor = session.readRepeaterNeighbors(key, target, route, 0, 'newest', cancelNeighbor.signal)
   await waitFor(() => lateNeighbor !== undefined)
   cancelNeighbor.abort(new Error('Stopped waiting'))
   await assert.rejects(pendingNeighbor, /Stopped waiting/)
@@ -913,7 +918,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   contact[36] = 0x46
   const changedRoute = { pathLength: 1, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
   await assert.rejects(session.readRepeaterAccessList(key, target, changedRoute, signal()), /route changed/)
-  await assert.rejects(session.readRepeaterNeighbors(key, target, changedRoute, 0, signal()), /route changed/)
+  await assert.rejects(session.readRepeaterNeighbors(key, target, changedRoute, 0, 'strongest', signal()), /route changed/)
   await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, 'get bootloader.ver', false, signal()), /route changed/)
   await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, 'sensor set gps_interval 60', true, signal()), /route changed/)
   for (const command of ['log start', 'log stop', 'log erase']) {

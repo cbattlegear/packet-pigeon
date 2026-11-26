@@ -102,8 +102,20 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
               ? [neighborUnknown, neighborNoPosition]
               : window.fixtureMixedNeighbors ? [neighborOne, neighborUnknown, neighborNoPosition]
                 : [neighborOne, neighborTwo, neighborThree, neighborCollision]
-            const entries = allEntries.slice(offset, offset + pageSize)
-            const rows = entries.flatMap((entry, index) => [...entry.slice(1, 33), 42 + index, 0, 0, 0, 0xec])
+            const samples = [[42, -20], [90, 12], [15, -8], [300, 0]]
+            const order = command[38]
+            const ordered = allEntries.slice()
+            if (window.fixtureNeighborOrders) ordered.sort((a, b) => {
+              const left = samples[allEntries.indexOf(a)]
+              const right = samples[allEntries.indexOf(b)]
+              return order === 0 ? left[0] - right[0] : order === 1 ? right[0] - left[0]
+                : order === 2 ? right[1] - left[1] : left[1] - right[1]
+            })
+            const entries = ordered.slice(offset, offset + pageSize)
+            const rows = entries.flatMap((entry, index) => {
+              const [age, snr] = window.fixtureNeighborOrders ? samples[allEntries.indexOf(entry)] : [42 + index, -20]
+              return [...entry.slice(1, 33), age & 255, age >> 8, 0, 0, snr & 255]
+            })
             emit([0x8c, 0, ...tag, 4, 0, entries.length, 0, ...rows])
             return
           }
@@ -169,6 +181,47 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await neighborKeys.waitFor()
   assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33, 40)),
     [6, 0, 3, 0, 0, 0, 32])
+  await page.evaluate(() => { window.fixtureNeighborOrders = true })
+  const neighborOrder = page.getByLabel('Neighbor order')
+  const beforeOrderChange = await page.evaluate(() => window.fixtureCommands.length)
+  await neighborOrder.selectOption('strongest')
+  assert.equal(await page.evaluate(() => window.fixtureCommands.length), beforeOrderChange)
+  assert.equal(await neighborKeys.count(), 0)
+  await page.getByRole('button', { name: 'Request first neighbor page' }).click()
+  await neighborKeys.getByText(/4567ef01.*90s.*3 dB/).waitFor()
+  await page.getByText(/Requested order: Highest reported SNR first/).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33, 40)),
+    [6, 0, 3, 0, 0, 2, 32])
+  await page.getByRole('button', { name: 'Request next page' }).click()
+  await neighborKeys.getByText(/1234abcd.*42s.*-5 dB/).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33, 40)),
+    [6, 0, 3, 3, 0, 2, 32])
+  await page.getByRole('button', { name: 'Request previous page' }).click()
+  await neighborKeys.getByText(/4567ef01.*90s.*3 dB/).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33, 40)),
+    [6, 0, 3, 0, 0, 2, 32])
+  await page.getByRole('button', { name: 'Show this page on map' }).click()
+  await neighborMap.getByText(/Requested order: Highest reported SNR first/).waitFor()
+  await page.evaluate(() => { window.location.hash = 'contacts' })
+  await neighborKeys.waitFor()
+  for (const [order, code, firstKey] of [
+    ['oldest', 1, `1234abcd55${'bc'.repeat(27)}`],
+    ['weakest', 3, `1234abcd${'bc'.repeat(28)}`],
+    ['newest', 0, `76543210${'bc'.repeat(28)}`],
+  ]) {
+    const before = await page.evaluate(() => window.fixtureCommands.length)
+    await neighborOrder.selectOption(order)
+    assert.equal(await page.evaluate(() => window.fixtureCommands.length), before)
+    assert.equal(await neighborKeys.count(), 0)
+    await page.getByRole('button', { name: 'Request first neighbor page' }).click()
+    await neighborKeys.waitFor()
+    assert.match(await neighborKeys.getByRole('listitem').first().innerText(), new RegExp(firstKey))
+    assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([command]) => command === 50).at(-1).slice(33, 40)),
+      [6, 0, 3, 0, 0, code, 32])
+  }
+  await page.evaluate(() => { window.fixtureNeighborOrders = false })
+  await page.getByRole('button', { name: 'Request first neighbor page' }).click()
+  await neighborKeys.waitFor()
   await page.getByRole('button', { name: 'Request next page' }).click()
   await page.getByText(/Reported total: 4; page offset: 3/).waitFor()
   assert.equal(await neighborKeys.getByRole('listitem').count(), 1)

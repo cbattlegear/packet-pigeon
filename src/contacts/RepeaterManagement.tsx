@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { CompanionSession } from '../radio/companion-session.ts'
-import type { RepeaterLogin, RepeaterStatus } from '../radio/repeater-management.ts'
+import { repeaterNeighborOrders } from '../radio/repeater-management.ts'
+import type { RepeaterLogin, RepeaterNeighborOrder, RepeaterStatus } from '../radio/repeater-management.ts'
 import { decodeContactPath, pathUnknown } from '../radio/contact-path.ts'
 import type { ContactEntry } from './model.ts'
 import { contactPosition } from './model.ts'
@@ -25,6 +26,13 @@ type Props = {
   onMap?: (path: MapPath) => void
 }
 
+const neighborOrderLabels: Record<RepeaterNeighborOrder, string> = {
+  newest: 'Newest heard first',
+  oldest: 'Oldest heard first',
+  strongest: 'Highest reported SNR first',
+  weakest: 'Lowest reported SNR first',
+}
+
 export function RepeaterManagement({ session, messageSync, contact, radioKey, ready, busy, neighborNodes, onMap }: Props) {
   const [login, setLogin] = useState<RepeaterLogin | null>(null)
   const [status, setStatus] = useState<RepeaterStatus | null>(null)
@@ -34,9 +42,11 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     entries: Awaited<ReturnType<CompanionSession['readRepeaterAccessList']>>
     receivedAt: number
   } | null>(null)
+  const [neighborOrder, setNeighborOrder] = useState<RepeaterNeighborOrder>('newest')
   const [neighbors, setNeighbors] = useState<{
     page: Awaited<ReturnType<CompanionSession['readRepeaterNeighbors']>>
     offset: number
+    order: RepeaterNeighborOrder
     previousOffsets: number[]
     receivedAt: number
   } | null>(null)
@@ -108,7 +118,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     }
   }
 
-  async function readNeighbors(offset: number, previousOffsets: number[] = []) {
+  async function readNeighbors(offset: number, order: RepeaterNeighborOrder, previousOffsets: number[] = []) {
     if (!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)) return
     const controller = new AbortController()
     request.current = controller
@@ -117,8 +127,8 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     setNeighbors(null)
     try {
       const page = await session.readRepeaterNeighbors(radioKey, contact.publicKey,
-        { pathLength: details.pathLength, pathHex: details.pathHex }, offset, controller.signal)
-      setNeighbors({ page, offset, previousOffsets, receivedAt: Date.now() })
+        { pathLength: details.pathLength, pathHex: details.pathHex }, offset, order, controller.signal)
+      setNeighbors({ page, offset, order, previousOffsets, receivedAt: Date.now() })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The repeater neighbor request failed.')
     } finally {
@@ -197,28 +207,41 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
       the change may still arrive after a new status request.</p>}
     {login && <details>
       <summary>Inspect nearby repeater keys</summary>
-      <p>Each page is an explicit request over the mesh, up to three entries ordered by most recently heard.
+      <p>Each page is an explicit request over the mesh, up to three entries. In repeater v1.14.1, SNR is for the last
+        qualifying advertisement or discovery response heard by the repeater, not necessarily current link quality.
+        Equal values may not have a stable order.
         Repeater firmware v1.14.1 supports this request; other builds may not. Entries can be stale or change between
         pages, causing omissions or duplicates. Discovery responses are unauthenticated, so even a full key does not
         prove identity; verify it independently before using it. Request tags can repeat after a radio restart,
         so a delayed reply may be ambiguous. Map points use saved contact positions for this page only and do not imply a route.</p>
       <div className="contact-actions">
+        <label>Neighbor order
+          <select value={neighborOrder} disabled={!ready || busy || pending || cliPending}
+            onChange={(event) => {
+              const order = repeaterNeighborOrders.find((value) => value === event.currentTarget.value)
+              if (!order) { setError('Choose a valid neighbor order.'); return }
+              setNeighborOrder(order)
+              setNeighbors(null)
+            }}>
+            {repeaterNeighborOrders.map((order) => <option key={order} value={order}>{neighborOrderLabels[order]}</option>)}
+          </select>
+        </label>
         <button type="button" disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}
-          onClick={() => void readNeighbors(0)}>Request first neighbor page</button>
+          onClick={() => void readNeighbors(0, neighborOrder)}>Request first neighbor page</button>
         {neighbors && neighbors.previousOffsets.length > 0 && <button type="button"
           disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}
-          onClick={() => void readNeighbors(neighbors.previousOffsets.at(-1)!, neighbors.previousOffsets.slice(0, -1))}>
+          onClick={() => void readNeighbors(neighbors.previousOffsets.at(-1)!, neighbors.order, neighbors.previousOffsets.slice(0, -1))}>
           Request previous page</button>}
         {neighbors && neighbors.page.entries.length > 0 &&
           neighbors.offset + neighbors.page.entries.length < neighbors.page.total &&
           <button type="button" disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}
-            onClick={() => void readNeighbors(neighbors.offset + neighbors.page.entries.length,
+            onClick={() => void readNeighbors(neighbors.offset + neighbors.page.entries.length, neighbors.order,
               [...neighbors.previousOffsets, neighbors.offset])}>Request next page</button>}
       </div>
       {neighbors && <div>
         <p>Reply received <time dateTime={new Date(neighbors.receivedAt).toISOString()}>
           {new Date(neighbors.receivedAt).toLocaleString()}
-        </time>. Reported total: {neighbors.page.total}; page offset: {neighbors.offset}.
+        </time>. Requested order: {neighborOrderLabels[neighbors.order]}. Reported total: {neighbors.page.total}; page offset: {neighbors.offset}.
           Ages are seconds since heard when the repeater generated the reply; the reply may have been delayed.</p>
         {neighbors.page.entries.length ? <ul className="repeater-neighbor-keys" aria-label="Reported nearby repeater keys">
           {resolvedNeighbors.map((entry, index) => <li key={`${entry.publicKey}:${index}`}>
@@ -230,6 +253,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
         {onMap && neighbors.page.entries.length > 0 && <button type="button" disabled={!mappableNeighbors.length} onClick={() => onMap({
           title: `Reported neighbors of ${contact.displayName} (page offset ${neighbors.offset})`,
           description: `Reply received ${new Date(neighbors.receivedAt).toLocaleString()} (browser time). Ages are at reply and may be delayed. ` +
+            `Requested order: ${neighborOrderLabels[neighbors.order]}. ` +
             'Request tags can repeat after a radio restart. Discovery responses are unauthenticated; a full-key match does not prove identity. ' +
             'Positions are saved contact positions and may be stale. ' +
             'Pages can change; points do not imply a route.',

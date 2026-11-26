@@ -37,7 +37,7 @@ import type { RemoteNodeAccess } from './node-access.ts'
 import type { RemoteNodeAdmin } from './remote-nodes.ts'
 import { decodeSensorSummary } from './cayenne-lpp.ts'
 import { parseRepeaterNeighborPage, repeaterNeighborRequest, repeaterRequest, UncertainRepeaterRequestError } from './repeater-management.ts'
-import type { RepeaterLogin, RepeaterStatus } from './repeater-management.ts'
+import type { RepeaterLogin, RepeaterNeighborOrder, RepeaterStatus } from './repeater-management.ts'
 import { allocateRepeaterCliTag, isRepeaterRebootCommand, repeaterCliCommand, sendRepeaterCli, UncertainRepeaterCliError } from './repeater-cli.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { IdentityRecoveryPreparation } from './identity-backup.ts'
@@ -709,11 +709,11 @@ export class CompanionSession {
 
   readonly readRepeaterNeighbors = (
     radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
-    offset: number, signal: AbortSignal,
+    offset: number, order: RepeaterNeighborOrder, signal: AbortSignal,
   ) => this.withRepeaterBinaryRequest(radioKey, contactKey, expectedRoute, signal, 'neighbors',
     async (link, key, request) => {
       const { requestRemoteNodeData } = await import('./remote-nodes.ts')
-      return parseRepeaterNeighborPage(await requestRemoteNodeData(link, key, repeaterNeighborRequest(offset),
+      return parseRepeaterNeighborPage(await requestRemoteNodeData(link, key, repeaterNeighborRequest(offset, order),
         this.subscribeToPushes, request, { minimumMs: 10_000, marginMs: 5_000 }), offset)
     })
 
