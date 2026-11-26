@@ -6,6 +6,7 @@ import type { SerialLink } from './serial-link.ts'
 
 const receiverGainWarning = 'Support depends on the repeater radio and firmware build. Changing gain may affect reception and power use. OK or matching read-back does not prove the radio applied the preference or saved it successfully. On some unsupported builds, a gain query returns radio parameters instead of on/off. In v1.14.1, saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent.'
 const multiAckWarning = 'In repeater firmware v1.14.1, enabling this attempts to queue one extra multipart ACK when forwarding an eligible direct ACK, and can delay the normal ACK. It can use more airtime; other nodes may not support multipart ACKs, and delivery or improved reliability is not guaranteed. Already queued ACKs are unaffected. Firmware support varies. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove ACKs were sent or the preference was saved.'
+const gpsWarning = 'GPS support depends on the repeater firmware and hardware. Enabling GPS can expose sensor coordinates in location telemetry and later advertisements when the advert policy is share; it may also change the device clock and disrupt later commands. Disabling GPS does not erase previously stored coordinates or recall queued or sent locations, and some boards cannot power off the receiver. In v1.14.1, saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An ok reply does not prove a fix, hardware state, or persistence; request the GPS activity setting separately.'
 
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
@@ -67,6 +68,9 @@ export const repeaterCliCommands = [
   { command: 'get flood.advert.interval', description: 'Read the flood advert interval' },
   { command: 'get lat', description: 'Read stored latitude' },
   { command: 'get lon', description: 'Read stored longitude' },
+  { command: 'sensor get gps', description: 'Read GPS activity setting' },
+  { command: 'gps on', description: 'Enable GPS receiver', confirm: true, warning: gpsWarning },
+  { command: 'gps off', description: 'Disable GPS receiver', confirm: true, warning: gpsWarning },
   { command: 'gps advert', description: 'Read GPS advert policy' },
   { command: 'gps advert none', description: 'Set GPS advert policy to none', confirm: true,
     warning: 'If applied, new advertisements omit location, but already queued or transmitted locations cannot be recalled. This does not send an advertisement. Some firmware builds do not support this command; check the reply and read the policy.' },

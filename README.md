@@ -710,6 +710,18 @@ zero, and choosing `share` does not enable GPS. Policy changes do not send an
 advertisement or recall already queued or transmitted locations. Sync replies and read
 the policy again to check the change; radio acceptance alone does not prove it
 succeeded.
+Administrators can explicitly request the reported GPS activity setting or
+confirm enabling or disabling GPS. Firmware and hardware support varies.
+Enabling can expose sensor coordinates in location telemetry or later
+advertisements when the policy is `share`, and may change the device clock and
+disrupt later commands. Disabling does not erase stored coordinates or recall
+queued or sent locations; some boards cannot power off the receiver. On v1.14.1,
+saving also sets a local advert interval below 60 minutes to zero; an already
+scheduled advert may still be sent. An `ok` reply or activity setting does not
+prove a fix, hardware state, or persistence. In v1.14.1, `1` means active and
+`0` inactive; `null` means the setting was not found.
+The `gps` status command is not offered: repeater v1.14.1 may crash when a GPS
+receiver is not detected.
 Administrators can also read and change the repeater power-saving preference.
 Depending on the board and firmware, enabling it may allow sleep when idle and
 affect responsiveness; disabling it may increase power consumption. An `on`

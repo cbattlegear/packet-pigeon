@@ -83,6 +83,7 @@ const managementForms = {
   guestPassword: { title: 'Change guest login password', terms: 'set guest.password' },
   name: { title: 'Change repeater name', terms: 'set name get name' },
   owner: { title: 'Change owner information', terms: 'set owner.info' },
+  gps: { title: 'Manage GPS receiver', terms: 'gps on gps off sensor get gps activity' },
   position: { title: 'Change stored position', terms: 'set lat set lon gps advert location' },
 } as const
 
@@ -119,6 +120,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     item.command === 'powersaving on' || item.command === 'powersaving off')
   const receiverGainCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set radio.rxgain on' || item.command === 'set radio.rxgain off')
+  const gpsCommands = repeaterCliCommands.filter((item) => item.command === 'gps on' || item.command === 'gps off')
   const multiAckCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set multi.acks 1' || item.command === 'set multi.acks 0')
   const [latitude, setLatitude] = useState('')
@@ -560,6 +562,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'get public.key' && <p>Compare the reported key with the saved contact; a match alone does not prove identity.
       Replies may be delayed or misattributed and firmware support varies.</p>}
     {selected === 'get role' && <p>This reads the node's firmware role, not the current user's access level. Firmware support varies.</p>}
+    {selected === 'sensor get gps' && <p>This reads the reported GPS activity setting, not a fix or hardware power state.
+      In v1.14.1, 1 means active and 0 inactive; null means the setting was not found. Other firmware may differ and replies may be stale.</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
@@ -1031,6 +1035,23 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set owner information</button>
       </form>
     </details>
+    <details data-cli-section="gps">
+      <summary>{managementForms.gps.title}</summary>
+      <p>GPS support depends on the repeater firmware and hardware. Enabling GPS can expose sensor coordinates through location
+        telemetry or later advertisements with the share policy and may change the device clock, disrupting later commands. Disabling does not erase
+        stored coordinates or recall locations already sent or queued; some boards cannot power off the receiver.
+        An ok reply does not prove a fix, hardware state, or persistence.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('sensor get gps', 'Read GPS activity setting', false)}>Read GPS activity setting</button>
+        {gpsCommands.map((command) => <button key={command.command} type="button"
+          disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => sendChoice(command)}>{command.description}</button>)}
+      </div>
+      <p>Each action sends a separate command. Sync replies explicitly; request the activity setting again to check the reported state.
+        In v1.14.1, 1 means active and 0 inactive; null means the setting was not found.
+        The <code>gps</code> status command is not offered because repeater v1.14.1 may crash when a GPS receiver is not detected.</p>
+    </details>
     <details data-cli-section="position">
       <summary>{managementForms.position.title}</summary>
       <p>Advertisements use these stored coordinates only when the GPS advert policy is <code>prefs</code>.
@@ -1088,6 +1109,11 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             </p>}
           {item.command === 'get role' && item.reply !== null &&
             <p className="contact-status">This is the reported firmware role, not your access level. Firmware support varies.</p>}
+          {item.command === 'sensor get gps' && item.reply !== null &&
+            <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.
+              In v1.14.1, 1 means active and 0 inactive. A null or unsupported reply does not establish hardware support. Firmware and hardware support vary.</p>}
+          {(item.command === 'gps on' || item.command === 'gps off') && item.reply !== null &&
+            <p className="contact-status">An ok reply does not prove a fix, hardware state, or persistence. Request the GPS activity setting separately.</p>}
           {item.command === 'region' && item.reply !== null &&
             <p className="contact-status">The region tree may be truncated without an indication; it is not a complete inventory.
               F marks flood permission, ^ marks the home region, and * is the unscoped wildcard.</p>}
