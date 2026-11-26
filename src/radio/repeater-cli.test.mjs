@@ -63,6 +63,22 @@ test('power diagnostic queries accept only exact read-only commands', () => {
   assert.throws(() => repeaterCliCommand('set pwrmgt.source battery'), /supported repeater CLI command/)
 })
 
+test('bridge diagnostics are exact read-only queries and exclude secrets and mutations', () => {
+  for (const command of ['get bridge.type', 'get bridge.enabled', 'get bridge.delay',
+    'get bridge.source', 'get bridge.baud', 'get bridge.channel']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.command, command)
+    assert.equal('confirm' in action, false)
+    for (const invalid of [`${command} `, `${command} extra`, `${command}\nreboot`]) {
+      assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
+    }
+  }
+  for (const command of ['get bridge.secret', 'set bridge.secret secret', 'set bridge.enabled on',
+    'set bridge.delay 500', 'set bridge.source rx', 'set bridge.baud 9600', 'set bridge.channel 1']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('neighbor replies parse exact firmware records and reject malformed or unsafe values', () => {
   assert.deepEqual(parseRepeaterNeighbors('1234ABCD:42:-20\r\n89abcdef:300:12'), [
     { keyPrefix: '1234abcd', secondsAgo: 42, snrQuarterDb: -20 },

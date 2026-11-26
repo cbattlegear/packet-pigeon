@@ -560,6 +560,13 @@ The `get public.key` query compares a recognized reply with the saved contact;
 a match alone does not prove identity, and replies can be delayed or
 misattributed. `get role` reports the firmware role, not the user's access
 level. Firmware support for either query may vary.
+Read-only bridge diagnostics let an administrator explicitly query the
+compiled bridge type and enabled, delay, packet-source, RS-232 baud, or ESP-NOW
+channel preferences. In repeater v1.14.1, the type reflects the build, and the
+other queries depend on which bridge support was compiled in; unsupported or
+delayed replies are possible. Preferences do not prove a bridge or peer is
+working, or that packets are forwarded. Bridge changes and secret queries are
+not offered.
 Search also finds supported management forms by name or command and can open
 them without sending anything; the forms retain their separate confirmations.
 The confirmed `discover.neighbors` action asks the repeater to broadcast a

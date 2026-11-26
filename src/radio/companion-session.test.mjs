@@ -734,6 +734,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
     await assert.rejects(send(command), /administrator/)
   }
+  for (const command of ['get bridge.type', 'get bridge.enabled', 'get bridge.delay',
+    'get bridge.source', 'get bridge.baud', 'get bridge.channel']) {
+    await assert.rejects(send(command), /administrator/)
+  }
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
@@ -804,6 +808,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
     await assert.rejects(send(command), /administrator/)
   }
+  for (const command of ['get bridge.type', 'get bridge.enabled', 'get bridge.delay',
+    'get bridge.source', 'get bridge.baud', 'get bridge.channel']) {
+    await assert.rejects(send(command), /administrator/)
+  }
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
@@ -864,7 +872,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(session.readRepeaterAccessList(key, target, changedRoute, signal()), /route changed/)
   await assert.rejects(session.readRepeaterNeighbors(key, target, changedRoute, 0, signal()), /route changed/)
   contact[36] = 0x45
-  for (const command of ['get guest.password', 'password secret', 'reboot now',
+  for (const command of ['get guest.password', 'get bridge.secret', 'set bridge.enabled on', 'password secret', 'reboot now',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
     await assert.rejects(send(command, true), /supported repeater CLI command/)
   }
@@ -952,6 +960,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
   await assert.rejects(send('ver'), /route changed/)
+  await assert.rejects(send('get bridge.type'), /route changed/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /route changed/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /route changed/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 1`, true), /route changed/)
@@ -986,6 +995,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   port.emit(6, 0, ...new Uint8Array(8))
   await pending
   delayed = false
+  const bridgeType = await send('get bridge.type')
+  assert.equal(bridgeType.route, 'direct')
+  const bridgeFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(bridgeFrame.slice(13))), `${bridgeType.tag}|get bridge.type`)
   const changed = await send('set flood.advert.interval 3', true)
   const frame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${changed.tag}|set flood.advert.interval 3`)
