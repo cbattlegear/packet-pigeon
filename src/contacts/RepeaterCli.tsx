@@ -200,8 +200,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       const mode = Number(pathHashMode)
       const hashBytes = mode + 1
       const warning = mode === 0
-        ? 'This uses one-byte hashes for this repeater\'s flood advertisements.'
-        : `This uses ${hashBytes}-byte hashes for this repeater's flood advertisements. Repeater firmware v1.13 or earlier drops packets with multi-byte path hashes, which can limit flood propagation. Confirm the mesh is sufficiently upgraded first.`
+        ? 'This uses one-byte hashes for this repeater\'s manual flood advertisements.'
+        : `This uses ${hashBytes}-byte hashes for this repeater's manual flood advertisements. On repeater v1.14.0 scheduled flood advertisements still use one-byte hashes. Repeater firmware v1.13 or earlier drops packets with multi-byte path hashes, which can limit flood propagation. Confirm the mesh is sufficiently upgraded first.`
       void send(command.command, command.description, true, warning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Choose a supported advert path hash size.')
@@ -319,11 +319,12 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     </details>
     <details>
       <summary>Change advert path hash size</summary>
-      <p>This controls the hash width used in this repeater's flood advertisements, not the hash widths of packets it
-        forwards. On repeater firmware v1.14 and later, packets with any supported hash width can be forwarded. Repeater
+      <p>This controls the hash width used in this repeater's manual flood advertisements, not the hash widths of packets it
+        forwards. On repeater v1.14.0, scheduled flood advertisements still use one-byte hashes; v1.14.1 and later also
+        apply the setting to scheduled flood advertisements. Repeater firmware v1.14 and later can forward all supported hash widths. Repeater
         firmware v1.13 and earlier drops multi-byte path hashes, so enabling them can limit flood propagation across a mixed-version mesh.
-        Mode 0 uses 1 byte (256 IDs, up to 64 flood hops); mode 1 uses 2 bytes (65,536 IDs, up to 32 hops); mode 2 uses
-        3 bytes (16,777,216 IDs, up to 21 hops). This setting requires repeater firmware v1.14 or later.</p>
+        Modes 0, 1, and 2 use 1, 2, and 3 bytes (256, 65,536, and 16,777,216 possible IDs), respectively; their
+        paths can encode at most 63, 32, and 21 hops. This setting requires repeater firmware v1.14 or later.</p>
       <form className="contact-actions" onSubmit={submitPathHashMode}>
         <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
           onClick={() => void send('get path.hash.mode', 'Read advert path hash size', false)}>Read current size</button>
@@ -331,9 +332,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           <select required value={pathHashMode} disabled={!ready || busy || pending || syncStatus.syncing}
             onChange={(event) => setPathHashMode(event.currentTarget.value)}>
             <option value="">Choose a size</option>
-            <option value="0">1 byte — 256 IDs, 64 flood hops</option>
-            <option value="1">2 bytes — 65,536 IDs, 32 flood hops</option>
-            <option value="2">3 bytes — 16,777,216 IDs, 21 flood hops</option>
+            <option value="0">1 byte — 256 IDs, up to 63 encoded hops</option>
+            <option value="1">2 bytes — 65,536 IDs, up to 32 encoded hops</option>
+            <option value="2">3 bytes — 16,777,216 IDs, up to 21 encoded hops</option>
           </select>
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set advert hash size</button>

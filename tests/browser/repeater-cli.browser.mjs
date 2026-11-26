@@ -272,8 +272,13 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByText('Change advert path hash size', { exact: true }).click()
   await page.getByText(/Repeater firmware v1\.13 and earlier drops multi-byte path hashes/).waitFor()
   await page.getByText(/This setting requires repeater firmware v1\.14 or later/).waitFor()
-  await page.getByText(/mode 2 uses 3 bytes/).waitFor()
+  await page.getByText(/On repeater v1\.14\.0, scheduled flood advertisements still use one-byte hashes; v1\.14\.1 and later also apply the setting/).waitFor()
+  await page.getByText(/paths can encode at most 63, 32, and 21 hops/).waitFor()
   const hashMode = page.getByLabel('New advert path hash size')
+  assert.deepEqual(await hashMode.locator('option').allTextContents(), [
+    'Choose a size', '1 byte — 256 IDs, up to 63 encoded hops',
+    '2 bytes — 65,536 IDs, up to 32 encoded hops', '3 bytes — 16,777,216 IDs, up to 21 encoded hops',
+  ])
   const setHashMode = page.getByRole('button', { name: 'Set advert hash size' })
   const beforeHash = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
   await page.getByRole('button', { name: 'Read current size' }).click()
@@ -286,6 +291,8 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await search.fill('path.hash.mode')
   page.once('dialog', (dialog) => {
     assert.match(dialog.message(), /Set advert path hash size to 2/)
+    assert.match(dialog.message(), /manual flood advertisements/)
+    assert.match(dialog.message(), /v1\.14\.0 scheduled flood advertisements still use one-byte hashes/)
     assert.match(dialog.message(), /v1\.13 or earlier drops packets with multi-byte path hashes/)
     assert.match(dialog.message(), /Confirm the mesh is sufficiently upgraded first/)
     void dialog.dismiss()
