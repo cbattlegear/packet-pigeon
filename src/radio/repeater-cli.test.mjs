@@ -73,6 +73,16 @@ test('identity queries accept only exact commands and compare complete public-ke
   }
 })
 
+test('bootloader version query is read-only and accepts only the exact command', () => {
+  const command = 'get bootloader.ver'
+  const action = repeaterCliCommand(command)
+  assert.equal(action.command, command)
+  assert.equal('confirm' in action, false)
+  for (const invalid of [`${command} `, `${command} extra`, `${command}\nreboot`, 'set bootloader.ver 1']) {
+    assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
+  }
+})
+
 test('statistics reset requires confirmation and only accepts the exact command', () => {
   const action = repeaterCliCommand('clear stats')
   assert.equal(action.confirm, true)

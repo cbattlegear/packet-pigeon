@@ -52,6 +52,9 @@ type HistoryEntry = {
 }
 
 const neighborTiming = 'Ages are seconds since heard when the repeater generated the reply; the reply may have been delayed before syncing.'
+const bootloaderDiagnosticHelp = 'This is not the repeater firmware version or proof that a bootloader works or is update-compatible. ' +
+  'In v1.14.1, nRF52 firmware looks for a UF2 marker; unknown does not prove a bootloader is missing, and other platforms report unsupported. ' +
+  'Firmware and hardware support vary; replies may be delayed or misattributed.'
 const receiveDelayWarning = 'This experimental setting can affect flood processing, routing and remote access. ' +
   'It is a base, not milliseconds. In repeater firmware v1.14.1, the delay depends on packet score and estimated airtime; direct packets are not deferred by this mechanism. ' +
   'Already queued floods retain their scheduled time. ' +
@@ -722,6 +725,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'get public.key' && <p>Compare the reported key with the saved contact; a match alone does not prove identity.
       Replies may be delayed or misattributed and firmware support varies.</p>}
     {selected === 'get role' && <p>This reads the node's firmware role, not the current user's access level. Firmware support varies.</p>}
+    {selected === 'get bootloader.ver' && <p>{bootloaderDiagnosticHelp}</p>}
     {selected === 'get radio' && <p>In v1.14.1 this reports preferences, not active radio settings or proof of persistence.
       Frequency uses floating-point precision; bandwidth is rounded to three decimals. Replies can be delayed.</p>}
     {powerDiagnosticHelp(selected) && <p>{powerDiagnosticHelp(selected)} Firmware and hardware support vary; replies may be delayed.</p>}
@@ -1498,6 +1502,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             </p>}
           {item.command === 'get role' && item.reply !== null &&
             <p className="contact-status">This is the reported firmware role, not your access level. Firmware support varies.</p>}
+          {item.command === 'get bootloader.ver' && item.reply !== null &&
+            <p className="contact-status">{bootloaderDiagnosticHelp}</p>}
           {item.command === 'get radio' && item.reply !== null &&
             <p className="contact-status">This reports preferences, not active radio settings or proof of persistence.
               In v1.14.1 frequency uses floating-point precision and bandwidth is rounded to three decimals.</p>}
