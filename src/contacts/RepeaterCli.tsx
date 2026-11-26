@@ -70,6 +70,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const matchingHistory = history.filter((item) =>
     `${item.command} ${item.description} ${item.reply?.text ?? ''}`.toLowerCase().includes(term))
   const action = repeaterCliCommands.find((item) => item.command === selected)
+  const regionActions = repeaterCliCommands.filter((item) =>
+    item.command === 'region allowf *' || item.command === 'region denyf *' || item.command === 'region save')
 
   useEffect(() => messageSync.subscribeToSavedReceipts((key, message) => {
     const receipt = message.receipt
@@ -137,6 +139,11 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       setPending(false)
       onPending(false)
     }
+  }
+
+  function sendChoice(item: (typeof repeaterCliCommands)[number]) {
+    void send(item.command, item.description, 'confirm' in item && item.confirm,
+      'warning' in item ? item.warning : '')
   }
 
   function submitInterval(event: FormEvent<HTMLFormElement>) {
@@ -265,8 +272,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       The list is limited by the repeater. Only unique matches with saved coordinates can be mapped; separate dots do not imply a route.</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
-        if (action) void send(action.command, action.description, 'confirm' in action && action.confirm,
-          'warning' in action ? action.warning : '')
+        if (action) sendChoice(action)
       }}>
         {action ? `Send ${action.command}` : 'Select a command'}
       </button>
@@ -299,6 +305,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Read region</button>
       </form>
+      <p>Unscoped flood forwarding can be changed for the wildcard region only. Denying it can disrupt mesh routes
+        and remote access. Other routing rules can still block forwarding when allowed. Changes affect the live map
+        but are not saved by these commands. Sync the reply and read the wildcard state before deciding whether to save.</p>
+      <p>Saving is separate and writes the entire current region map, including unrelated changes by other administrators.
+        Radio acceptance alone does not confirm the change or save.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('region get *', 'Read wildcard region', false)}>Read wildcard region</button>
+        {regionActions.map((item) => <button key={item.command} type="button"
+          disabled={!ready || busy || pending || syncStatus.syncing} onClick={() => sendChoice(item)}>{item.description}</button>)}
+      </div>
     </details>
     <details>
       <summary>Change flood hop limits</summary>

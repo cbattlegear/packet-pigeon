@@ -611,6 +611,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set loop.detect strict', true), /administrator/)
   await assert.rejects(send('set path.hash.mode 2', true), /administrator/)
   await assert.rejects(send('region'), /administrator/)
+  await assert.rejects(send('region denyf *', true), /administrator/)
+  await assert.rejects(send('region save', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
@@ -624,6 +626,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('get loop.detect'), /administrator/)
   await assert.rejects(send('get path.hash.mode'), /administrator/)
   await assert.rejects(send('region get *'), /administrator/)
+  await assert.rejects(send('region allowf *', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
@@ -643,7 +646,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set loop.detect extreme', true), /supported repeater CLI command/)
   await assert.rejects(send('set path.hash.mode 2'), /Confirm/)
   await assert.rejects(send('set path.hash.mode 3', true), /supported repeater CLI command/)
-  await assert.rejects(send('region save', true), /supported repeater CLI command/)
+  for (const command of ['region allowf *', 'region denyf *', 'region save']) {
+    await assert.rejects(send(command), /Confirm/)
+  }
+  await assert.rejects(send('region denyf North', true), /supported repeater CLI command/)
   await assert.rejects(send('set flood.max 256', true), /flood hop limit/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
