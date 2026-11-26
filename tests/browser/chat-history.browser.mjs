@@ -187,3 +187,96 @@ test('session-only drafts remain accessible after their contact and channel are 
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
   await page.getByRole('heading', { name: 'No conversations' }).waitFor()
 })
+
+test('searches across the selected radio and focuses the exact cached message', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1200, height: 800 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  page.setDefaultTimeout(8000)
+  const radio = 'ab'.repeat(32)
+  const otherRadio = 'cd'.repeat(32)
+  await page.goto(`${url}#settings`)
+  await page.getByLabel('Focus the composer when opening a conversation').check()
+  await page.evaluate(async ({ radio, otherRadio }) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const contact = '01'.repeat(32)
+    const channel = (id, index, text) => ({
+      id, conversationId: `channel:${index}`, sender: '', timestamp: Date.UTC(2025, 0, 1), text,
+      receipt: { kind: 'channel-text', receiptId: id, channelIndex: index, textType: 0,
+        senderTimestamp: Date.UTC(2025, 0, 1) / 1000, text, pathLength: 255, snrDb: null },
+    })
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        contacts: [{ publicKey: contact, name: 'Pigeon', details: {
+          type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
+          latitude: 0, longitude: 0, lastModifiedAt: 0,
+        } }],
+        channels: [{ index: 0, name: 'Public' }],
+        blockedChannelSender: { name: 'Blocked', blocked: true },
+        messages: [
+          channel('archived', 7, 'Alice: Orchard archive'), channel('repeat', 7, 'Alice: Orchard archive'),
+          channel('blocked', 0, 'Blocked: Orchard hidden'),
+          ...Array.from({ length: 36 }, (_, index) => ({
+            id: `message-${index}`, conversationId: `direct:${contact}`, sender: contact,
+            timestamp: Date.UTC(2025, 0, 2, 12, index), text: index === 3 ? 'Orchard marker' : `Message number ${index}`,
+          })),
+        ],
+      })
+      await storage.update(radioKeyFromPublicKey(otherRadio), {
+        messages: [channel('other-radio', 7, 'Orchard on another radio')],
+      })
+    } finally {
+      storage.close()
+    }
+  }, { radio, otherRadio })
+  await page.reload()
+  await page.getByRole('link', { name: 'Chats' }).click()
+  const radios = page.getByRole('combobox', { name: 'Cached radio' })
+  await radios.selectOption(radio)
+  const pigeon = page.getByRole('region', { name: 'Conversation with Pigeon' })
+  const draft = pigeon.getByLabel('Message', { exact: true })
+  await draft.fill('Keep this draft')
+  const localSearch = pigeon.getByLabel('Search messages')
+  await localSearch.fill('number 17')
+  assert.equal(await pigeon.locator('[data-receipt-id="message-3"]').count(), 0)
+
+  await page.getByText('Search all chats', { exact: true }).click()
+  const allChats = page.getByRole('searchbox', { name: 'Cached message text' })
+  await allChats.fill(' ORCHARD ')
+  await page.getByText('3 matching messages', { exact: true }).waitFor()
+  const results = page.getByRole('list', { name: 'Matching messages' })
+  await results.getByRole('button', { name: /Orchard marker/ }).click()
+  const found = pigeon.locator('[data-receipt-id="message-3"]')
+  assert.equal(await found.evaluate((element) => element === document.activeElement), true)
+  assert.equal(await localSearch.inputValue(), '')
+  await pigeon.getByRole('button', { name: 'Jump to bottom' }).waitFor()
+
+  const archives = results.getByRole('button', { name: /Orchard archive/ })
+  await archives.first().click()
+  const archived = page.getByRole('region', { name: 'Conversation with Channel 7' })
+  assert.equal(await archived.getByRole('button', { name: 'Send message' }).isDisabled(), true)
+  const hide = archived.getByLabel(/Hide 1 possible repeat/)
+  await hide.check()
+  assert.equal(await archived.locator('[data-receipt-id="repeat"]').count(), 0)
+  await archives.nth(1).click()
+  assert.equal(await hide.isChecked(), false)
+  assert.equal(await archived.locator('[data-receipt-id="repeat"]').evaluate((element) => element === document.activeElement), true)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await results.getByRole('button', { name: /Orchard marker/ }).click()
+  const narrow = await found.evaluate((element) => {
+    const { top, bottom } = element.getBoundingClientRect()
+    return { focused: element === document.activeElement, activeId: document.activeElement?.id, top, bottom, height: innerHeight }
+  })
+  assert.ok(narrow.focused && narrow.top >= -1 && narrow.bottom <= narrow.height, JSON.stringify(narrow))
+  assert.equal(await draft.inputValue(), 'Keep this draft')
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+
+  await radios.selectOption(otherRadio)
+  await page.getByText('Search all chats', { exact: true }).click()
+  assert.equal(await allChats.inputValue(), '')
+  await allChats.fill('orchard')
+  await page.getByText('1 matching message', { exact: true }).waitFor()
+  assert.equal(await results.getByRole('button', { name: /Orchard on another radio/ }).count(), 1)
+})

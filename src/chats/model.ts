@@ -96,6 +96,14 @@ export function searchMessages(messages: readonly StoredMessage[], query: string
   return term ? messages.filter((message) => message.text.toLocaleLowerCase().includes(term)) : messages
 }
 
+export function searchChatHistory(conversations: readonly Conversation[], query: string) {
+  if (!query.trim()) return []
+  const time = ({ timestamp }: StoredMessage) => timestamp !== null && Number.isFinite(timestamp) ? timestamp : -Infinity
+  return conversations.flatMap((conversation) => searchMessages(conversation.messages, query)
+    .map((message) => ({ conversation, message })))
+    .sort((first, second) => time(second.message) - time(first.message))
+}
+
 export function messageDay(timestamp: number | null) {
   if (timestamp === null || !Number.isFinite(timestamp) || Math.abs(timestamp) > 8.64e15) return null
   const date = new Date(timestamp)
