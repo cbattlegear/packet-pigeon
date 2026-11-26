@@ -504,6 +504,14 @@ Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 which can map unique matches with saved positions as separate points rather
 than a route. Unknown or ambiguous four-byte prefixes are not mapped.
+**Inspect repeater regions** offers explicit read-only tree, home, default-scope,
+and individual region queries. The region-tree reply can be truncated silently
+and is not a complete inventory. `F` marks flood permission, `^` the home
+region, and `*` the unscoped wildcard; other routing rules may still block
+forwarding. Individual lookups prefer an exact name but may return a different
+region when a prefix is ambiguous; compare the returned name. Remote tree
+replies require repeater firmware v1.12 or later; support for other queries
+varies by firmware. Region changes are not yet supported.
 Administrators can also confirm a flood or zero-hop advertisement, or change
 advertisement intervals, owner information, repeater name, stored position,
 packet forwarding, and flood hop limits with confirmation.

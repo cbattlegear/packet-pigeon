@@ -4,7 +4,7 @@ import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
-  repeaterPositionCommand, UncertainRepeaterCliError,
+  repeaterPositionCommand, repeaterRegionQuery, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 import { mapPosition } from '../map/nodes.ts'
@@ -53,6 +53,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [floodLimit, setFloodLimit] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
   const [pathHashMode, setPathHashMode] = useState('')
+  const [regionName, setRegionName] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [latitude, setLatitude] = useState('')
@@ -208,6 +209,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitRegionQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterRegionQuery(regionName)
+      void send(command.command, command.description, false)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid region name.')
+    }
+  }
+
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -264,6 +276,30 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }}>Sync messages for replies</button>
       <button type="button" disabled={!history.length || pending} onClick={() => setHistory([])}>Clear CLI history</button>
     </div>
+    <details>
+      <summary>Inspect repeater regions</summary>
+      <p>These queries do not change regions. The tree reply may be truncated without an indication, so it is not a
+        complete inventory. In the tree, <code>F</code> marks flood permission, <code>^</code> marks the home region,
+        and <code>*</code> is the wildcard for unscoped floods. Other routing rules can still block forwarding.</p>
+      <p>Individual queries use firmware prefix matching: an exact match is preferred, but an incomplete or ambiguous
+        prefix can return a different region. Compare the returned name. Region-tree replies require repeater firmware
+        v1.12 or later; other query support varies by firmware.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('region', 'Read the region tree', false)}>Read region tree</button>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('region home', 'Read the home region', false)}>Read home region</button>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('region default', 'Read the default scope region', false)}>Read default scope region</button>
+      </div>
+      <form className="contact-actions" onSubmit={submitRegionQuery}>
+        <label>Region name or prefix
+          <input type="text" required value={regionName} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setRegionName(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Read region</button>
+      </form>
+    </details>
     <details>
       <summary>Change flood hop limits</summary>
       <p>These limits apply to forwarded flood packets, not direct packets. The overall limit applies to all floods;
@@ -426,6 +462,11 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.reply !== null ? <pre>{item.reply.text || '(empty reply)'}</pre> :
             <p>{now >= item.deadline ? 'No reply synced before the deadline. It may still arrive.' :
               'Waiting for a reply. Sync messages to check.'}</p>}
+          {item.command === 'region' && item.reply !== null &&
+            <p className="contact-status">The region tree may be truncated without an indication; it is not a complete inventory.
+              F marks flood permission, ^ marks the home region, and * is the unscoped wildcard.</p>}
+          {item.command.startsWith('region get ') && item.reply !== null &&
+            <p className="contact-status">Firmware may match a prefix to a different region. Compare the returned name.</p>}
           {item.command === 'neighbors' && item.reply !== null &&
             <NeighborReport reply={item.reply.text} syncedAt={item.reply.syncedAt} name={name} repeaterPosition={repeaterPosition}
               nodes={neighborNodes} onMap={onMap} />}

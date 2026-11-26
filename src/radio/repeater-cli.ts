@@ -19,6 +19,9 @@ export const repeaterCliCommands = [
   { command: 'get flood.max.advert', description: 'Read the flood advertisement hop limit' },
   { command: 'get loop.detect', description: 'Read flood loop detection mode' },
   { command: 'get path.hash.mode', description: 'Read advert path hash size' },
+  { command: 'region', description: 'Read the region tree' },
+  { command: 'region home', description: 'Read the home region' },
+  { command: 'region default', description: 'Read the default scope region' },
   { command: 'set repeat on', description: 'Enable packet forwarding', confirm: true,
     warning: 'Forwarding is still subject to the repeater routing and region settings.' },
   { command: 'set repeat off', description: 'Disable packet forwarding', confirm: true,
@@ -88,6 +91,17 @@ export function repeaterNameCommand(value: string) {
   return repeaterCliCommand(`set name ${value}`)
 }
 
+export function repeaterRegionQuery(value: string) {
+  const bytes = new TextEncoder().encode(value)
+  if (value !== '*' && (!value || value === '#' || bytes.length > 30 ||
+    new TextDecoder().decode(bytes) !== value || /[\s\p{Cc}]/u.test(value) ||
+    bytes.some((byte) => byte !== 35 && byte !== 36 && byte !== 45 &&
+      !(byte >= 48 && byte <= 57) && !(byte >= 65 && byte !== 127)))) {
+    throw new Error('Enter * or a valid region name or prefix of up to 30 UTF-8 bytes without spaces or control characters.')
+  }
+  return { command: `region get ${value}`, description: `Read region ${value}` }
+}
+
 function validatePosition(axis: 'lat' | 'lon', value: string) {
   const maximum = axis === 'lat' ? 90 : 180
   const coordinate = Number(value)
@@ -101,6 +115,8 @@ function validatePosition(axis: 'lat' | 'lon', value: string) {
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
+  const regionPrefix = 'region get '
+  if (command.startsWith(regionPrefix)) return repeaterRegionQuery(command.slice(regionPrefix.length))
   const namePrefix = 'set name '
   if (command.startsWith(namePrefix)) {
     const value = command.slice(namePrefix.length)

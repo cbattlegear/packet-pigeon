@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
-  repeaterNameCommand, repeaterPositionCommand, parseRepeaterNeighbors,
+  repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -112,6 +112,24 @@ test('flood hop limits accept exact whole values and require confirmation', () =
     for (const value of ['', '-1', '65', '256', '01', '1.0', '1e1', ' 1', '1 ', '1\n', '1\nreboot', '999999999999999999999']) {
       assert.throws(() => repeaterCliCommand(`set ${kind} ${value}`), /flood hop limit|supported/)
     }
+  }
+})
+
+test('region inspection allows bounded names but rejects injected and mutating commands', () => {
+  for (const command of ['region', 'region home', 'region default']) {
+    assert.equal(repeaterCliCommand(command).command, command)
+  }
+  for (const name of ['*', '#North', '$private', 'North-É', 'é'.repeat(15)]) {
+    assert.equal(repeaterRegionQuery(name).command, `region get ${name}`)
+    assert.equal(repeaterCliCommand(`region get ${name}`).command, `region get ${name}`)
+  }
+  for (const name of ['', '#', 'a b', 'a\tb', 'a\nregion save', 'a\0b', 'é'.repeat(16),
+    'a\u0085b', '\ud800', '*x', 'bad/name']) {
+    assert.throws(() => repeaterRegionQuery(name), /region name or prefix/)
+  }
+  for (const command of ['region save', 'region load', 'region home North', 'region default North',
+    'region denyf *', 'region get North\nregion save']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command|region name or prefix/)
   }
 })
 
