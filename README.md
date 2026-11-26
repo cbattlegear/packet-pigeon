@@ -567,6 +567,12 @@ zero, and choosing `share` does not enable GPS. Policy changes do not send an
 advertisement or recall already queued or transmitted locations. Sync replies and read
 the policy again to check the change; radio acceptance alone does not prove it
 succeeded.
+Administrators can also read and change the repeater power-saving preference.
+Depending on the board and firmware, enabling it may allow sleep when idle and
+affect responsiveness; disabling it may increase power consumption. An `on`
+reply reports the preference, not actual sleep: Pico W repeater firmware
+v1.14.1, for example, does not implement sleep. Read the preference explicitly
+and sync replies; radio acceptance alone does not confirm success.
 Owner information can be requested
 over the mesh; do not put passwords or private data in it. Editing it requires
 repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line
