@@ -128,6 +128,20 @@ test('flood loop detection accepts only supported modes and requires confirmatio
   }
 })
 
+test('advert path hash size is restricted to the three firmware modes and requires confirmation', () => {
+  assert.equal(repeaterCliCommand('get path.hash.mode').command, 'get path.hash.mode')
+  for (const mode of ['0', '1', '2']) {
+    const command = repeaterCliCommand(`set path.hash.mode ${mode}`)
+    assert.equal(command.confirm, true)
+    assert.match(command.description, new RegExp(mode))
+  }
+  for (const command of ['set path.hash.mode', 'set path.hash.mode 3', 'set path.hash.mode 255',
+    'set path.hash.mode -1', 'set path.hash.mode 01', 'set path.hash.mode 1 ',
+    'set path.hash.mode 1 extra', 'set path.hash.mode 2\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('CLI confirmation failures distinguish rejection from uncertain dispatch', async () => {
   const link = (reply) => ({ async request(_bytes, receive) { return receive(Uint8Array.of(...reply)).value } })
   await assert.rejects(sendRepeaterCli(link([1, 2]), key, 'ver', 'AA'), { code: 'device-error' })

@@ -52,6 +52,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [floodLimitKind, setFloodLimitKind] = useState<'flood.max' | 'flood.max.unscoped' | 'flood.max.advert'>('flood.max')
   const [floodLimit, setFloodLimit] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
+  const [pathHashMode, setPathHashMode] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [latitude, setLatitude] = useState('')
@@ -191,6 +192,22 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitPathHashMode(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set path.hash.mode ${pathHashMode}`)
+      const mode = Number(pathHashMode)
+      const hashBytes = mode + 1
+      const warning = mode === 0
+        ? 'This uses one-byte hashes for this repeater\'s flood advertisements.'
+        : `This uses ${hashBytes}-byte hashes for this repeater's flood advertisements. Repeater firmware v1.13 or earlier drops packets with multi-byte path hashes, which can limit flood propagation. Confirm the mesh is sufficiently upgraded first.`
+      void send(command.command, command.description, true, warning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Choose a supported advert path hash size.')
+    }
+  }
+
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -298,6 +315,28 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           </select>
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set loop detection</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change advert path hash size</summary>
+      <p>This controls the hash width used in this repeater's flood advertisements, not the hash widths of packets it
+        forwards. On repeater firmware v1.14 and later, packets with any supported hash width can be forwarded. Repeater
+        firmware v1.13 and earlier drops multi-byte path hashes, so enabling them can limit flood propagation across a mixed-version mesh.
+        Mode 0 uses 1 byte (256 IDs, up to 64 flood hops); mode 1 uses 2 bytes (65,536 IDs, up to 32 hops); mode 2 uses
+        3 bytes (16,777,216 IDs, up to 21 hops). This setting requires repeater firmware v1.14 or later.</p>
+      <form className="contact-actions" onSubmit={submitPathHashMode}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get path.hash.mode', 'Read advert path hash size', false)}>Read current size</button>
+        <label>New advert path hash size
+          <select required value={pathHashMode} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setPathHashMode(event.currentTarget.value)}>
+            <option value="">Choose a size</option>
+            <option value="0">1 byte — 256 IDs, 64 flood hops</option>
+            <option value="1">2 bytes — 65,536 IDs, 32 flood hops</option>
+            <option value="2">3 bytes — 16,777,216 IDs, 21 flood hops</option>
+          </select>
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set advert hash size</button>
       </form>
     </details>
     <details>
