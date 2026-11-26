@@ -304,6 +304,8 @@ function App() {
             direct={directMessages} status={directStatus} cacheSaving={cacheStatus.saving}
             active={activeSection === 'Chats'} preferences={settings.preferences} locale={settings.locale}
             mapPosition={sharePosition}
+            observationSource={session}
+            pathNodes={pathNodes} onPathMap={showPathOnMap}
             readChannelKey={(key, channel) => session.readChannelShareKey(key, channel.index, channel.name)} />
         </div>
         {hasOpenedDiagnostics && <div hidden={activeSection !== 'Diagnostics'}>

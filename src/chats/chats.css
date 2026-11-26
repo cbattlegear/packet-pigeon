@@ -77,6 +77,29 @@
   margin: 0;
 }
 
+.chat-observation {
+  padding: 8px 28px;
+  max-height: 12rem;
+  overflow-y: auto;
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+.chat-observation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.chat-observation p {
+  margin: 8px 0 0;
+}
+
+.chat-observation [role="alert"] {
+  color: var(--error);
+}
+
 .chat-repeat-filter {
   display: flex;
   align-items: flex-start;
@@ -94,6 +117,12 @@
 .chat-message-list li {
   max-width: min(100%, 48rem);
   background: var(--surface);
+}
+
+.chat-message-list .chat-observed-paths li {
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
 }
 
 .chat-message-list .chat-message--outgoing {
@@ -230,6 +259,7 @@
   }
 
   .chat-workspace .conversation-heading,
+  .chat-observation,
   .chat-repeat-filter,
   .chat-composer,
   .chat-retry-settings {
