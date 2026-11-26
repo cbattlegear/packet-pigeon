@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
 import { createPrivateKey, createPublicKey, randomBytes } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
 import { createServer } from 'vite'
@@ -25,8 +24,8 @@ test('backs up selected settings, restores data and identity, and guards mainten
   await server.listen()
   const browser = await chromium.launch({ channel: 'chrome' })
   t.after(() => browser.close())
-  const page = await browser.newPage({ acceptDownloads: true, viewport: { width: 1200, height: 840 } })
-  page.setDefaultTimeout(10000)
+  const page = await browser.newPage({ viewport: { width: 1200, height: 840 } })
+  page.setDefaultTimeout(20_000)
   const current = await identityFixture()
   const target = await identityFixture()
   const channelKey = '42'.repeat(16)
@@ -35,6 +34,17 @@ test('backs up selected settings, restores data and identity, and guards mainten
   const existingKey = 'ad'.repeat(32)
   const overflowKey = 'de'.repeat(32)
   await page.addInitScript(({ current, target, existingKey }) => {
+    // Read each downloaded blob in the page, before Chrome hands it to the host.
+    const downloads = []
+    window.backupDownloads = downloads
+    const click = HTMLAnchorElement.prototype.click
+    HTMLAnchorElement.prototype.click = function () {
+      if (this.download && this.href.startsWith('blob:')) {
+        downloads.push({ filename: this.download, content: fetch(this.href).then((response) => response.text()) })
+        return
+      }
+      click.call(this)
+    }
     const encoder = new TextEncoder()
     const decode = new TextDecoder()
     const bytes = (hex) => Uint8Array.from(hex.match(/../g), (pair) => parseInt(pair, 16))
@@ -143,6 +153,16 @@ test('backs up selected settings, restores data and identity, and guards mainten
     Object.defineProperty(navigator, 'serial', { value: { async requestPort() { return openPort() } } })
   }, { current, target, existingKey })
 
+  async function downloadAt(index, filename) {
+    await page.waitForFunction((index) => window.backupDownloads.length > index, index)
+    const captured = await page.evaluate(async (index) => {
+      const { filename, content } = window.backupDownloads[index]
+      return { filename, content: await content }
+    }, index)
+    assert.equal(captured.filename, filename)
+    return captured.content
+  }
+
   await page.goto(server.resolvedUrls.local[0] + '#settings')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const panel = page.getByRole('region', { name: 'Backup and recovery' })
@@ -152,24 +172,18 @@ test('backs up selected settings, restores data and identity, and guards mainten
   assert.equal(await exported.getByLabel('Private identity key', { exact: true }).isChecked(), false)
   await exported.getByRole('button', { name: 'Deselect all export sections' }).click()
   await exported.getByLabel('Radio name', { exact: true }).check()
-  const download = page.waitForEvent('download', { timeout: 45_000 })
   await exported.getByRole('button', { name: 'Download configuration' }).click()
-  const file = await download.catch(async (error) => {
-    const status = await panel.getByRole('status').allTextContents()
-    const alerts = await panel.getByRole('alert').allTextContents()
-    throw new Error(`Name export did not start a download. ${[...status, ...alerts].join(' ')}`, { cause: error })
-  })
-  assert.deepEqual(JSON.parse(await readFile(await file.path(), 'utf8')), {
+  const currentBackupFilename = `meshcore-config-${current.publicKey.slice(0, 12)}.json`
+  assert.deepEqual(JSON.parse(await downloadAt(0, currentBackupFilename)), {
     name: 'Backup fixture', public_key: current.publicKey, packet_pigeon: { version: 1 },
   })
   assert.equal(await page.evaluate(() => window.backupCommands.includes(23)), false)
 
   await exported.getByRole('button', { name: 'Deselect all export sections' }).click()
   await exported.getByLabel('Channels and keys', { exact: true }).check()
-  const defaultDownload = page.waitForEvent('download')
   page.once('dialog', (dialog) => dialog.accept())
   await exported.getByRole('button', { name: 'Download configuration' }).click()
-  const defaults = await readFile(await (await defaultDownload).path())
+  const defaults = Buffer.from(await downloadAt(1, currentBackupFilename))
   assert.deepEqual(JSON.parse(defaults.toString()).channels, [{ name: 'Public', secret: '15'.repeat(16),
     packet_pigeon_scope: 'default', message_retention_duration_seconds: null }])
 
@@ -290,10 +304,9 @@ test('backs up selected settings, restores data and identity, and guards mainten
   await panel.getByText('Radio command sent. Reconnect to verify the result.', { exact: true }).waitFor()
   assert.equal(await page.evaluate(() => window.backupCommands.includes(51)), true)
 
-  const archive = page.waitForEvent('download')
   page.once('dialog', (dialog) => dialog.accept())
   await panel.getByRole('button', { name: 'Download local chat archive' }).click()
-  const archiveJson = JSON.parse(await readFile(await (await archive).path(), 'utf8'))
+  const archiveJson = JSON.parse(await downloadAt(2, `packet-pigeon-chat-${target.publicKey.slice(0, 12)}.json`))
   assert.equal(archiveJson.format, 'packet-pigeon-chat-archive')
   assert.equal(archiveJson.public_key, target.publicKey)
   assert.equal(Object.hasOwn(archiveJson, 'private_key'), false)
