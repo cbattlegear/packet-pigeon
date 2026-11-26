@@ -10,6 +10,7 @@ import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
 import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contactPublicKey,
   readContactForEdit, readContactFrame, removeContactCommand, writeContactCommand } from './contact-commands.ts'
 import type { ContactPermissions, NewContact } from './contact-commands.ts'
+import { decodeContactPath } from './contact-path.ts'
 import type { ContactPathWidth } from './contact-path.ts'
 import { contactPingWidth, parseTracePath, sendContactPing, sendPathTrace } from './contact-ping.ts'
 import type { PingHashWidth, TraceHashWidth } from './contact-ping.ts'
@@ -17,8 +18,10 @@ import { decodeDirectSent, directMessageCommand, resetPathCommand } from './dire
 import type { DirectSendReceipt } from './direct-message.ts'
 import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort } from './web-bluetooth.ts'
 import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bluetooth.ts'
-import { readAdvertPath, readAutoAddPolicy, readNoiseFloor, writeAutoAddPolicy } from './discovery-commands.ts'
-import type { AutoAddPolicy } from './discovery-commands.ts'
+import {
+  readAdvertPath, readAutoAddPolicy, readNoiseFloor, requestRepeaterDetails, scanNearby, sendNearbyRequest, writeAutoAddPolicy,
+} from './discovery-commands.ts'
+import type { AutoAddPolicy, NearbyNode, RepeaterDetails } from './discovery-commands.ts'
 import { channelName, makeChannelSecret, readChannelSlot, secretHex, writeChannelSlot } from './channel-commands.ts'
 import { channelMessageCommand } from './channel-message.ts'
 import { writeSetupPathWidth, writeSetupRadioSettings } from './setup-commands.ts'
@@ -106,6 +109,7 @@ export class CompanionSession {
   private expectedKey?: string
   private contactWritePending = false
   private directCommandPending = false
+  private nearbyDiscoveryPending = false
   private readonly openScopeStorage: typeof openRadioStorage
   private scopeTail: Promise<void> = Promise.resolve()
 
@@ -435,6 +439,66 @@ export class CompanionSession {
       return readNoiseFloor(link)
     })
   )
+
+  private async watchDiscovery<T>(
+    radioKey: string, signal: AbortSignal, run: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    signal.throwIfAborted()
+    const attempt = this.attempt
+    if (!attempt?.link || this.snapshot.phase !== 'ready' || this.snapshot.device?.publicKey !== radioKey) {
+      throw new CompanionError('disconnected', 'Connect the selected radio and wait for it to finish syncing.')
+    }
+    if (this.snapshot.transport !== 'usb') {
+      throw new CompanionError('unsupported-transport', 'Connect over USB for active discovery.')
+    }
+    if (this.snapshot.device.capabilities.firmwareProtocolVersion < 8) {
+      throw new CompanionError('unsupported-firmware', 'Active discovery requires companion protocol v8 or newer.')
+    }
+    const disconnected = new AbortController()
+    const stopWatching = this.subscribe(() => {
+      if (this.attempt !== attempt || this.snapshot.phase !== 'ready') {
+        disconnected.abort(new Error('The radio disconnected during discovery.'))
+      }
+    })
+    try {
+      return await run(AbortSignal.any([signal, disconnected.signal]))
+    } finally {
+      stopWatching()
+    }
+  }
+
+  readonly discoverNearby = async (
+    radioKey: string, signal: AbortSignal, onNode: (node: NearbyNode) => void, onListening: () => void,
+  ) => {
+    if (this.nearbyDiscoveryPending) throw new Error('A nearby discovery scan is already running.')
+    this.nearbyDiscoveryPending = true
+    try {
+      await this.watchDiscovery(radioKey, signal, (request) => scanNearby(
+        (tag) => this.runRadioCommand(radioKey, (link) => sendNearbyRequest(link, tag, request)),
+        this.subscribeToPushes, request,
+        (node) => { if (node.publicKey !== radioKey) onNode(node) }, onListening,
+      ))
+    } finally {
+      this.nearbyDiscoveryPending = false
+    }
+  }
+
+  readonly discoverRepeaterDetails = async (
+    radioKey: string, contactKey: string, kind: RepeaterDetails['kind'], signal: AbortSignal, onWaiting: () => void,
+  ) => {
+    const key = contactPublicKey(contactKey)
+    if (kind !== 'regions' && kind !== 'owner') throw new Error('Choose a supported discovery request.')
+    return this.watchDiscovery(radioKey, signal, (request) => this.runRadioCommand(radioKey, async (link) => {
+      const contacts = await this.readContacts(link)
+      request.throwIfAborted()
+      const contact = contacts.find(({ publicKey }) => publicKey === key)
+      const path = contact && decodeContactPath(contact.pathLength, contact.pathHex)
+      if (!contact || contact.type !== 2 || !path || path.hops.length !== 0) {
+        throw new Error('Region and owner requests require a saved repeater with a zero-hop radio path.')
+      }
+      return requestRepeaterDetails(link, key, kind, this.subscribeToPushes, request, onWaiting)
+    }))
+  }
 
   readonly setAutoAdd = (radioKey: string, policy: AutoAddPolicy) => (
     this.runRadioCommand(radioKey, async (link) => {

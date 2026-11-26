@@ -175,6 +175,179 @@ test('a timed-out noise-floor command closes the link rather than misattributing
   await session.disconnect()
 })
 
+test('nearby discovery is explicit, capability-aware, and releases the radio while listening', async () => {
+  let version = 14
+  let rejectDiscovery = false
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: { const info = deviceInfo(); info[1] = version; serial.emit(...info); break }
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 55:
+        if (rejectDiscovery) serial.emit(1, 1)
+        else {
+          serial.emit(0x8e, 0xf8, 0x9c, 0, 0x92, 0xec, ...command.slice(3, 7), ...new Uint8Array(32).fill(0xbc))
+          serial.emit(0)
+        }
+        break
+      case 56: serial.emit(24, 1, 0x85, 0xff, ...new Uint8Array(10)); break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  const key = 'ab'.repeat(32)
+  await session.connect()
+  assert.deepEqual(port.commands.map(([code]) => code), [22, 1, 4])
+  const controller = new AbortController()
+  const found = []
+  let listening = false
+  const scanning = session.discoverNearby(key, controller.signal, (node) => found.push(node), () => { listening = true })
+  await waitFor(() => listening && found.length === 1)
+  const command = port.commands.find(([code]) => code === 55)
+  assert.deepEqual(command.slice(0, 3), [55, 0x80, 0x1e])
+  assert.deepEqual(command.slice(7), [0, 0, 0, 0])
+  assert.equal(found[0].publicKey, 'bc'.repeat(32))
+  assert.equal(await session.noiseFloor(key), -123)
+  await assert.rejects(session.discoverNearby(key, new AbortController().signal, () => {}, () => {}), /already running/)
+  controller.abort(new Error('Stopped by fixture'))
+  await assert.rejects(scanning, /Stopped by fixture/)
+  port.emit(0x8e, 0, 0, 0, 0x92, 0, ...command.slice(3, 7), ...new Uint8Array(32).fill(0xcd))
+  await setImmediate()
+  assert.equal(found.length, 1)
+  rejectDiscovery = true
+  await assert.rejects(session.discoverNearby(key, new AbortController().signal, () => {}, () => {}),
+    { code: 'unsupported-firmware' })
+  assert.equal(session.getSnapshot().phase, 'ready')
+  await session.disconnect()
+
+  version = 7
+  const oldPort = new FixturePort(([code], serial) => {
+    if (code === 22) { const info = deviceInfo(); info[1] = version; serial.emit(...info) }
+    else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) { serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0) }
+    else assert.fail(`Unexpected command ${code}`)
+  })
+  const oldSession = sessionWith(oldPort)
+  await oldSession.connect()
+  await assert.rejects(oldSession.discoverNearby(key, new AbortController().signal, () => {}, () => {}),
+    { code: 'unsupported-firmware' })
+  await assert.rejects(oldSession.discoverRepeaterDetails(key, 'bc'.repeat(32), 'regions',
+    new AbortController().signal, () => {}), { code: 'unsupported-firmware' })
+  assert.equal(oldPort.commands.some(([code]) => code === 55), false)
+  assert.equal(oldPort.commands.some(([code]) => code === 57), false)
+  await oldSession.disconnect()
+})
+
+test('nearby discovery waits for an in-flight acknowledgement and stops on disconnect', async () => {
+  let acknowledge
+  let hold = true
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 55:
+        if (hold) acknowledge = () => serial.emit(0)
+        else serial.emit(0)
+        break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port, 1000, { retryDelays: [10_000] })
+  const key = 'ab'.repeat(32)
+  await session.connect()
+  const controller = new AbortController()
+  let settled = false
+  const scanning = session.discoverNearby(key, controller.signal, () => {}, () => {})
+  scanning.catch(() => { settled = true })
+  await waitFor(() => typeof acknowledge === 'function')
+  controller.abort(new Error('Stopped before acknowledgement'))
+  await setImmediate()
+  assert.equal(settled, false)
+  await assert.rejects(session.noiseFloor(key), /already in progress/)
+  acknowledge()
+  await assert.rejects(scanning, /Stopped before acknowledgement/)
+
+  hold = false
+  let listening = false
+  const disconnected = session.discoverNearby(key, new AbortController().signal, () => {}, () => { listening = true })
+  await waitFor(() => listening)
+  port.dispatchEvent(new Event('disconnect'))
+  await assert.rejects(disconnected, /disconnected/)
+  await session.disconnect()
+})
+
+test('repeater details use only a freshly verified saved zero-hop repeater', async () => {
+  const contact = contactInfo()
+  contact[33] = 2
+  contact[35] = 0
+  let holdRead = false
+  let rejectDetails = false
+  let finishRead
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, 1, 0, 0, 0)
+        serial.emit(...contact)
+        if (holdRead) finishRead = () => serial.emit(4, 0, 0, 0, 0)
+        else serial.emit(4, 0, 0, 0, 0)
+        break
+      case 57: {
+        if (rejectDetails) {
+          serial.emit(1, 1)
+          break
+        }
+        const body = command[33] === 1 ? '*,local' : 'Relay\nOperator'
+        serial.emit(0x8c, 0, 1, 2, 3, 4, 9, 0, 0, 0, ...encode(body))
+        serial.emit(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0)
+        break
+      }
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  await session.connect()
+  assert.deepEqual(await session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
+    { kind: 'regions', regions: ['*', 'local'] })
+  assert.deepEqual(port.commands.at(-1), [57, ...new Uint8Array(32).fill(0xbc), 1, 0])
+  assert.deepEqual(await session.discoverRepeaterDetails(key, target, 'owner', new AbortController().signal, () => {}),
+    { kind: 'owner', name: 'Relay', owner: 'Operator' })
+  assert.deepEqual(port.commands.at(-1), [57, ...new Uint8Array(32).fill(0xbc), 2, 0])
+
+  rejectDetails = true
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
+    { code: 'unsupported-firmware' })
+  assert.equal(session.getSnapshot().phase, 'ready')
+  rejectDetails = false
+  const sent = port.commands.filter(([code]) => code === 57).length
+  contact[35] = 0xff
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
+    /zero-hop/)
+  contact[35] = 1
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
+    /zero-hop/)
+  contact[35] = 0
+  contact[33] = 1
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
+    /saved repeater/)
+  contact[33] = 2
+  await assert.rejects(session.discoverRepeaterDetails(key, 'cd'.repeat(32), 'regions', new AbortController().signal, () => {}),
+    /saved repeater/)
+  holdRead = true
+  const controller = new AbortController()
+  const cancelled = session.discoverRepeaterDetails(key, target, 'regions', controller.signal, () => {})
+  await waitFor(() => typeof finishRead === 'function')
+  controller.abort(new Error('Cancelled before transmission'))
+  finishRead()
+  await assert.rejects(cancelled, /Cancelled before transmission/)
+  assert.equal(port.commands.filter(([code]) => code === 57).length, sent)
+  await session.disconnect()
+})
+
 function contactInfo() {
   const frame = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), 1, 2, 0xff, ...new Uint8Array(112))
   frame.set(encode('Contact'), 100)

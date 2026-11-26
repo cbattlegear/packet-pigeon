@@ -12,6 +12,7 @@ import { PathDetails } from '../paths/PathDetails.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
 import { contactPosition } from '../contacts/model.ts'
 import { NoiseFloorMonitor } from './NoiseFloorMonitor.tsx'
+import { ActiveDiscovery } from './ActiveDiscovery.tsx'
 import '../contacts/contacts.css'
 
 type View = ReturnType<typeof useRadioDiscoveries>
@@ -181,6 +182,8 @@ function DiscoveryBrowser({
   return (
     <>
       <p>Connect over USB to record live adverts and read paths from the radio. Saved discovery history is available while connected over Bluetooth or disconnected.</p>
+      <ActiveDiscovery radioKey={radioKey} active={active} ready={ready} usb={usb} firmware={firmware}
+        session={session} entries={entries} radioContacts={radioContacts} />
       <NoiseFloorMonitor radioKey={radioKey} active={active} ready={ready} usb={usb} firmware={firmware} session={session} />
       <div className="contact-filters">
         <label>Search discovered nodes

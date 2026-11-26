@@ -189,6 +189,19 @@ test('uses raw notification frames, prefers writes with response, and shares syn
   unsubscribe()
 })
 
+test('active discovery is unavailable over Bluetooth without writing a discovery command', async () => {
+  const radio = fixture()
+  const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks: ownership() })
+  await session.connectBluetooth()
+  const key = session.getSnapshot().device.publicKey
+  const signal = new AbortController().signal
+  await assert.rejects(session.discoverNearby(key, signal, () => {}, () => {}), { code: 'unsupported-transport' })
+  await assert.rejects(session.discoverRepeaterDetails(key, 'bc'.repeat(32), 'regions', signal, () => {}),
+    { code: 'unsupported-transport' })
+  assert.deepEqual(radio.writes.map(({ bytes }) => bytes[0]), [22, 1, 4])
+  await session.disconnect()
+})
+
 test('uses write without response when required and reconnects to the authorized device with bounded retries', async () => {
   const radio = fixture({ writeWithoutResponse: true })
   const session = new CompanionSession({
