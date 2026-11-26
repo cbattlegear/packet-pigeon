@@ -7,6 +7,8 @@ import type { ContactEntry } from './model.ts'
 import { contactPosition } from './model.ts'
 import { RepeaterCli } from './RepeaterCli.tsx'
 import type { RepeaterMessageSync } from './RepeaterCli.tsx'
+import { mapPosition } from '../map/nodes.ts'
+import { resolvePath } from '../paths/model.ts'
 import type { MapPath, PathNode } from '../paths/model.ts'
 
 type Props = {
@@ -46,6 +48,12 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
   const path = decodeContactPath(details.pathLength, details.pathHex)
   const route = path ? (path.hops.length ? `${path.hops.length} saved hops` : 'Direct, zero hops')
     : details.pathLength === pathUnknown ? 'Flood (no saved route)' : 'Invalid saved route'
+  const resolvedNeighbors = (neighbors?.page.entries ?? []).map((entry) => ({
+    ...entry,
+    matches: resolvePath([entry.publicKey], neighborNodes)[0].matches
+      .filter((node) => node.publicKey.toLowerCase() === entry.publicKey),
+  }))
+  const mappableNeighbors = resolvedNeighbors.filter(({ matches }) => matches.length === 1 && mapPosition(matches[0].position))
 
   useEffect(() => () => request.current?.abort(new Error('Stopped waiting for the repeater.')), [])
 
@@ -161,7 +169,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
         Repeater firmware v1.14.1 supports this request; other builds may not. Entries can be stale or change between
         pages, causing omissions or duplicates. Discovery responses are unauthenticated, so even a full key does not
         prove identity; verify it independently before using it. Request tags can repeat after a radio restart,
-        so a delayed reply may be ambiguous.</p>
+        so a delayed reply may be ambiguous. Map points use saved contact positions for this page only and do not imply a route.</p>
       <div className="contact-actions">
         <button type="button" disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}
           onClick={() => void readNeighbors(0)}>Request first neighbor page</button>
@@ -181,10 +189,26 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
         </time>. Reported total: {neighbors.page.total}; page offset: {neighbors.offset}.
           Ages are seconds since heard when the repeater generated the reply; the reply may have been delayed.</p>
         {neighbors.page.entries.length ? <ul className="repeater-neighbor-keys" aria-label="Reported nearby repeater keys">
-          {neighbors.page.entries.map((entry, index) => <li key={`${entry.publicKey}:${index}`}>
+          {resolvedNeighbors.map((entry, index) => <li key={`${entry.publicKey}:${index}`}>
             <code>{entry.publicKey}</code> · {entry.secondsAgo}s · {entry.snrDb} dB
+            {entry.matches.length === 1 ? ` · Saved contact: ${entry.matches[0].name}` : ' · Not in saved contacts'}
+            {entry.matches.length === 1 && !mapPosition(entry.matches[0].position) ? ' · Position unavailable' : ''}
           </li>)}
         </ul> : <p>No entries were returned on this page.</p>}
+        {onMap && neighbors.page.entries.length > 0 && <button type="button" disabled={!mappableNeighbors.length} onClick={() => onMap({
+          title: `Reported neighbors of ${contact.displayName} (page offset ${neighbors.offset})`,
+          description: `Reply received ${new Date(neighbors.receivedAt).toLocaleString()} (browser time). Ages are at reply and may be delayed. ` +
+            'Request tags can repeat after a radio restart. Discovery responses are unauthenticated; a full-key match does not prove identity. ' +
+            'Positions are saved contact positions and may be stale. ' +
+            'Pages can change; points do not imply a route.',
+          connect: false,
+          points: mappableNeighbors.map(({ publicKey, secondsAgo, snrDb, matches }) => ({
+            label: `${matches[0].name} (${publicKey}) · reported age ${secondsAgo}s at reply · SNR ${snrDb} dB`,
+            position: matches[0].position,
+          })),
+        })}>Show this page on map</button>}
+        {neighbors.page.entries.length > 0 && !mappableNeighbors.length &&
+          <p>No entries on this page have mappable saved contact positions.</p>}
       </div>}
     </details>}
     {login?.role === 'admin' && <details>
