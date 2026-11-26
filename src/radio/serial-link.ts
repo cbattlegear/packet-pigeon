@@ -1,5 +1,6 @@
 import { CompanionError, Response } from './protocol.ts'
 import { encodeCommand, SerialFrameDecoder } from './web-serial.ts'
+import type { CompanionTransport } from './transport.ts'
 
 export interface CompanionLinkPort extends EventTarget {
   readonly readable: ReadableStream<Uint8Array> | null
@@ -21,7 +22,7 @@ export class SerialLink {
   private readonly onError: (error: CompanionError) => void
   private readonly reading: Promise<void>
   private readonly timeoutMs: number
-  private readonly transport: 'usb' | 'bluetooth'
+  private readonly transport: CompanionTransport
   private pending?: PendingCommand
   private stopped = false
   private closing?: Promise<void>
@@ -31,7 +32,7 @@ export class SerialLink {
     timeoutMs: number,
     onPush: (frame: Uint8Array) => void,
     onError: (error: CompanionError) => void,
-    transport: 'usb' | 'bluetooth' = 'usb',
+    transport: CompanionTransport = 'usb',
   ) {
     if (!port.readable || !port.writable) {
       throw new CompanionError('open-failed', 'The radio connection did not expose both streams.')
@@ -64,7 +65,7 @@ export class SerialLink {
   }
 
   private async read() {
-    const decoder = this.transport === 'usb' ? new SerialFrameDecoder() : null
+    const decoder = this.transport === 'bluetooth' ? null : new SerialFrameDecoder()
     try {
       while (!this.stopped) {
         const { done, value } = await this.reader.read()
@@ -95,7 +96,7 @@ export class SerialLink {
   ): Promise<T> {
     if (this.stopped) return Promise.reject(new CompanionError('disconnected', 'The radio connection is closed.'))
     if (this.pending) return Promise.reject(new CompanionError('protocol', 'A companion command is already pending.'))
-    const packet = this.transport === 'usb' ? encodeCommand(command) : command
+    const packet = this.transport === 'bluetooth' ? command : encodeCommand(command)
 
     return new Promise((resolve, reject) => {
       let written = false
@@ -146,6 +147,17 @@ export class SerialLink {
         this.fail(new CompanionError('serial-io', 'Could not write to the radio.', { cause: error }))
       })
     })
+  }
+
+  async sendWithoutReply(command: Uint8Array) {
+    if (this.stopped) throw new CompanionError('disconnected', 'The radio connection is closed.')
+    if (this.pending) throw new CompanionError('protocol', 'A companion command is already pending.')
+    const packet = this.transport === 'bluetooth' ? command : encodeCommand(command)
+    try {
+      await this.writer.write(packet)
+    } catch (cause) {
+      throw new CompanionError('serial-io', 'Could not confirm delivery of the radio command.', { cause })
+    }
   }
 
   close() {

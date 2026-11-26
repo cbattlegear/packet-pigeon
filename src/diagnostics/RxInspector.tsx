@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { AppPreferences } from '../preferences/appPreferences.ts'
 import { clockFormatter } from '../preferences/appPreferences.ts'
 import type { CompanionSession, CompanionSnapshot } from '../radio/companion-session.ts'
+import { transportName } from '../radio/transport.ts'
 import { decodeRxPacket, packetHex, payloadFields, routeLabel, rxPacketHash, rxPacketPush, typeLabel } from '../radio/rx-packet.ts'
 import type { CapturedPacket } from './rx-log.ts'
 import { matchingChannelObservations, maxRxPackets, redactedDiagnostics } from './rx-log.ts'
@@ -126,7 +127,7 @@ export function RxInspector({ snapshot, session, prefs, locale, pathNodes, mapPa
           onClick={() => void copy(redactedDiagnostics(filtered))}>Copy redacted diagnostics</button>
         <button type="button" disabled={!filtered.length} onClick={exportReport}>Export redacted diagnostics</button>
       </div>
-      <p role="status">{capturing ? `Capturing via ${snapshot.transport === 'bluetooth' ? 'Bluetooth' : 'USB'}.`
+      <p role="status">{capturing && snapshot.transport ? `Capturing via ${transportName(snapshot.transport)}.`
         : captureKey && !currentKey ? 'Capture paused until the selected radio reconnects.'
           : currentKey ? 'Capture stopped.' : 'Connect a radio to capture received packets.'}</p>
       {buffer && currentKey && buffer.key !== currentKey &&
@@ -213,7 +214,7 @@ function PacketDetails({ entry, observations, format, nodes, onMap, close, copyR
     <dl>
       <dt>Received in browser</dt><dd>{format(new Date(time))} <code>{new Date(time).toISOString()}</code></dd>
       <dt>Direction</dt><dd>RX</dd>
-      <dt>Transport</dt><dd>{transport === 'bluetooth' ? 'Bluetooth' : 'USB'}</dd>
+      <dt>Transport</dt><dd>{transportName(transport)}</dd>
       {packet.header && <>
         <dt>Route</dt><dd>{routeLabel(packet.header)}</dd>
         <dt>Payload version</dt><dd>{packet.header.version}</dd>

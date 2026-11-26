@@ -1,4 +1,4 @@
-import type { QueuedMessageLease } from '../radio/companion-session.ts'
+import type { QueuedMessageLease, SyncMaintenanceMessages } from '../radio/companion-session.ts'
 import { CompanionError, Response, decodeQueuedMessage } from '../radio/protocol.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioData, RadioKey, StoredMessage } from '../storage/index.ts'
@@ -9,6 +9,7 @@ type MessageSource = {
 }
 
 type PendingReceipt = { key: RadioKey; message: StoredMessage; release: () => void }
+type MaintenanceSync = { publicKey: string; reserve: () => QueuedMessageLease; signal: AbortSignal }
 type Status = {
   syncing: boolean
   receiptsSaved: number
@@ -108,7 +109,18 @@ export class MessageSync {
     return pending.message.receipt !== undefined
   }
 
-  readonly sync = async () => {
+  readonly sync = () => this.syncMessages()
+
+  readonly syncForMaintenance: SyncMaintenanceMessages = async (publicKey, reserve, signal) => {
+    if (this.status.syncing) throw new Error('Wait for the current message sync before restarting the radio.')
+    signal.throwIfAborted()
+    await this.syncMessages({ publicKey, reserve, signal })
+    if (this.status.error || this.status.pending) {
+      throw new Error(this.status.error ?? 'Save the pending message before restarting the radio.')
+    }
+  }
+
+  private async syncMessages(maintenance?: MaintenanceSync) {
     if (this.status.syncing) return
     ++this.loadVersion
     this.update({ syncing: true, receiptsSaved: 0, error: null })
@@ -119,17 +131,17 @@ export class MessageSync {
         if (!await this.savePending(storage)) throw new Error(unsupportedError)
       }
       const snapshot = this.source.getSnapshot()
-      if (snapshot.phase !== 'ready' || !snapshot.device) {
-        throw new Error('Connect a radio before syncing messages.')
-      }
-      const key = radioKeyFromPublicKey(snapshot.device.publicKey)
+      const publicKey = maintenance?.publicKey ?? (snapshot.phase === 'ready' ? snapshot.device?.publicKey : undefined)
+      if (!publicKey) throw new Error('Connect a radio before syncing messages.')
+      const key = radioKeyFromPublicKey(publicKey)
       this.update({ key, data: null })
       const cached = await storage.read(key)
       if (this.status.key === key) this.update({ data: cached })
       while (true) {
+        maintenance?.signal.throwIfAborted()
         if (!this.cacheReady()) throw new Error('Resolve pending cache writes before syncing messages.')
         const id = crypto.randomUUID()
-        const lease = this.source.reserveQueuedMessage(key)
+        const lease = maintenance ? maintenance.reserve() : this.source.reserveQueuedMessage(key)
         let failed = false
         let requestError: unknown
         let received = false
@@ -164,7 +176,7 @@ export class MessageSync {
     } finally {
       storage?.close()
       this.update({ syncing: false })
-      if (this.status.key) await this.load(this.status.key)
+      if (!maintenance && this.status.key) await this.load(this.status.key)
     }
   }
 }

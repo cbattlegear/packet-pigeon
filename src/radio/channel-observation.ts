@@ -1,4 +1,5 @@
-import { validateChannelScope } from './channel-scope.ts'
+import { regionKey, validateChannelScope } from './channel-scope.ts'
+import type { NamedRegion } from './channel-scope.ts'
 import type { RxPacket } from './rx-packet.ts'
 
 export type ChannelObservation = {
@@ -13,10 +14,9 @@ export type ChannelObservation = {
   region: { kind: 'unknown' | 'unscoped' } | { kind: 'candidates'; names: string[] }
 }
 
-const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true })
 
-export async function createChannelObserver(secret: Uint8Array, regionNames: readonly string[]) {
+export async function createChannelObserver(secret: Uint8Array, regionNames: readonly (string | NamedRegion)[]) {
   if (secret.length !== 16) {
     secret.fill(0)
     throw new Error('The radio returned an invalid channel key.')
@@ -29,15 +29,15 @@ export async function createChannelObserver(secret: Uint8Array, regionNames: rea
       crypto.subtle.digest('SHA-256', keyBytes),
     ])
     const channelHash = new Uint8Array(hash)[0]
-    const names = [...new Set(regionNames.map((name) => {
-      const scope = validateChannelScope({ mode: 'region', name })
+    const scopes = new Map(regionNames.map((region) => {
+      const scope = validateChannelScope(typeof region === 'string' ? { mode: 'region', name: region } : region)
       if (scope.mode !== 'region') throw new Error('Invalid region name.')
-      return scope.name
-    }))].sort()
-    const regions = await Promise.all(names.map(async (name) => {
-      const key = new Uint8Array(await crypto.subtle.digest('SHA-256', encoder.encode(name))).slice(0, 16)
+      return [JSON.stringify(scope), scope]
+    }))
+    const regions = await Promise.all([...scopes.values()].map(async (scope) => {
+      const key = await regionKey(scope)
       try {
-        return { name, key: await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']) }
+        return { name: scope.name, key: await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']) }
       } finally { key.fill(0) }
     }))
 
@@ -83,7 +83,7 @@ export async function createChannelObserver(secret: Uint8Array, regionNames: rea
           const code = raw === 0 ? 1 : raw === 0xffff ? 0xfffe : raw
           return code === transportCodes[0] ? name : null
         }))
-        const matchingNames = matches.filter((name): name is string => name !== null)
+        const matchingNames = [...new Set(matches.filter((name): name is string => name !== null))].sort()
         if (matchingNames.length) region = { kind: 'candidates', names: matchingNames }
       }
       return {

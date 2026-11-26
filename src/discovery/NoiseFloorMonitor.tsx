@@ -5,12 +5,12 @@ type Props = {
   radioKey: string
   active: boolean
   ready: boolean
-  usb: boolean
+  framed: boolean
   firmware: number
   session: Pick<CompanionSession, 'noiseFloor'>
 }
 
-export function NoiseFloorMonitor({ radioKey, active, ready, usb, firmware, session }: Props) {
+export function NoiseFloorMonitor({ radioKey, active, ready, framed, firmware, session }: Props) {
   const [polling, setPolling] = useState(false)
   const [busy, setBusy] = useState(false)
   const [reading, setReading] = useState<{ value: number; time: number } | null>(null)
@@ -53,7 +53,7 @@ export function NoiseFloorMonitor({ radioKey, active, ready, usb, firmware, sess
       Stopping prevents further polls; an in-flight read must finish or time out.</p>
     {!ready ? <p>Connect a radio and finish syncing to read its noise floor.</p>
       : firmware < 8 ? <p>Radio statistics require companion protocol v8 or newer.</p> : null}
-    {supported && !usb && <p>Bluetooth notifications can be split or dropped. Malformed or missing replies stop polling.</p>}
+    {supported && !framed && <p>Bluetooth notifications can be split or dropped. Malformed or missing replies stop polling.</p>}
     <div className="contact-actions">
       <button type="button" disabled={!active || !supported || polling || busy} onClick={() => {
         setError('')

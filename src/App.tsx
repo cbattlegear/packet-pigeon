@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { CompanionSession, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
+import { CompanionSession, detectLanBridge, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
+import { framedTransport } from './radio/transport.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import { MessageSync } from './integration/message-sync.ts'
 import { DirectMessages } from './integration/direct-messages.ts'
@@ -37,6 +38,7 @@ const messageSync = new MessageSync(session, undefined, () => {
 const directMessages = new DirectMessages(session)
 const MapWorkspace = lazy(() => import('./map/MapWorkspace.tsx'))
 const DeviceSettingsPanel = lazy(() => import('./preferences/DeviceSettingsPanel.tsx'))
+const BackupPanel = lazy(() => import('./backup/BackupPanel.tsx'))
 let startupRetention: Promise<number> | undefined
 
 function applyStartupRetention() {
@@ -159,6 +161,7 @@ function App() {
   const knownPathNodes = useMemo(() => [...pathNodes, ...mapPathNodes], [pathNodes, mapPathNodes])
   const usbSupport = getWebSerialSupport()
   const bluetoothSupport = getWebBluetoothSupport()
+  const [lanAvailable, setLanAvailable] = useState(false)
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
   const canDisconnect = ['opening', 'handshake', 'syncing', 'ready', 'reconnecting'].includes(snapshot.phase)
   const controlsDisabled = busy || snapshot.error?.code === 'cleanup-failed'
@@ -168,7 +171,7 @@ function App() {
     opening: 'Opening connection',
     handshake: 'Identifying radio',
     syncing: 'Connected',
-    ready: 'Connected',
+    ready: snapshot.transport === 'lan' ? 'Connected over local network' : 'Connected',
     reconnecting: 'Reconnecting',
     closing: 'Disconnecting',
     error: 'Error',
@@ -181,6 +184,15 @@ function App() {
     : messageStatus.pending || messageStatus.error ? 'Needs attention' : null
   const syncStatus = [radioSyncStatus, receiptSyncStatus].filter(Boolean).join(' · ')
     || (snapshot.phase === 'ready' ? 'Idle' : 'Not syncing')
+
+  useEffect(() => {
+    if (!import.meta.env.PROD) return
+    const probe = new AbortController()
+    void detectLanBridge(probe.signal).then((available) => {
+      if (!probe.signal.aborted) setLanAvailable(available)
+    })
+    return () => probe.abort()
+  }, [])
 
   useEffect(() => {
     const refresh = () => setNotificationPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
@@ -349,6 +361,12 @@ function App() {
                 Connect Bluetooth
               </button>
             )}
+            {!canDisconnect && lanAvailable && (
+              <button type="button" disabled={controlsDisabled} aria-describedby="connection-warning"
+                onClick={() => void session.connectLan()}>
+                Connect local network
+              </button>
+            )}
           </div>
           <p className="connection-warning" id="connection-warning">
             Message sync is manual.
@@ -452,6 +470,14 @@ function App() {
             <Suspense fallback={null}>
               <DeviceSettingsPanel snapshot={snapshot} session={session}
                 radioBusy={messageStatus.syncing || directStatus.activeId !== null} />
+              <BackupPanel snapshot={snapshot} session={session} syncMessages={messageSync.syncForMaintenance}
+                radioBusy={messageStatus.syncing || directStatus.activeId !== null}
+                canPurge={!cacheStatus.saving && cacheStatus.pending === 0 && directStatus.pending === 0 && !messageStatus.pending}
+                onCacheChanged={(key, purged) => {
+                  if (purged) directMessages.forgetSessionDrafts(key)
+                  if (directMessages.getSnapshot().key === key) void directMessages.load(key)
+                  discovery.refresh()
+                }} />
             </Suspense>
             <section className="preferences" aria-label="Companion setup links">
               <h2>Companion setup links</h2>
@@ -511,7 +537,7 @@ function App() {
             <div className="section-pane">
               <div className="pane-heading"><h1>Discovery</h1></div>
               <DiscoveryPanel view={discovery} entries={adverts} radioContacts={radioContacts}
-                connected={discoveryConnected} ready={snapshot.phase === 'ready'} usb={snapshot.transport === 'usb'}
+                connected={discoveryConnected} ready={snapshot.phase === 'ready'} framed={framedTransport(snapshot.transport)}
                 active={activeSection === 'Discovery'} firmware={snapshot.device?.capabilities.firmwareProtocolVersion ?? 0}
                 mapPathNodes={mapPathNodes} onPathMap={showPathOnMap}
                 pending={cacheStatus.pending}

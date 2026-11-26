@@ -18,6 +18,9 @@ import { decodeDirectSent, directMessageCommand, resetPathCommand } from './dire
 import type { DirectSendReceipt } from './direct-message.ts'
 import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort } from './web-bluetooth.ts'
 import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bluetooth.ts'
+import { getLanCompanionUrl } from './lan-bridge.ts'
+import { framedTransport } from './transport.ts'
+import type { CompanionTransport } from './transport.ts'
 import {
   readAdvertPath, readAutoAddPolicy, readNoiseFloor, requestRepeaterDetails, scanNearby, sendNearbyRequest, writeAutoAddPolicy,
 } from './discovery-commands.ts'
@@ -32,6 +35,7 @@ import { requestOwnTelemetry, requestRemoteTelemetry, telemetryProtocolVersion }
 import { repeaterRequest } from './repeater-management.ts'
 import type { RepeaterLogin, RepeaterStatus } from './repeater-management.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
+import type { IdentityRecoveryPreparation } from './identity-backup.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -41,7 +45,7 @@ export interface SyncProgress {
 
 export interface CompanionSnapshot {
   readonly phase: 'idle' | 'choosing' | 'opening' | 'handshake' | 'syncing' | 'ready' | 'reconnecting' | 'closing' | 'error'
-  readonly transport: 'usb' | 'bluetooth' | null
+  readonly transport: CompanionTransport | null
   readonly error: CompanionError | null
   readonly device: CompanionDevice | null
   readonly contacts: readonly CompanionContact[]
@@ -61,21 +65,28 @@ export interface QueuedMessageLease {
   release(): void
 }
 
+export type SyncMaintenanceMessages = (publicKey: string, reserve: () => QueuedMessageLease, signal: AbortSignal) => Promise<void>
+
 interface Attempt {
   link?: SerialLink
   opening?: Promise<SerialLink | null>
   locking?: Promise<void>
   recovering?: boolean
   scopePending?: boolean
+  maintenance?: boolean
 }
 
 type SelectedTransport =
   | { kind: 'usb'; device: CompanionSerialPort }
   | { kind: 'bluetooth'; device: CompanionBluetoothDevice }
+  | { kind: 'lan'; url: string }
 
 interface LockProvider {
   request(name: string, options: { ifAvailable: true }, callback: (lock: unknown | null) => Promise<void>): Promise<void>
 }
+
+// Keep the same ownership lock as existing USB-only tabs.
+const companionOwnershipLock = 'packet-pigeon-usb-session'
 
 const initial: CompanionSnapshot = {
   phase: 'idle', transport: null, error: null, device: null, contacts: [], channels: [], messages: [], progress: null,
@@ -164,7 +175,7 @@ export class CompanionSession {
     if (attempt.link) {
       this.cleanup = attempt.link.close()
     }
-    if (this.expectedKey && (error.code === 'disconnected' || error.code === 'serial-io')) {
+    if (!attempt.maintenance && this.expectedKey && (error.code === 'disconnected' || error.code === 'serial-io')) {
       const generation = this.generation
       this.update({ phase: 'reconnecting', error, progress: null })
       void this.reconnect(generation)
@@ -192,8 +203,7 @@ export class CompanionSession {
     if (!this.locks) throw new CompanionError('ownership', 'This browser cannot safely coordinate radio access between tabs.')
     let resolveAcquired: (acquired: boolean) => void = () => {}
     const acquired = new Promise<boolean>((resolve) => { resolveAcquired = resolve })
-    // Use the same ownership lock as existing USB-only tabs.
-    this.ownership = this.locks.request('packet-pigeon-usb-session', { ifAvailable: true }, async (lock) => {
+    this.ownership = this.locks.request(companionOwnershipLock, { ifAvailable: true }, async (lock) => {
       resolveAcquired(lock !== null)
       if (lock !== null) await new Promise<void>((resolve) => { this.releaseOwnership = resolve })
     })
@@ -230,6 +240,12 @@ export class CompanionSession {
   readonly connectBluetooth = () => this.connectUsing(async () => {
     const device = await chooseBluetoothDevice(this.bluetoothEnvironment ?? browserBluetoothEnvironment())
     return device ? { kind: 'bluetooth', device } : null
+  })
+
+  readonly connectLan = () => this.connectUsing(async () => {
+    const url = getLanCompanionUrl()
+    if (!url) throw new CompanionError('unsupported-transport', 'Open Packet Pigeon from the local companion bridge.')
+    return { kind: 'lan', url }
   })
 
   private async connectUsing(choose: () => Promise<SelectedTransport | null>) {
@@ -277,8 +293,11 @@ export class CompanionSession {
       if (connection.kind === 'usb') {
         await connection.device.open({ baudRate: 115200 })
         port = connection.device
-      } else {
+      } else if (connection.kind === 'bluetooth') {
         port = await openBluetoothPort(connection.device)
+      } else {
+        const { openLanPort } = await import('./web-lan.ts')
+        port = await openLanPort(connection.url)
       }
     } catch (error) {
       if (error instanceof CompanionError && error.code === 'cleanup-failed') {
@@ -334,19 +353,34 @@ export class CompanionSession {
     }
   }
 
+  readonly whileRadioDisconnected = async (work: () => Promise<void>) => {
+    if (this.snapshot.phase !== 'idle' && this.snapshot.phase !== 'error') {
+      throw new Error('Disconnect the radio before clearing its cache.')
+    }
+    if (!this.locks) return work()
+    await this.locks.request(companionOwnershipLock, { ifAvailable: true }, async (lock) => {
+      if (!lock) throw new Error('Disconnect the radio in the other Packet Pigeon tab before clearing the cache.')
+      await work()
+    })
+  }
+
   readonly reserveQueuedMessage = (publicKey: string): QueuedMessageLease => {
     const link = this.attempt?.link
     if (this.snapshot.phase !== 'ready' || !link || this.snapshot.device?.publicKey !== publicKey) {
       throw new CompanionError('disconnected', 'Connect the selected radio before syncing messages.')
-    }
-    if (this.receiptHolds.size) {
-      throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
     }
     if (this.contactWritePending) {
       throw new CompanionError('protocol', 'Wait for the contact change to finish before syncing messages.')
     }
     if (this.directCommandPending) {
       throw new CompanionError('protocol', 'Wait for the direct-message command to finish before syncing messages.')
+    }
+    return this.reserveReceipt(link, publicKey)
+  }
+
+  private reserveReceipt(link: SerialLink, publicKey: string): QueuedMessageLease {
+    if (this.receiptHolds.size) {
+      throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
     }
     const hold = Symbol()
     this.receiptHolds.add(hold)
@@ -482,8 +516,8 @@ export class CompanionSession {
 
   readonly advertPath = (radioKey: string, contactKey: string) => (
     this.runRadioCommand(radioKey, (link) => {
-      if (this.connection?.kind !== 'usb') {
-        throw new CompanionError('unsupported-transport', 'Connect over USB to read an advert path from the radio.')
+      if (!framedTransport(this.snapshot.transport)) {
+        throw new CompanionError('unsupported-transport', 'Connect over USB or the local network to read an advert path from the radio.')
       }
       return readAdvertPath(link, contactKey)
     })
@@ -642,7 +676,7 @@ export class CompanionSession {
     const key = contactPublicKey(contactKey)
     let clockAdvanced = false
     await this.changeContacts(radioKey, async (link) => {
-      if (this.snapshot.transport !== 'usb') throw new Error('Connect over USB to edit radio paths or permissions.')
+      if (!framedTransport(this.snapshot.transport)) throw new Error('Connect over USB or the local network to edit radio paths or permissions.')
       const { frame, since } = await readContactForEdit(link, key)
       if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') throw new Error('The radio disconnected before the edit.')
       await writeContactCommand(link, edit(frame))
@@ -743,7 +777,7 @@ export class CompanionSession {
     const hashes = parseTracePath(text, width)
     signal.throwIfAborted()
     return this.runRadioCommand(radioKey, async (link) => {
-      if (this.snapshot.transport !== 'usb') throw new Error('Connect over USB to trace a multi-hop path.')
+      if (!framedTransport(this.snapshot.transport)) throw new Error('Connect over USB or the local network to trace a multi-hop path.')
       const version = this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0
       if (!contactPingWidth(version, width)) throw new Error('This firmware does not support that trace hash width.')
       const abort = new AbortController()
@@ -1002,6 +1036,187 @@ export class CompanionSession {
     return this.runRadioCommand(radioKey, (link) => readDeviceDetails(link, this.snapshot.device!.capabilities.firmwareProtocolVersion))
   }
 
+  readonly exportDeviceIdentity = async (radioKey: string) => {
+    const { readBackupIdentity } = await import('./identity-backup.ts')
+    return this.runRadioCommand(radioKey, (link) => readBackupIdentity(link, radioKey))
+  }
+
+  readonly exportBackupChannels = async (radioKey: string, signal: AbortSignal) => {
+    const { readBackupChannels } = await import('./backup-commands.ts')
+    return this.runRadioCommand(radioKey, (link) => readBackupChannels(link, this.snapshot.device!.capabilities.maxChannels, signal))
+  }
+
+  readonly exportBackupContacts = (radioKey: string) =>
+    this.runRadioCommand(radioKey, (link) => this.readContacts(link))
+
+  readonly exportBackupDefaultRegion = async (radioKey: string) => {
+    const { readBackupDefaultRegion } = await import('./device-settings.ts')
+    return this.runRadioCommand(radioKey, (link) => this.snapshot.device!.capabilities.firmwareProtocolVersion >= 12
+      ? readBackupDefaultRegion(link) : Promise.resolve(undefined))
+  }
+
+  readonly importBackupDefaultRegion = async (radioKey: string, region: { name: string; key: string } | null) => {
+    const { writeBackupDefaultRegion } = await import('./device-settings.ts')
+    return this.runRadioCommand(radioKey, async (link) => {
+      if (this.snapshot.device!.capabilities.firmwareProtocolVersion < 12) {
+        throw new Error('This firmware does not support setting the default region.')
+      }
+      await writeBackupDefaultRegion(link, region)
+    })
+  }
+
+  readonly importBackupChannels = async (radioKey: string, entries: readonly { name: string; secret: string }[], signal: AbortSignal) => {
+    const { restoreBackupChannels } = await import('./backup-commands.ts')
+    let result: Awaited<ReturnType<typeof restoreBackupChannels>> | undefined
+    try {
+      await this.runRadioCommand(radioKey, async (link) => {
+        const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
+        result = await restoreBackupChannels(link, this.snapshot.device!.capabilities.maxChannels, entries, signal, connected)
+        if (connected()) this.update({ channels: result.channels })
+      })
+    } catch (error) {
+      if (!result) throw error
+    }
+    return result!
+  }
+
+  readonly importBackupContacts = async (radioKey: string, entries: readonly Omit<CompanionContact, 'lastModifiedAt'>[], signal: AbortSignal) => {
+    const { restoreBackupContacts } = await import('./backup-commands.ts')
+    let results: Awaited<ReturnType<typeof restoreBackupContacts>> | undefined
+    try {
+      await this.runRadioCommand(radioKey, async (link) => {
+        const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
+        const { firmwareProtocolVersion: firmware, maxContacts: capacity } = this.snapshot.device!.capabilities
+        results = await restoreBackupContacts(link, entries, signal, { ownKey: radioKey, firmware, capacity, connected,
+          readContacts: () => this.readContacts(link) })
+        if (connected() && results.some(({ status }) => status === 'saved')) {
+          this.update({ contacts: await this.readContacts(link) })
+        }
+      })
+    } catch (error) {
+      if (!results) throw error
+      results.push({ publicKey: '', label: 'Refresh contacts', status: 'failed', reason: 'Reconnect to refresh the saved contacts.' })
+    }
+    return results!
+  }
+
+  private async runMaintenance(radioKey: string, write: (link: SerialLink) => Promise<void>,
+    prepare?: (link: SerialLink) => Promise<void>) {
+    const generation = this.generation
+    let disconnect = false
+    try {
+      await this.runRadioCommand(radioKey, async (link) => {
+        const attempt = this.attempt!
+        if (prepare) await prepare(link)
+        if (this.attempt !== attempt) throw new Error('The radio disconnected before maintenance started.')
+        attempt.maintenance = true
+        disconnect = true
+        try {
+          await write(link)
+        } catch (error) {
+          if (error instanceof CompanionError && error.code === 'device-error') {
+            attempt.maintenance = false
+            disconnect = false
+          }
+          throw error
+        }
+      })
+    } finally {
+      if (disconnect && generation === this.generation) {
+        const closing = this.disconnect()
+        // The UI must be able to report a failed restart while ownership waits for a receipt retry.
+        if (!this.receiptHolds.size) await closing
+      }
+    }
+  }
+
+  readonly prepareIdentityRecovery = async (radioKey: string, syncMessages: SyncMaintenanceMessages, signal: AbortSignal) => {
+    const { maintenanceCommand, readBootTime } = await import('./identity-backup.ts')
+    if ((this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0) < 8) {
+      throw new Error('Identity recovery requires firmware that can verify a reboot before replacing the key.')
+    }
+    let bootTime = 0
+    let preparation: IdentityRecoveryPreparation | undefined
+    try {
+      await this.runMaintenance(radioKey, async (link) => {
+        const requestedAt = performance.now()
+        await link.sendWithoutReply(maintenanceCommand('reboot'))
+        preparation = { radioKey, bootTime, requestedAt }
+      }, async (link) => {
+        bootTime = await readBootTime(link)
+        await syncMessages(radioKey, () => this.reserveReceipt(link, radioKey), signal)
+        signal.throwIfAborted()
+      })
+    } catch (error) {
+      if (!preparation) throw error
+    }
+    return preparation!
+  }
+
+  readonly verifyIdentityRecovery = async (radioKey: string, preparation: IdentityRecoveryPreparation, signal: AbortSignal) => {
+    const { readBootTime, verifyRebootTime } = await import('./identity-backup.ts')
+    if (preparation.radioKey !== radioKey) throw new Error('Reconnect the radio prepared for identity recovery.')
+    const bootTime = await this.runRadioCommand(radioKey, readBootTime)
+    signal.throwIfAborted()
+    verifyRebootTime(preparation, bootTime)
+  }
+
+  readonly restoreDeviceIdentity = async (radioKey: string, key: Uint8Array, expectedPublicKey: string,
+    contacts: readonly Omit<CompanionContact, 'lastModifiedAt'>[], syncMessages: SyncMaintenanceMessages, signal: AbortSignal) => {
+    const { maintenanceCommand, writeBackupIdentity } = await import('./identity-backup.ts')
+    const { restoreContactsAfterIdentity } = await import('./backup-commands.ts')
+    if (radioKey === expectedPublicKey) return []
+    let identitySaved = false
+    let before: readonly CompanionContact[] = []
+    let results: Awaited<ReturnType<typeof restoreContactsAfterIdentity>> = []
+    const unverifiedContacts = { publicKey: '', label: 'Verify contacts', status: 'uncertain' as const,
+      reason: 'Reconnect and verify the radio’s contacts after the identity change.' }
+    try {
+      await this.runMaintenance(radioKey, async (link) => {
+        const { firmwareProtocolVersion: firmware, maxContacts: capacity } = this.snapshot.device!.capabilities
+        await writeBackupIdentity(link, key, expectedPublicKey)
+        identitySaved = true
+        const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
+        try {
+          results = await restoreContactsAfterIdentity(link, before, contacts, signal,
+            { ownKey: expectedPublicKey, firmware, capacity, connected, readContacts: () => this.readContacts(link) },
+            async () => {
+              await syncMessages(expectedPublicKey, () => this.reserveReceipt(link, radioKey), signal)
+              signal.throwIfAborted()
+              await link.sendWithoutReply(maintenanceCommand('reboot'))
+            })
+        } catch {
+          results.push(unverifiedContacts)
+        }
+      }, async (link) => {
+        await syncMessages(radioKey, () => this.reserveReceipt(link, radioKey), signal)
+        before = await this.readContacts(link)
+        signal.throwIfAborted()
+      })
+    } catch (error) {
+      if (!identitySaved) throw error
+      if (!results.length) results.push(unverifiedContacts)
+    }
+    return results
+  }
+
+  readonly sendMaintenance = async (radioKey: string, action: 'reboot' | 'reset') => {
+    const { maintenanceCommand } = await import('./identity-backup.ts')
+    if (action === 'reset' && (this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0) < 7) {
+      throw new Error('This firmware does not expose the factory reset command.')
+    }
+    let submitted = false
+    try {
+      await this.runMaintenance(radioKey, async (link) => {
+        await link.sendWithoutReply(maintenanceCommand(action))
+        submitted = true
+      })
+    } catch (error) {
+      // A reboot or reset can close the connection before the session observes the write result.
+      if (!submitted) throw error
+    }
+  }
+
   readonly saveDevicePreferences = async (radioKey: string, edits: DeviceEdits, advanced: AdvancedDeviceEdits = {}) => {
     const { advancedDeviceOperations, deviceOperations } = await import('./device-settings.ts')
     const results: DeviceSaveResult[] = []
@@ -1151,7 +1366,7 @@ export class CompanionSession {
 
   private async reconnectConnection(): Promise<SelectedTransport | undefined> {
     const current = this.connection
-    if (current?.kind === 'bluetooth') return current
+    if (current && current.kind !== 'usb') return current
     const serial = (this.environment ?? browserSerialEnvironment()).serial
     if (!serial?.getPorts || !current?.device.getInfo) {
       throw new CompanionError('reconnect-failed', 'Automatic reconnection is unavailable. Use Connect USB to reconnect.')
@@ -1177,7 +1392,8 @@ export class CompanionSession {
 
   private async reconnect(generation: number) {
     let lastError = this.snapshot.error
-    const action = this.connection?.kind === 'bluetooth' ? 'Connect Bluetooth' : 'Connect USB'
+    const kind = this.connection?.kind
+    const action = kind === 'lan' ? 'Connect local network' : kind === 'bluetooth' ? 'Connect Bluetooth' : 'Connect USB'
     try {
       await this.cleanup
       for (const delay of this.retryDelays) {
