@@ -24,7 +24,6 @@ export const repeaterCliCommands = [
   { command: 'get lon', description: 'Read stored longitude' },
   { command: 'gps advert', description: 'Read GPS advert policy' },
   { command: 'get owner.info', description: 'Read operator information' },
-  { command: 'get allow.read.only', description: 'Read guest access policy' },
   { command: 'advert', description: 'Send a flood advertisement', confirm: true },
   { command: 'advert.zerohop', description: 'Send a zero-hop advertisement', confirm: true },
 ] as const

@@ -62,6 +62,8 @@ test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   const link = { async request() { writes++; throw new Error('unexpected write') } }
   for (const command of ['get guest.password', 'set guest.password secret', 'get prv.key', 'reboot', 'ver\nadvert',
     'set repeat', 'set repeat true', 'set repeat off\n', 'set repeat off extra',
+    'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off',
+    'set allow.read.only', 'set allow.read.only true', 'set allow.read.only off extra',
     'set name Bad\nreboot', 'set name Bad/Name', `set name ${'x'.repeat(32)}`]) {
     await assert.rejects(sendRepeaterCli(link, key, command, 'AA'), /supported repeater CLI command|name/)
   }

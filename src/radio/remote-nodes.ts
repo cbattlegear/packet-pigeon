@@ -131,6 +131,7 @@ export function parseRoomStatus(payload: Uint8Array) {
 }
 
 export type RemoteNodeAdmin =
+  | { kind: 'read-allow-read-only' }
   | { kind: 'allow-read-only'; enabled: boolean }
   | { kind: 'room-announcement'; text: string }
   | { kind: 'client-permissions'; publicKey: string; permissions: number }
@@ -154,6 +155,7 @@ export function remoteNodeAdminText(action: RemoteNodeAdmin, nodeType: 3 | 4) {
   }
   if (action.kind === 'name') return `set name ${validText(action.value, 31)}`
   if (nodeType !== 3) throw new Error('This action requires a room server.')
+  if (action.kind === 'read-allow-read-only') return 'get allow.read.only'
   if (action.kind === 'allow-read-only') return `set allow.read.only ${action.enabled ? 'on' : 'off'}`
   const prefix = 'room.post '
   return prefix + validText(action.text, Math.min(maxRoomTextBytes, maxDirectTextBytes - prefix.length))
