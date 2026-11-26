@@ -1,0 +1,47 @@
+.preferences {
+  display: grid;
+  gap: 16px;
+  padding: 22px clamp(16px, 3vw, 28px) 28px;
+  max-width: 54rem;
+}
+
+.preferences fieldset {
+  min-width: 0;
+  padding: 12px 16px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.preferences legend {
+  font-weight: 700;
+}
+
+.preference-check {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.preference-field {
+  display: grid;
+  gap: 6px;
+  max-width: 18rem;
+  margin-top: 12px;
+}
+
+.preference-field select {
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.preferences p {
+  color: var(--muted);
+  font-size: 0.875rem;
+}

@@ -1,0 +1,147 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+import { conversations, messageDay, messageVisibility, oldestUnreadReceipt, possibleRepeats, receiptPathDescription, searchMessages, unreadReceipts } from './model.ts'
+
+const details = {
+  type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
+  latitude: 0, longitude: 0, lastModifiedAt: 0,
+}
+const first = '010203040506' + 'aa'.repeat(26)
+const second = '010203040506' + 'bb'.repeat(26)
+const receipt = {
+  kind: 'direct-text', receiptId: 'one', senderKeyPrefix: '010203040506', signatureHex: null,
+  textType: 0, senderTimestamp: 123, text: 'Hello', pathLength: 0, snrDb: null,
+}
+const received = {
+  id: 'one', conversationId: 'direct:010203040506', sender: '010203040506',
+  timestamp: 123000, text: 'Hello', receipt,
+}
+
+test('describes the encoded path hash width without inventing paths or decoding reserved values', () => {
+  assert.equal(receiptPathDescription(0x01), '1 path hop · 1-byte path hashes')
+  assert.equal(receiptPathDescription(0x45), '5 path hops · 2-byte path hashes')
+  assert.equal(receiptPathDescription(0x8a), '10 path hops · 3-byte path hashes')
+  assert.equal(receiptPathDescription(0xff), 'Direct receipt')
+  assert.equal(receiptPathDescription(0xc1), 'Unsupported path metadata')
+  assert.equal(receiptPathDescription(256), 'Unsupported path metadata')
+})
+
+test('joins a uniquely identified sender with its contact and preserves repeated receipts', () => {
+  const data = {
+    contacts: [{ publicKey: first, name: 'Pigeon', details }], channels: [],
+    messages: [received, { ...received, id: 'two', receipt: { ...receipt, receiptId: 'two' } }],
+    drafts: [], preferences: null, contactPreferences: [{ publicKey: first, customName: 'Friend', favorite: false }],
+  }
+  const items = conversations(data)
+  assert.equal(items.length, 1)
+  assert.equal(items[0].title, 'Friend')
+  assert.equal(items[0].recipient, first)
+  assert.deepEqual(items[0].messages.map((message) => message.id), ['one', 'two'])
+  assert.deepEqual([...possibleRepeats(items[0].messages)], ['two'])
+})
+
+test('possible repeats are hidden only on request and remain recoverable', () => {
+  const repeated = { ...received, id: 'two', receipt: { ...receipt, receiptId: 'two', pathLength: 3 } }
+  const distinct = {
+    ...received, id: 'three', timestamp: 124000,
+    receipt: { ...receipt, receiptId: 'three', senderTimestamp: 124 },
+  }
+  const otherSender = {
+    ...received, id: 'four', receipt: { ...receipt, receiptId: 'four', senderKeyPrefix: '0708090a0b0c' },
+  }
+  const messages = [received, repeated, distinct, otherSender]
+  const shown = messageVisibility(messages, false)
+  assert.deepEqual(shown.visible.map(({ id }) => id), ['one', 'two', 'three', 'four'])
+  assert.deepEqual([...shown.repeats], ['two'])
+  assert.deepEqual(messageVisibility(messages, true).visible.map(({ id }) => id), ['one', 'three', 'four'])
+  assert.deepEqual(messageVisibility(messages, false).visible.map(({ id }) => id), ['one', 'two', 'three', 'four'])
+  assert.deepEqual(messages.map(({ id }) => id), ['one', 'two', 'three', 'four'])
+})
+
+test('does not attribute an ambiguous sender or enable sending to colliding contacts', () => {
+  const data = {
+    contacts: [
+      { publicKey: first, name: 'One', details },
+      { publicKey: second, name: 'Two', details },
+    ],
+    channels: [{ index: 0, name: 'Public' }],
+    messages: [
+      received,
+      { id: 'channel', conversationId: 'channel:0', sender: '', timestamp: 124000, text: 'Public message' },
+      { id: 'raw', conversationId: 'unsupported', sender: '', timestamp: null, text: '', rawHex: '5501' },
+    ],
+    drafts: [], preferences: null,
+  }
+  const items = conversations(data)
+  assert.equal(items.find((item) => item.id === `direct:${first}`).recipient, null)
+  assert.equal(items.find((item) => item.id === `direct:${second}`).recipient, null)
+  assert.deepEqual(items.find((item) => item.id === 'direct:010203040506').messages, [received])
+  assert.equal(items.find((item) => item.id === 'channel:0').title, 'Public')
+  assert.equal(items.find((item) => item.id === 'unsupported').messages[0].rawHex, '5501')
+})
+
+test('blocked channel names hide receipts without hiding direct or unattributed messages', () => {
+  const channelReceipt = {
+    kind: 'channel-text', receiptId: 'channel', channelIndex: 0, textType: 0,
+    senderTimestamp: 123, text: 'Alice: hello', pathLength: 0, snrDb: null,
+  }
+  const channel = {
+    id: 'channel', conversationId: 'channel:0', sender: '', timestamp: 123000,
+    text: channelReceipt.text, receipt: channelReceipt,
+  }
+  const unattributed = {
+    ...channel, id: 'unknown', text: 'no prefix',
+    receipt: { ...channelReceipt, receiptId: 'unknown', text: 'no prefix' },
+  }
+  const direct = { ...received, text: 'Alice: direct message' }
+  const data = {
+    contacts: [], channels: [{ index: 0, name: 'Public' }],
+    messages: [channel, unattributed, direct], drafts: [], preferences: null, blockedChannelSenders: ['Alice'],
+  }
+  const items = conversations(data)
+  const conversation = items.find((item) => item.id === 'channel:0')
+  assert.deepEqual(conversation.messages.map(({ id }) => id), ['unknown'])
+  assert.deepEqual(unreadReceipts(conversation.messages, new Set(['unknown'])), [])
+  assert.match(conversation.description, /blocked names are hidden/)
+  assert.equal(items.find((item) => item.id.startsWith('direct:')).messages.length, 1)
+  const restored = conversations({ ...data, blockedChannelSenders: [] })
+    .find((item) => item.id === 'channel:0')
+  assert.deepEqual(restored.messages.map(({ id }) => id), ['channel', 'unknown'])
+  assert.deepEqual(unreadReceipts(restored.messages, new Set(['unknown'])).map(({ id }) => id), ['channel'])
+  assert.equal(data.messages.length, 3)
+})
+
+test('the oldest unread receipt uses the sender timestamp and skips outgoing and read entries', () => {
+  const undated = { ...received, id: 'undated', timestamp: null }
+  const oldest = { ...received, id: 'oldest', timestamp: 100000 }
+  const sent = { ...received, id: 'sent', timestamp: 99000, outgoing: {} }
+  const read = { ...received, id: 'read', timestamp: 98000 }
+  const unread = unreadReceipts([undated, received, oldest, sent, read], new Set([read.id]))
+  assert.deepEqual(unread.map(({ id }) => id), [undated.id, received.id, oldest.id])
+  assert.equal(oldestUnreadReceipt(unread), oldest)
+})
+
+test('orders cached history by time and searches without modifying receipts', () => {
+  const later = { ...received, id: 'later', timestamp: 200000, text: 'Radio Pigeon' }
+  const undated = { ...received, id: 'undated', timestamp: null, text: 'Unknown' }
+  const data = { contacts: [], channels: [], messages: [later, undated, received], drafts: [], preferences: null }
+  const messages = conversations(data)[0].messages
+  assert.deepEqual(messages.map(({ id }) => id), ['one', 'later', 'undated'])
+  assert.deepEqual(searchMessages(messages, ' PIGEON ').map(({ id }) => id), ['later'])
+  assert.deepEqual(searchMessages(messages, ' ').map(({ id }) => id), ['one', 'later', 'undated'])
+  assert.equal(messageDay(null), null)
+  assert.equal(messageDay(Infinity), null)
+  assert.equal(messageDay(new Date(2026, 0, 3, 10).getTime()), messageDay(new Date(2026, 0, 3, 23).getTime()))
+  assert.notEqual(messageDay(new Date(2026, 0, 3).getTime()), messageDay(new Date(2026, 0, 4).getTime()))
+  assert.deepEqual(data.messages.map(({ id }) => id), ['later', 'undated', 'one'])
+})
+
+test('keeps a draft accessible when its contact or channel is no longer cached', () => {
+  const data = {
+    contacts: [], channels: [], messages: [], preferences: null,
+    drafts: [{ conversationId: `direct:${first}`, text: 'Unsent' }, { conversationId: 'channel:3', text: 'Draft' }],
+  }
+  const items = conversations(data)
+  assert.equal(items.find((item) => item.id === `direct:${first}`).recipient, null)
+  assert.equal(items.find((item) => item.id === 'channel:3').channel, null)
+})

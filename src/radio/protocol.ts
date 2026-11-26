@@ -1,17 +1,22 @@
 export const Command = {
   appStart: 1,
+  sendDirect: 2,
+  sendChannel: 3,
   contacts: 4,
   nextMessage: 10,
+  resetPath: 13,
   deviceQuery: 22,
   channel: 31,
 } as const
 
 export const Response = {
+  ok: 0,
   error: 1,
   contactsStart: 2,
   contact: 3,
   contactsEnd: 4,
   selfInfo: 5,
+  sent: 6,
   directText: 7,
   channelText: 8,
   noMoreMessages: 10,
@@ -24,11 +29,14 @@ export const Response = {
 } as const
 
 export const messageWaiting = 0x83
+export const messageAcknowledged = 0x82
 
 export type CompanionErrorCode =
   | 'insecure-context' | 'unsupported-browser' | 'chooser-failed' | 'open-failed'
   | 'disconnected' | 'serial-io' | 'timeout' | 'protocol' | 'device-error'
-  | 'unsupported-firmware'
+  | 'unsupported-firmware' | 'unsupported-transport'
+  | 'ownership' | 'identity' | 'reconnect-failed' | 'cleanup-failed'
+  | 'scope-recovery'
 
 export class CompanionError extends Error {
   readonly code: CompanionErrorCode
@@ -51,11 +59,31 @@ export interface DeviceCapabilities {
   readonly pathHashMode: number | null
 }
 
+export type RadioParameters = {
+  frequencyMHz: number
+  bandwidthKHz: number
+  spreadingFactor: number
+  codingRate: number
+}
+
+export type DevicePreferences = {
+  readonly txPowerDbm: number
+  readonly maxTxPowerDbm: number
+  readonly latitude: number
+  readonly longitude: number
+  readonly advertLocation: boolean | null
+  readonly telemetryPolicy: number | null
+  readonly extraAcknowledgements: boolean | null
+}
+
 export interface CompanionDevice {
   readonly publicKey: string
   readonly name: string
   readonly type: number
+  readonly contactMode: number
   readonly capabilities: DeviceCapabilities
+  readonly preferences: DevicePreferences
+  readonly radioParameters?: RadioParameters
 }
 
 export interface CompanionContact {
@@ -147,12 +175,28 @@ export function decodeCapabilities(frame: Uint8Array): DeviceCapabilities {
 }
 
 export function decodeSelf(frame: Uint8Array, capabilities: DeviceCapabilities): CompanionDevice {
-  view(frame, 58)
+  const data = view(frame, 58)
+  const frequency = data.getUint32(48, true)
+  const bandwidth = data.getUint32(52, true)
   return {
     publicKey: hex(frame.subarray(4, 36)),
     name: text(frame.subarray(58)),
     type: frame[1],
+    contactMode: frame[47],
     capabilities,
+    preferences: {
+      txPowerDbm: data.getInt8(2),
+      maxTxPowerDbm: data.getInt8(3),
+      latitude: data.getInt32(36, true) / 1e6,
+      longitude: data.getInt32(40, true) / 1e6,
+      advertLocation: frame[45] <= 1 ? frame[45] === 1 : null,
+      telemetryPolicy: capabilities.firmwareProtocolVersion >= 5 ? frame[46] : null,
+      extraAcknowledgements: capabilities.firmwareProtocolVersion >= 7 && frame[44] <= 1 ? frame[44] === 1 : null,
+    },
+    ...(frequency > 0 && bandwidth > 0 ? { radioParameters: {
+      frequencyMHz: frequency / 1_000, bandwidthKHz: bandwidth / 1_000,
+      spreadingFactor: frame[56], codingRate: frame[57],
+    } } : {}),
   }
 }
 

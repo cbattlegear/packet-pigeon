@@ -1,0 +1,62 @@
+.device-settings :is(.device-form, .device-fields, .device-advanced, .device-preset, .device-summary) {
+  display: grid;
+  gap: 10px;
+}
+
+.device-settings .device-summary,
+.device-settings .device-fields {
+  grid-template-columns: repeat(auto-fit, minmax(min(10rem, 100%), 1fr));
+}
+
+.device-summary {
+  margin: 0;
+}
+
+.device-summary dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.device-settings :is(.device-actions, .device-form) button {
+  justify-self: start;
+}
+
+.device-settings :is(.device-fields label, .device-preset) {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.device-settings .device-preset {
+  max-width: 25rem;
+}
+
+.device-settings .device-preset + .device-fields {
+  margin-top: 10px;
+}
+
+.device-settings :is(input:not([type='checkbox']), select, button) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.device-settings :is(summary, button:not(:disabled)) {
+  cursor: pointer;
+}
+
+.device-settings :is(.device-advanced, .device-form > button, .device-fields + .device-fields) {
+  margin-top: 10px;
+}
+
+.device-results {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 20px;
+}
