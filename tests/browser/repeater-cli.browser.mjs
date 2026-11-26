@@ -2043,7 +2043,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   }
   await search.fill('bridge')
   assert.equal(await page.getByRole('button', { name: /get bridge\.secret/ }).count(), 0)
-  assert.equal(await page.getByRole('button', { name: /set bridge\.(delay|baud|channel|secret)/ }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: /set bridge\.(baud|channel|secret)/ }).count(), 0)
   for (const [command, description, reply, help] of [
     ['get bridge.type', 'Read compiled bridge type', '> none', 'compiled bridge type, not whether a bridge is enabled or working'],
     ['get bridge.enabled', 'Read bridge enabled preference', '??: bridge.enabled', 'not whether bridge hardware is connected or forwarding'],
@@ -2154,6 +2154,57 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     await sync.click()
     await history.getByText(reply, { exact: true }).waitFor()
     await history.getByText(/does not prove packets were bridged or the setting was saved/).waitFor()
+  }
+  await page.evaluate(() => { window.fixtureUnconfirmed = false })
+  await search.fill('bridge.delay')
+  const beforeDelayForm = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  await page.getByRole('button', { name: 'Open form: Manage repeater bridge' }).click()
+  await bridgeSection.getByText(/Already queued packets retain their scheduled time/).waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeDelayForm)
+  const delayInput = bridgeSection.getByLabel('Bridge inbound delay (0–10000 ms)')
+  const setDelay = bridgeSection.getByRole('button', { name: 'Set bridge inbound delay', exact: true })
+  await delayInput.fill('10001')
+  await setDelay.click()
+  await page.getByRole('alert').getByText('Enter a whole bridge delay from 0 to 10000 milliseconds.').waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeDelayForm)
+  await bridgeSection.getByRole('button', { name: 'Read bridge delay preference' }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'get bridge.delay')
+  await page.evaluate(() => window.queueRepeaterReply('> 500'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'get bridge.delay' }).first()
+    .getByText('> 500', { exact: true }).waitFor()
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 1280, height: 720 })
+  for (const [value, reply] of [['0', 'OK'], ['10000', '??: bridge.delay 10000']]) {
+    const command = `set bridge.delay ${value}`
+    await delayInput.fill(value)
+    const before = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+    const beforeSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+    page.once('dialog', (dialog) => {
+      assert.match(dialog.message(), /Fixture repeater \(bcbcbcbcbcbc\)/)
+      assert.match(dialog.message(), new RegExp(`to ${value} milliseconds`))
+      assert.match(dialog.message(), /Already queued packets retain their scheduled time/)
+      assert.match(dialog.message(), /does not guarantee immediate processing/)
+      assert.match(dialog.message(), /local advert interval below 60 minutes/)
+      void dialog.dismiss()
+    })
+    await setDelay.click()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), before)
+    if (value === '10000') await page.evaluate(() => { window.fixtureUnconfirmed = true })
+    page.once('dialog', (dialog) => dialog.accept())
+    await setDelay.click()
+    assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+      window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), command)
+    const history = page.locator('.repeater-cli-history li').filter({ hasText: command }).first()
+    await history.getByText(value === '10000' ? /Send unconfirmed/ : /Accepted by radio/).waitFor()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), before + 1)
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeSync)
+    await page.evaluate((text) => window.queueRepeaterReply(text), reply)
+    await sync.click()
+    await history.getByText(reply, { exact: true }).waitFor()
+    await history.getByText(/does not prove actual timing or persistence/).waitFor()
   }
   await page.evaluate(() => { window.fixtureUnconfirmed = false })
   await search.fill('gps setloc')

@@ -125,8 +125,23 @@ test('bridge diagnostics are exact read-only queries and exclude secrets and uns
     }
   }
   for (const command of ['get bridge.secret', 'set bridge.secret secret',
-    'set bridge.delay 500', 'set bridge.baud 9600', 'set bridge.channel 1']) {
+    'set bridge.baud 9600', 'set bridge.channel 1']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('bridge inbound delay accepts only bounded whole milliseconds and requires confirmation', () => {
+  for (const value of ['0', '1', '500', '10000']) {
+    const action = repeaterCliCommand(`set bridge.delay ${value}`)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /Already queued packets retain their scheduled time/)
+    assert.match(action.warning, /does not guarantee immediate processing/)
+    assert.match(action.warning, /local advert interval below 60 minutes/)
+    assert.match(action.warning, /delayed command/i)
+  }
+  for (const value of ['', '-1', '+1', '01', '10001', '1.0', '1e2', '999999999999999999',
+    ' 5', '5 ', '5 extra', '5\n', '5\nreboot']) {
+    assert.throws(() => repeaterCliCommand(`set bridge.delay ${value}`), /whole bridge delay/)
   }
 })
 
