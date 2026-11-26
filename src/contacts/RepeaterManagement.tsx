@@ -10,7 +10,7 @@ import type { RepeaterMessageSync } from './RepeaterCli.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
 
 type Props = {
-  session: Pick<CompanionSession, 'manageRepeater' | 'readRepeaterAccessList' | 'sendRepeaterCommand' |
+  session: Pick<CompanionSession, 'manageRepeater' | 'readRepeaterAccessList' | 'readRepeaterNeighbors' | 'sendRepeaterCommand' |
     'hasRememberedRepeaterPassword' | 'forgetRepeaterPassword' | 'resumeRepeater'>
   messageSync: RepeaterMessageSync
   contact: ContactEntry
@@ -26,6 +26,12 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
   const [status, setStatus] = useState<RepeaterStatus | null>(null)
   const [clients, setClients] = useState<{
     entries: Awaited<ReturnType<CompanionSession['readRepeaterAccessList']>>
+    receivedAt: number
+  } | null>(null)
+  const [neighbors, setNeighbors] = useState<{
+    page: Awaited<ReturnType<CompanionSession['readRepeaterNeighbors']>>
+    offset: number
+    previousOffsets: number[]
     receivedAt: number
   } | null>(null)
   const [pending, setPending] = useState(false)
@@ -49,7 +55,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     request.current = controller
     setPending(true)
     setError('')
-    if (operation !== 'status') { setLogin(null); setStatus(null); setClients(null); setRebootNotice('') }
+    if (operation !== 'status') { setLogin(null); setStatus(null); setClients(null); setNeighbors(null); setRebootNotice('') }
     try {
       const currentRoute = { pathLength: details.pathLength, pathHex: details.pathHex }
       const result = operation === 'resume'
@@ -81,6 +87,25 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
       setClients({ entries, receivedAt: Date.now() })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The repeater access-list request failed.')
+    } finally {
+      if (request.current === controller) request.current = null
+      setPending(false)
+    }
+  }
+
+  async function readNeighbors(offset: number, previousOffsets: number[] = []) {
+    if (!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)) return
+    const controller = new AbortController()
+    request.current = controller
+    setPending(true)
+    setError('')
+    setNeighbors(null)
+    try {
+      const page = await session.readRepeaterNeighbors(radioKey, contact.publicKey,
+        { pathLength: details.pathLength, pathHex: details.pathHex }, offset, controller.signal)
+      setNeighbors({ page, offset, previousOffsets, receivedAt: Date.now() })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'The repeater neighbor request failed.')
     } finally {
       if (request.current === controller) request.current = null
       setPending(false)
@@ -130,6 +155,38 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     {login && <p role="status">Login reported {login.role === 'guest-or-legacy' ? 'guest or legacy (admin not confirmed)' : login.role} access;
       the request used {login.route} routing.</p>}
     {login && <button type="button" disabled={!ready || busy || pending || cliPending} onClick={() => void run('status')}>Request status</button>}
+    {login && <details>
+      <summary>Inspect nearby repeater keys</summary>
+      <p>Each page is an explicit request over the mesh, up to three entries ordered by most recently heard.
+        Repeater firmware v1.14.1 supports this request; other builds may not. Entries can be stale or change between
+        pages, causing omissions or duplicates. Discovery responses are unauthenticated, so even a full key does not
+        prove identity; verify it independently before using it. Request tags can repeat after a radio restart,
+        so a delayed reply may be ambiguous.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}
+          onClick={() => void readNeighbors(0)}>Request first neighbor page</button>
+        {neighbors && neighbors.previousOffsets.length > 0 && <button type="button"
+          disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}
+          onClick={() => void readNeighbors(neighbors.previousOffsets.at(-1)!, neighbors.previousOffsets.slice(0, -1))}>
+          Request previous page</button>}
+        {neighbors && neighbors.page.entries.length > 0 &&
+          neighbors.offset + neighbors.page.entries.length < neighbors.page.total &&
+          <button type="button" disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}
+            onClick={() => void readNeighbors(neighbors.offset + neighbors.page.entries.length,
+              [...neighbors.previousOffsets, neighbors.offset])}>Request next page</button>}
+      </div>
+      {neighbors && <div>
+        <p>Reply received <time dateTime={new Date(neighbors.receivedAt).toISOString()}>
+          {new Date(neighbors.receivedAt).toLocaleString()}
+        </time>. Reported total: {neighbors.page.total}; page offset: {neighbors.offset}.
+          Ages are seconds since heard when the repeater generated the reply; the reply may have been delayed.</p>
+        {neighbors.page.entries.length ? <ul className="repeater-neighbor-keys" aria-label="Reported nearby repeater keys">
+          {neighbors.page.entries.map((entry, index) => <li key={`${entry.publicKey}:${index}`}>
+            <code>{entry.publicKey}</code> · {entry.secondsAgo}s · {entry.snrDb} dB
+          </li>)}
+        </ul> : <p>No entries were returned on this page.</p>}
+      </div>}
+    </details>}
     {login?.role === 'admin' && <details>
       <summary>Inspect repeater access</summary>
       <p>Requesting the access list transmits over the mesh. The reply contains six-byte public-key prefixes,
@@ -155,7 +212,8 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
       ready={ready} busy={busy || pending} neighborNodes={neighborNodes} repeaterPosition={contactPosition(details)}
       onMap={onMap} onPending={setCliPending}
       onAccessChange={() => setClients(null)}
-      onReboot={(notice) => { setLogin(null); setStatus(null); setClients(null); setRebootNotice(notice) }} />}
+      onNeighborChange={() => setNeighbors(null)}
+      onReboot={(notice) => { setLogin(null); setStatus(null); setClients(null); setNeighbors(null); setRebootNotice(notice) }} />}
     {rebootNotice && <p role="status">{rebootNotice}</p>}
     {pending && <p role="status">Waiting for the repeater…
       <button type="button" onClick={() => request.current?.abort(new Error('Stopped waiting. A sent request cannot be recalled.'))}>Stop waiting</button>

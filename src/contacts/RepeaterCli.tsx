@@ -29,6 +29,7 @@ type Props = {
   busy: boolean
   onPending: (pending: boolean) => void
   onAccessChange: () => void
+  onNeighborChange: () => void
   onReboot: (notice: string) => void
   neighborNodes: readonly PathNode[]
   repeaterPosition: Coordinates | null
@@ -85,7 +86,7 @@ const managementForms = {
   position: { title: 'Change stored position', terms: 'set lat set lon gps advert location' },
 } as const
 
-export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onReboot,
+export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onNeighborChange, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
   const ownerInfoId = useId()
   const [query, setQuery] = useState('')
@@ -464,7 +465,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     try {
       const command = repeaterRemoveNeighborCommand(neighborKey)
       void send(command.command, `${command.description} for ${command.neighborTarget}`,
-        command.confirm, command.warning, command.command, () => setNeighborKey(''))
+        command.confirm, command.warning, command.command, () => { setNeighborKey(''); onNeighborChange() })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid neighbor public key.')
     }

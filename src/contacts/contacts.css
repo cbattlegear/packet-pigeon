@@ -186,6 +186,10 @@
   overflow-wrap: anywhere;
 }
 
+.repeater-neighbor-keys code {
+  overflow-wrap: anywhere;
+}
+
 .repeater-owner-form {
   display: grid;
   gap: 8px;

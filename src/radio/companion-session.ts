@@ -36,7 +36,7 @@ import { canPostToRoom, maxRoomTextBytes } from './node-access.ts'
 import type { RemoteNodeAccess } from './node-access.ts'
 import type { RemoteNodeAdmin } from './remote-nodes.ts'
 import { decodeSensorSummary } from './cayenne-lpp.ts'
-import { repeaterRequest, UncertainRepeaterRequestError } from './repeater-management.ts'
+import { parseRepeaterNeighborPage, repeaterNeighborRequest, repeaterRequest, UncertainRepeaterRequestError } from './repeater-management.ts'
 import type { RepeaterLogin, RepeaterStatus } from './repeater-management.ts'
 import { allocateRepeaterCliTag, repeaterCliCommand, sendRepeaterCli, UncertainRepeaterCliError } from './repeater-cli.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
@@ -651,9 +651,11 @@ export class CompanionSession {
     })
   }
 
-  readonly readRepeaterAccessList = async (
-    radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string }, signal: AbortSignal,
-  ) => {
+  private async withRepeaterBinaryRequest<T>(
+    radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
+    signal: AbortSignal, kind: 'access list' | 'neighbors',
+    action: (link: SerialLink, key: string, signal: AbortSignal) => Promise<T>,
+  ) {
     const key = contactPublicKey(contactKey)
     if (key === radioKey) throw new Error('Choose a different repeater from the connected radio.')
     signal.throwIfAborted()
@@ -663,8 +665,10 @@ export class CompanionSession {
         throw new Error('A previous reply may arrive late. Reconnect before requesting this operation again.')
       }
       const login = this.repeaterLogin
-      if (!login || login.attempt !== attempt || login.key !== key || login.role !== 'admin') {
-        throw new Error('Log in to this repeater as an administrator before reading its access list.')
+      if (!login || login.attempt !== attempt || login.key !== key || (kind === 'access list' && login.role !== 'admin')) {
+        throw new Error(kind === 'access list'
+          ? 'Log in to this repeater as an administrator before reading its access list.'
+          : 'Log in to this repeater before reading its neighbors.')
       }
       const disconnected = new AbortController()
       const stop = this.subscribe(() => {
@@ -676,16 +680,33 @@ export class CompanionSession {
       try {
         const target = await this.verifiedRepeater(link, radioKey, key, expectedRoute, request)
         if (login.pathLength !== target.pathLength || login.pathHex !== target.pathHex) {
-          throw new Error('The repeater route changed after login. Log in again before reading its access list.')
+          throw new Error(`The repeater route changed after login. Log in again before reading its ${kind}.`)
         }
-        const { parseRemoteNodeClients, requestRemoteNodeData } = await import('./remote-nodes.ts')
-        return parseRemoteNodeClients(await requestRemoteNodeData(link, key, Uint8Array.of(5, 0, 0),
-          this.subscribeToPushes, request, { minimumMs: 10_000, marginMs: 5_000 }))
+        return await action(link, key, request)
       } finally {
         stop()
       }
     })
   }
+
+  readonly readRepeaterAccessList = (
+    radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string }, signal: AbortSignal,
+  ) => this.withRepeaterBinaryRequest(radioKey, contactKey, expectedRoute, signal, 'access list',
+    async (link, key, request) => {
+      const { parseRemoteNodeClients, requestRemoteNodeData } = await import('./remote-nodes.ts')
+      return parseRemoteNodeClients(await requestRemoteNodeData(link, key, Uint8Array.of(5, 0, 0),
+        this.subscribeToPushes, request, { minimumMs: 10_000, marginMs: 5_000 }))
+    })
+
+  readonly readRepeaterNeighbors = (
+    radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
+    offset: number, signal: AbortSignal,
+  ) => this.withRepeaterBinaryRequest(radioKey, contactKey, expectedRoute, signal, 'neighbors',
+    async (link, key, request) => {
+      const { requestRemoteNodeData } = await import('./remote-nodes.ts')
+      return parseRepeaterNeighborPage(await requestRemoteNodeData(link, key, repeaterNeighborRequest(offset),
+        this.subscribeToPushes, request, { minimumMs: 10_000, marginMs: 5_000 }), offset)
+    })
 
   readonly sendRepeaterCommand = async (
     radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
