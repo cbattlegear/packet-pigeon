@@ -124,9 +124,25 @@ test('bridge diagnostics are exact read-only queries and exclude secrets and uns
       assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
     }
   }
-  for (const command of ['get bridge.secret', 'set bridge.secret secret',
-    'set bridge.baud 9600']) {
+  for (const command of ['get bridge.secret', 'set bridge.secret secret']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('RS-232 bridge baud accepts only bounded whole rates and requires confirmation', () => {
+  for (const value of ['9600', '19200', '57601', '115200']) {
+    const action = repeaterCliCommand(`set bridge.baud ${value}`)
+    assert.equal(action.command, `set bridge.baud ${value}`)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /peer baud rate/)
+    assert.match(action.warning, /local recovery/)
+    assert.match(action.warning, /partial received frames/)
+    assert.match(action.warning, /local advert interval below 60 minutes/)
+    assert.match(action.warning, /delayed command/i)
+  }
+  for (const value of ['', '0', '9599', '115201', '-9600', '+9600', '09600', '9600.0', '1e4',
+    '999999999999999999999', ' 9600', '9600 ', '9600 extra', '9600\n', '9600\nreboot']) {
+    assert.throws(() => repeaterCliCommand(`set bridge.baud ${value}`), /whole RS-232 bridge baud rate/)
   }
 })
 

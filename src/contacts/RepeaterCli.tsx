@@ -10,7 +10,7 @@ import {
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
   repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning, repeaterTempRadioWarning,
-  repeaterClockCommand, repeaterClockWarning, repeaterBridgeDelayWarning, repeaterBridgeChannelWarning, isRepeaterRebootCommand,
+  repeaterClockCommand, repeaterClockWarning, repeaterBridgeDelayWarning, repeaterBridgeChannelWarning, repeaterBridgeBaudWarning, isRepeaterRebootCommand,
   UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -117,6 +117,7 @@ const managementForms = {
   packetLog: { title: 'Manage repeater packet log', terms: 'log start stop erase logging packet diagnostics' },
   bridge: { title: 'Manage repeater bridge', terms: 'get bridge.type get bridge.enabled set bridge.enabled on off get bridge.source set bridge.source rx tx logRx logTx get bridge.delay set bridge.delay' },
   bridgeChannel: { title: 'Change ESP-NOW bridge channel', terms: 'get bridge.channel set bridge.channel wifi wireless peer' },
+  bridgeBaud: { title: 'Change RS-232 bridge baud rate', terms: 'get bridge.baud set bridge.baud serial uart peer' },
   advertInterval: { title: 'Change advertisement interval', terms: 'set advert.interval set flood.advert.interval' },
   removeAccess: { title: 'Remove repeater access-list entry', terms: 'setperm acl permissions' },
   limitedAccess: { title: 'Set non-admin repeater client role', terms: 'setperm acl permissions read-only read-write' },
@@ -145,6 +146,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [interferenceThreshold, setInterferenceThreshold] = useState('')
   const [bridgeDelay, setBridgeDelay] = useState('')
   const [bridgeChannel, setBridgeChannel] = useState('')
+  const [bridgeBaud, setBridgeBaud] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [radioFrequency, setRadioFrequency] = useState('')
@@ -238,7 +240,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       ? 'No reply is expected on repeater v1.14.1. Log in again when the repeater is available; a delayed clock reset and reboot may still arrive. Read and set the clock separately using a trusted time.'
       : 'No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.'
     const target = reboots || command.startsWith('log ') || command.startsWith('set bridge.enabled ') ||
-      command.startsWith('set bridge.source ') || command.startsWith('set bridge.delay ') || command.startsWith('set bridge.channel ')
+      command.startsWith('set bridge.source ') || command.startsWith('set bridge.delay ') ||
+      command.startsWith('set bridge.channel ') || command.startsWith('set bridge.baud ')
       ? `${name} (${contactKey.slice(0, 12)})` : name
     if (confirmed) {
       if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
@@ -463,6 +466,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       void send(command.command, `${command.description} to ${bridgeChannel}`, true, repeaterBridgeChannelWarning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid ESP-NOW bridge channel.')
+    }
+  }
+
+  function submitBridgeBaud(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set bridge.baud ${bridgeBaud}`)
+      void send(command.command, `${command.description} to ${bridgeBaud}`, true, repeaterBridgeBaudWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid RS-232 bridge baud rate.')
     }
   }
 
@@ -1245,6 +1259,28 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set ESP-NOW bridge channel</button>
       </form>
     </details>
+    <details data-cli-section="bridgeBaud">
+      <summary>{managementForms.bridgeBaud.title}</summary>
+      <p>Changing this rate can interrupt bridge traffic, routes and remote access. Check the peer baud rate, device support
+        and a local recovery method first; acceptance does not guarantee the hardware or peer supports the rate.
+        This control accepts whole rates from 9600 to 115200, the default v1.14.1 firmware range.
+        Customized builds can use a different maximum; firmware and RS-232 build support vary.</p>
+      <p>In repeater v1.14.1, a running bridge immediately attempts to restart its serial interface; a stopped bridge is not
+        started. In-flight data may be lost, and partial received frames may remain across the restart. Saving can fail and
+        also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent.
+        An OK reply or matching preference does not prove the interface or peer is working or the setting was saved.
+        Commands and replies may arrive late.</p>
+      <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+        onClick={() => void send('get bridge.baud', 'Read RS-232 bridge baud preference', false)}>Read RS-232 bridge baud rate</button>
+      <form className="contact-actions" onSubmit={submitBridgeBaud}>
+        <label>RS-232 bridge baud rate (9600–115200)
+          <input type="text" inputMode="numeric" required value={bridgeBaud}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setBridgeBaud(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set RS-232 bridge baud rate</button>
+      </form>
+    </details>
     <details data-cli-section="advertInterval">
       <summary>{managementForms.advertInterval.title}</summary>
       <p>Changing an interval affects future transmissions. Use 0 to disable. Local intervals are even minutes
@@ -1486,6 +1522,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
               a delayed command may still change it later.</p>}
           {item.command.startsWith('set bridge.channel ') && item.reply !== null &&
             <p className="contact-status">A reply does not prove the channel was applied, a peer is connected, or the setting was saved.
+              Read the preference separately; a delayed command may still change it later.</p>}
+          {item.command.startsWith('set bridge.baud ') && item.reply !== null &&
+            <p className="contact-status">A reply does not prove the interface or peer is working or the setting was saved.
               Read the preference separately; a delayed command may still change it later.</p>}
           {item.command === 'sensor get gps' && item.reply !== null &&
             <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.

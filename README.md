@@ -634,8 +634,19 @@ v1.14.1, a running bridge turns Wi-Fi off before attempting an immediate restart
 a stopped bridge is not started. Restart or saving can fail, and the same
 advert-save side effect applies. Replies or matching preference read-back do
 not prove application, peer connectivity or persistence. Commands and replies
-may arrive late, and firmware and build support vary. Other bridge changes and
-secret queries are not offered.
+may arrive late, and firmware and build support vary.
+The separately confirmed **Change RS-232 bridge baud rate** control accepts
+whole rates from 9600 to 115200, the default v1.14.1 range. Customized builds
+may use a different maximum. Check peer rate, device support and local
+recovery first: an accepted rate does not guarantee hardware or peer support,
+and a mismatch can interrupt bridge traffic and remote access. In v1.14.1, a
+running bridge immediately attempts to restart its serial interface; a stopped
+bridge is not started. In-flight data may be lost and partial received frames
+may remain across restart. Saving can fail and has the advert-save side effect
+above. Replies or matching preference read-back do not prove the interface or
+peer is working or the setting was saved. Commands and replies may arrive late,
+and firmware and RS-232 build support vary. Other bridge changes and secret
+queries are not offered.
 Administrators can explicitly read and confirm changes to repeater radio
 preferences (frequency, bandwidth, spreading factor and coding rate). Check
 the board, local regulations, channel plan and recovery method first: changing
