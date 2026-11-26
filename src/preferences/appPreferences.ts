@@ -14,12 +14,17 @@ export type AppPreferences = {
   chatPreviews: boolean
   pathMetadata: boolean
   regionMetadata: boolean
+  syncedMessageAlerts: boolean
+  discoveredContactAlerts: boolean
+  fullStorageAlerts: boolean
 }
 
 export const defaultPreferences: AppPreferences = {
   appearance: 'system', language: 'system', clock: 'system',
   saveDrafts: true, oldestUnread: false, keepScreenOn: false, composerAutofocus: false,
   chatPreviews: true, pathMetadata: true, regionMetadata: true,
+  syncedMessageAlerts: false,
+  discoveredContactAlerts: false, fullStorageAlerts: false,
 }
 
 export function parseAppPreferences(json: string | null): AppPreferences {
@@ -48,6 +53,9 @@ export function parseAppPreferences(json: string | null): AppPreferences {
       chatPreviews: enabled('chatPreviews'),
       pathMetadata: enabled('pathMetadata'),
       regionMetadata: enabled('regionMetadata'),
+      syncedMessageAlerts: enabled('syncedMessageAlerts'),
+      discoveredContactAlerts: enabled('discoveredContactAlerts'),
+      fullStorageAlerts: enabled('fullStorageAlerts'),
     }
   } catch {
     return defaultPreferences

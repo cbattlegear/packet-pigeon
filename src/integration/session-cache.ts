@@ -1,7 +1,7 @@
 import type { CompanionMessage, CompanionPush, CompanionSnapshot } from '../radio/index.ts'
 import { decodeAdvert } from '../radio/discovery-commands.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
-import type { RadioKey, RadioUpdate, StoredMessage } from '../storage/index.ts'
+import type { RadioKey, RadioUpdate, StoredDiscovery, StoredMessage } from '../storage/index.ts'
 import { storedContact } from './contact-record.ts'
 
 type SessionSource = {
@@ -38,6 +38,7 @@ function storedMessage(message: CompanionMessage): StoredMessage {
 export class SessionCache {
   private readonly events = new EventTarget()
   private readonly queue: PendingUpdate[] = []
+  private readonly discoveryListeners = new Set<(key: RadioKey, discovery: StoredDiscovery) => void>()
   private readonly seenReceipts = new Set<string>()
   private readonly openStorage: typeof openRadioStorage
   private storage?: Awaited<ReturnType<typeof openRadioStorage>>
@@ -73,6 +74,11 @@ export class SessionCache {
   }
 
   readonly getSnapshot = () => this.status
+
+  readonly subscribeToDiscoveries = (listener: (key: RadioKey, discovery: StoredDiscovery) => void) => {
+    this.discoveryListeners.add(listener)
+    return () => { this.discoveryListeners.delete(listener) }
+  }
 
   private setStatus(update: Partial<CacheStatus>) {
     this.status = { ...this.status, ...update }
@@ -141,9 +147,15 @@ export class SessionCache {
       this.storage ??= await this.openStorage()
       while (this.queue.length) {
         const { key, update, completion } = this.queue[0]
+        const discovery = update.discovery?.upsert?.[0]
+        const previous = discovery ? await this.storage.read(key) : null
         await this.storage.update(key, update)
         this.queue.shift()
         this.setStatus({ pending: this.queue.length })
+        if (discovery && !previous?.contacts.some((contact) => contact.publicKey === discovery.publicKey)
+          && !previous?.discoveries?.some((entry) => entry.publicKey === discovery.publicKey)) {
+          for (const listener of this.discoveryListeners) listener(key, discovery)
+        }
         completion?.resolve()
       }
       this.setStatus({ saving: false })

@@ -21,6 +21,15 @@ export function channelMentionNames(contacts: readonly StoredContact[], messages
 
 export type ChannelTextPart = { kind: 'text'; text: string } | { kind: 'mention'; name: string }
 
+export function channelMessageBody(message: StoredMessage) {
+  const sender = channelSender(message)
+  return sender ? message.text.slice(sender.length + 2) : message.text
+}
+
+export function isSelfMention(name: string, ownName: string | null) {
+  return ownName !== null && name.localeCompare(ownName, undefined, { sensitivity: 'accent' }) === 0
+}
+
 export function channelTextParts(text: string): ChannelTextPart[] {
   const parts: ChannelTextPart[] = []
   let end = 0

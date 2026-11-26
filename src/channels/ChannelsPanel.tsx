@@ -28,9 +28,12 @@ type Props = {
   messageSyncing: boolean
   onBlockedSendersChanged: (key: RadioKey) => void
   onImport?: () => void
+  radioNavigation?: { key: RadioKey; sequence: number } | null
+  onRadioNavigationHandled?: () => void
 }
 
-export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSyncing, onBlockedSendersChanged, onImport }: Props) {
+export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSyncing, onBlockedSendersChanged, onImport,
+  radioNavigation, onRadioNavigationHandled }: Props) {
   const live = snapshot.phase === 'ready' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [choice, setChoice] = useState('')
@@ -46,6 +49,12 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
   const [kind, setKind] = useState<'private' | 'join' | 'public' | 'hashtag'>('private')
   const key = liveKey ?? choice
   if (share && share.key !== liveKey) setShare(null)
+
+  useEffect(() => {
+    if (!radioNavigation) return
+    setChoice(radioNavigation.key)
+    onRadioNavigationHandled?.()
+  }, [radioNavigation, onRadioNavigationHandled])
 
   useEffect(() => {
     let active = true
@@ -177,6 +186,7 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
       setError('Choose a valid retention period.')
       return
     }
+
     if (option.days !== null && !window.confirm(
       `At startup, cached messages in "${channel.name}" older than ${option.label} will be permanently deleted using sender-provided timestamps. Continue?`,
     )) return
@@ -194,6 +204,23 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
       setStatus('Retention saved. Cleanup runs when the app starts.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save channel retention.')
+    } finally { setBusy(false) }
+  }
+
+  async function setNotification(channel: StoredChannel, mode: string) {
+    if (!key || !cacheLoaded || busy || (mode !== 'all' && mode !== 'mentions' && mode !== 'muted')) return
+    const radioKey = radioKeyFromPublicKey(key)
+    setBusy(true); setError(''); setStatus('')
+    try {
+      const storage = await openRadioStorage()
+      try {
+        await storage.update(radioKey, { channelNotification: { index: channel.index, channelName: channel.name, mode } })
+        const data = await storage.read(radioKey)
+        setCached((current) => current?.key === radioKey ? { key: radioKey, data } : current)
+      } finally { storage.close() }
+      setStatus('Notification mode saved for this browser and radio.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not save notification mode.')
     } finally { setBusy(false) }
   }
 
@@ -282,6 +309,8 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
         const paused = retention && (retention.paused || retention.channelName !== channel.name)
         const retentionValue = paused ? 'paused' : retention ? String(retention.days) : 'forever'
         const channelCached = cachedData?.channels.some((entry) => entry.index === channel.index && entry.name === channel.name)
+        const notification = cachedData?.channelNotifications?.find((entry) => entry.index === channel.index)
+        const notificationPaused = notification && (notification.paused || notification.channelName !== channel.name)
         return <li key={channel.index}>
           <div><strong>{channel.name}</strong> <span>Slot {channel.index}</span></div>
           <form onSubmit={(event) => {
@@ -299,6 +328,15 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
               disabled={!channelCached || !validRetention || busy} onChange={(event) => void setRetention(channel, event.currentTarget.value)}>
               {paused && <option value="paused" disabled>Paused: slot name changed</option>}
               {retentionChoices.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label>Browser alerts
+            <select aria-label={`Browser alerts for ${channel.name}`} value={notificationPaused ? 'paused' : notification?.mode ?? 'all'}
+              disabled={!channelCached || busy} onChange={(event) => void setNotification(channel, event.currentTarget.value)}>
+              {notificationPaused && <option value="paused" disabled>Paused: slot changed</option>}
+              <option value="all">All messages</option>
+              <option value="mentions">Mentions only</option>
+              <option value="muted">Muted</option>
             </select>
           </label>
           {paused && <p>Retention is paused because this slot changed names. Choose a setting for this channel.</p>}
@@ -356,7 +394,8 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
       <button type="submit" disabled={!live || busy}>Save channel</button>
     </form>
     <p>Renaming keeps the existing key; hashtag channels cannot be renamed. Reusing a slot can associate its old cached messages with the new channel.</p>
-    <p>Notification modes are not available yet. Sending scopes do not change the radio&apos;s saved default region.</p>
+    <p>Browser alert modes apply to manually synced messages while this app is open. Mentions match the radio name without regard to case; names are unverified. A removed slot or changed slot name pauses alerts until a mode is chosen. A replacement with the same name without an observed removal cannot be distinguished.</p>
+    <p>Sending scopes do not change the radio&apos;s saved default region.</p>
   </div>
 }
 

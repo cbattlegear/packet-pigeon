@@ -182,8 +182,7 @@ Incoming sender names are unverified and can be impersonated. A reply adds a
 name mention and a short quoted preview while keeping the existing draft. Use
 **Mention a name** to insert a saved contact or observed sender name, or type
 `@[name]` directly. Names containing `]` cannot be used by the reply or
-mention picker. Mentions are plain text, not verified identities, and this app
-does not notify on them. Copy, local deletion and blocking a sender name do not
+mention picker. Mentions are plain text, not verified identities. Copy, local deletion and blocking a sender name do not
 affect other devices. A possible-repeat filter retains the individual receipts,
 which may represent distinct messages. Matching channel receipts also show a count
 and, when enabled, their reported path lengths and signal readings, including
@@ -233,6 +232,23 @@ Turn off **Save draft edits between visits** to keep new edits in the current
 tab's memory. Previously saved drafts remain in the radio cache. **Keep screen
 on** uses the browser's Screen Wake Lock API while the tab is visible and
 depends on browser and device support.
+
+Browser notifications are opt-in in Settings and require browser permission.
+They alert for direct and channel text saved during manual message sync while
+the app remains open, not after closure or through background push. The Channels
+page offers all, mentions-only and muted modes per radio and channel. Mentions
+match the connected radio's name without regard to case and are not authenticated. Direct
+conversations can also be muted from their chat pane; this applies to any
+senders sharing their 12-character key prefix. Visible, focused conversations
+and already-read or possible-repeat receipts do not alert;
+possible repeats can be distinct messages. Clicking an alert opens its chat.
+Slot removals and name changes pause a saved mode until it is chosen again;
+same-name replacement channels cannot be detected without an observed removal.
+Alert previews contain message text.
+Optional discovered-contact alerts cover newly cached USB adverts, not BLE
+adverts or previously known contacts. Optional full-storage alerts use the
+connected radio's reported contact and channel counts and capacities. Room-server
+messages and their notifications require the unimplemented room workflows (#24).
 
 ## Sharing and companion setup
 

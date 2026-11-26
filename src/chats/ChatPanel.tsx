@@ -18,10 +18,10 @@ import { ComposerTools } from '../sharing/ComposerTools.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { conversations, correlateChannelObservations, matchingChannelReceipts, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
+import { channelMentionNames, channelMessageBody, channelReply, channelTextParts, insertChannelMention, isSelfMention, mentionableName } from './mentions.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
 import { contactPosition } from '../contacts/model.ts'
-import { channelMentionNames, channelReply, channelTextParts, insertChannelMention, mentionableName } from './mentions.ts'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
@@ -42,6 +42,8 @@ type Props = {
   mapPathNodes?: readonly PathNode[]
   onPathMap?: (path: MapPath) => void
   mapPosition?: Coordinates | null
+  navigationRequest?: { key: RadioKey; id: string; sequence: number } | null
+  onActiveConversation?: (key: RadioKey | null, id: string | null) => void
 }
 
 type ChatDisplay = {
@@ -66,7 +68,8 @@ function errorText(error: unknown) {
 }
 
 export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving,
-  active, preferences, locale, readChannelKey, observationSource, mapPosition, pathNodes, mapPathNodes = [], onPathMap }: Props) {
+  active, preferences, locale, readChannelKey, observationSource, mapPosition, navigationRequest, onActiveConversation,
+  pathNodes, mapPathNodes = [], onPathMap }: Props) {
   const live = (snapshot.phase === 'ready' || snapshot.phase === 'syncing') && snapshot.device
     ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
   const last = snapshot.device ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
@@ -88,6 +91,17 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
       : null
   const ownContact = snapshot.device && last === radioKey
     ? contactShareLink(snapshot.device.name, snapshot.device.publicKey, snapshot.device.type) : null
+
+  useEffect(() => {
+    if (!navigationRequest) return
+    setOfflineChoice(navigationRequest.key)
+    setSelection({ key: navigationRequest.key, id: navigationRequest.id })
+  }, [navigationRequest])
+
+  useLayoutEffect(() => {
+    onActiveConversation?.(active ? radioKey : null, active ? selected?.id ?? null : null)
+    return () => onActiveConversation?.(null, null)
+  }, [active, radioKey, selected?.id, onActiveConversation])
 
   useEffect(() => {
     let active = true
@@ -234,12 +248,13 @@ function ConversationPane({ radioKey, data, selected, direct, status, senderName
   }
   return <ConversationView key={`${radioKey}:${selected.id}`} conversation={selected}
     radioKey={radioKey} options={data.directSendOptions ?? defaultOptions} direct={direct} status={status}
-    senderName={senderName} display={display} />
+    senderName={senderName} display={display} muted={data.mutedDirectConversations?.includes(selected.id.slice(0, 19)) ?? false} />
 }
 
 type ConversationProps = {
   conversation: Conversation
   radioKey: RadioKey
+  muted: boolean
   options: DirectSendOptions
   direct: DirectMessages
   status: DirectStatus
@@ -266,11 +281,12 @@ const idleObservation = { phase: 'idle' as const, error: null, dropped: 0, evict
 const noSubscription = () => () => {}
 const noObservation = () => idleObservation
 
-function ConversationView({ conversation, radioKey, options, direct, status, senderName, display }: ConversationProps) {
+function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted }: ConversationProps) {
   const { active, preferences, read, formatTime, ownContact, contacts, channels, readChannelKey, mapPosition,
     observationSource, canObserve, regionNames, pathNodes, onPathMap } = display
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
+  const [savingNotification, setSavingNotification] = useState(false)
   const [readError, setReadError] = useState('')
   const [hideRepeats, setHideRepeats] = useState(false)
   const [mentionName, setMentionName] = useState('')
@@ -477,6 +493,27 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
           receipt.pathLength !== 0xff && (receipt.pathLength & 63) > 0) &&
           <span>Saved receipts report hop count and hash width. For full paths, review live channel observations or packets captured in <a href="#diagnostics">Diagnostics</a>.</span>}
         {isChannel && <span>Radio acceptance does not confirm delivery. Live packet matches are best effort.</span>}
+        {conversation.id.startsWith('direct:') && <label>Browser alerts
+          <select aria-label={`Browser alerts for ${conversation.title}`} value={muted ? 'muted' : 'all'}
+            disabled={savingNotification} onChange={(event) => {
+              const muted = event.currentTarget.value === 'muted'
+              setSavingNotification(true)
+              void (async () => {
+                try {
+                  const storage = await openRadioStorage()
+                  try { await storage.update(radioKey, { directNotification: { conversationId: conversation.id, muted } }) }
+                  finally { storage.close() }
+                  await direct.load(radioKey)
+                  setActionError('')
+                } catch (error) {
+                  setActionError(errorText(error))
+                } finally { setSavingNotification(false) }
+              })()
+            }}>
+            <option value="all">All messages</option><option value="muted">Muted</option>
+          </select>
+        </label>}
+        {conversation.id.startsWith('direct:') && <span>Mute applies to senders sharing this 12-character key prefix.</span>}
       </div>
       {isChannel && observer && <div className="chat-observation">
         <div className="chat-observation-actions">
@@ -514,7 +551,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
         }}>
           {visible.map((message) => {
             const sender = channelSender(message)
-            const body = sender ? message.text.slice(sender.length + 2) : message.text
+            const body = channelMessageBody(message)
             const matches = channelMatches.get(message.id)
             const correlation = correlations.get(message.id)
             return (
@@ -609,7 +646,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             onChange={(event) => updateDraft(event.currentTarget.value)} />
           {isChannel && <details className="chat-mention-picker" ref={mentionPicker}>
             <summary>Mention a name</summary>
-            <p>Mentions are plain text. Names are unverified and can be impersonated. This app does not notify on mentions.</p>
+            <p>Mentions are plain text. Names are unverified and can be impersonated. Browser alerts depend on your notification settings.</p>
             {mentionNames.length ? <div className="chat-mention-choice">
               <label>Name to mention
                 <select value={selectedMention} onChange={(event) => setMentionName(event.currentTarget.value)}>
@@ -640,7 +677,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
 function ChannelMessageText({ text, ownName }: { text: string; ownName: string | null }) {
   return channelTextParts(text).map((part, index) => {
     if (part.kind === 'text') return part.text
-    const self = ownName !== null && part.name.localeCompare(ownName, undefined, { sensitivity: 'accent' }) === 0
+    const self = isSelfMention(part.name, ownName)
     return <span key={index} className={self ? 'chat-mention chat-mention--self' : 'chat-mention'}
       title={self ? 'Matches this radio name; names are not verified.' : 'Mention uses an unverified name.'}>
       @[{part.name}]

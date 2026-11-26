@@ -19,9 +19,10 @@ type Props = {
   saveFailed: boolean
   update: <K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) => void
   wake: { supported: boolean; status: string }
+  notifications: { permission: NotificationPermission | 'unsupported'; error: string; request: () => void }
 }
 
-export function PreferencesPanel({ preferences, saveFailed, update, wake }: Props) {
+export function PreferencesPanel({ preferences, saveFailed, update, wake, notifications }: Props) {
   return (
     <section className="preferences" aria-label="App preferences">
       <fieldset>
@@ -54,6 +55,28 @@ export function PreferencesPanel({ preferences, saveFailed, update, wake }: Prop
             {clockOptions.map((option) => <option key={option} value={option}>{clockLabels[option]}</option>)}
           </select>
         </div>
+      </fieldset>
+      <fieldset>
+        <legend>Browser notifications</legend>
+        <p>Alerts are available only while this app is open. Messages arrive when you manually sync; there is no push or background delivery.</p>
+        <p role="status">Permission: {notifications.permission}. {notifications.permission === 'denied' && 'Change notification permission in your browser site settings.'}</p>
+        <button type="button" disabled={notifications.permission !== 'default'} onClick={notifications.request}>Allow browser notifications</button>
+        <label className="preference-check">
+          <input type="checkbox" checked={preferences.syncedMessageAlerts}
+            onChange={(event) => update('syncedMessageAlerts', event.currentTarget.checked)} />
+          Alert for synced messages
+        </label>
+        <label className="preference-check">
+          <input type="checkbox" checked={preferences.discoveredContactAlerts}
+            onChange={(event) => update('discoveredContactAlerts', event.currentTarget.checked)} />
+          Alert for newly discovered contacts (USB)
+        </label>
+        <label className="preference-check">
+          <input type="checkbox" checked={preferences.fullStorageAlerts}
+            onChange={(event) => update('fullStorageAlerts', event.currentTarget.checked)} />
+          Alert when radio contact or channel storage is full
+        </label>
+        {notifications.error && <p role="alert">{notifications.error}</p>}
       </fieldset>
       <fieldset>
         <legend>Messaging</legend>

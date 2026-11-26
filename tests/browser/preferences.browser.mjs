@@ -19,6 +19,182 @@ after(async () => {
   await server?.close()
 })
 
+test('notification permission and per-channel mode persist independently', async (t) => {
+  const context = await browser.newContext()
+  t.after(() => context.close())
+  await context.addInitScript(() => {
+    class MockNotification {
+      static permission = 'default'
+      static async requestPermission() { MockNotification.permission = 'granted'; return 'granted' }
+    }
+    window.Notification = MockNotification
+  })
+  const page = await context.newPage()
+  const radio = 'ab'.repeat(32)
+  await page.goto(`${url}#settings`)
+  await page.getByRole('button', { name: 'Allow browser notifications' }).click()
+  await page.getByText('Permission: granted.').waitFor()
+  await page.getByLabel('Alert for synced messages').check()
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { await storage.update(radioKeyFromPublicKey(radio), { channels: [{ index: 0, name: 'Public' }] }) }
+    finally { storage.close() }
+  }, radio)
+  await page.getByRole('link', { name: 'Channels' }).click()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await page.getByLabel('Browser alerts for Public').selectOption('mentions')
+  await page.getByText('Notification mode saved for this browser and radio.').waitFor()
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  assert.equal(await page.getByLabel('Browser alerts for Public').inputValue(), 'mentions')
+  await page.getByRole('link', { name: 'Settings' }).click()
+  assert.equal(await page.getByLabel('Alert for synced messages').isChecked(), true)
+})
+
+test('a saved synced message alerts once and opens its conversation', async (t) => {
+  const context = await browser.newContext()
+  t.after(() => context.close())
+  await context.addInitScript(() => {
+    class MockNotification {
+      static permission = 'granted'
+      constructor(title, options) { this.title = title; this.options = options; window.alerts.push(this) }
+      close() {}
+    }
+    window.alerts = []
+    window.Notification = MockNotification
+    const encoder = new TextEncoder()
+    const settings = new Uint8Array(60)
+    settings.set([5, 1]); settings.fill(0xab, 4, 36); settings.set(encoder.encode('Me'), 58)
+    const capability = new Uint8Array(82)
+    capability.set([13, 14, 20, 1])
+    const slot = new Uint8Array(50)
+    slot.set([18, 0]); slot.set(encoder.encode('Public'), 2)
+    let controller
+    let remaining = 2
+    const port = new EventTarget()
+    const emit = (bytes) => controller.enqueue(Uint8Array.of(0x3e, bytes.length, 0, ...bytes))
+    Object.assign(port, {
+      readable: new ReadableStream({ start(stream) { controller = stream } }),
+      writable: new WritableStream({ write(frame) {
+        const command = frame[3]
+        if (command === 22) emit(capability)
+        else if (command === 1) emit(settings)
+        else if (command === 4) { emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]) }
+        else if (command === 31) emit(slot)
+        else if (command === 10) emit(remaining-- > 0
+          ? [7, 1, 2, 3, 4, 5, 6, 0, 0, 42, 0, 0, 0, 104, 105] : [10])
+        else throw Error(`Unexpected command ${command}`)
+      } }),
+      async open() {}, async close() {},
+    })
+    Object.defineProperty(navigator, 'serial', { value: { async requestPort() { return port } } })
+  })
+  const page = await context.newPage()
+  page.setDefaultTimeout(8000)
+  await page.goto(`${url}#settings`)
+  await page.getByLabel('Alert for synced messages').check()
+  await page.getByRole('button', { name: 'Connect USB' }).click()
+  await page.getByRole('link', { name: 'Chats' }).click()
+  const sync = page.getByRole('button', { name: 'Sync messages' })
+  await sync.waitFor()
+  await page.waitForFunction(() => !Array.from(document.querySelectorAll('button'))
+    .find((button) => button.textContent === 'Sync messages')?.disabled)
+  await sync.click()
+  await page.waitForFunction(() => window.alerts.length === 1)
+  await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
+    .some((button) => button.textContent === 'Sync messages'))
+  assert.equal(await page.evaluate(() => window.alerts.length), 1)
+  await page.evaluate(() => window.alerts[0].onclick())
+  await page.getByRole('region', { name: /Conversation with Unknown contact 010203040506/ }).waitFor()
+  await page.getByLabel('Browser alerts for Unknown contact 010203040506').selectOption('muted')
+  await page.waitForFunction(async () => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey('ab'.repeat(32))))?.mutedDirectConversations?.includes('direct:010203040506') }
+    finally { storage.close() }
+  })
+})
+
+test('discovery and full-storage alerts retain their radio across a switch and offline navigation', async (t) => {
+  const context = await browser.newContext()
+  t.after(() => context.close())
+  await context.addInitScript(() => {
+    class MockNotification {
+      static permission = 'granted'
+      constructor(title, options) { this.title = title; this.options = options; window.alerts.push(this) }
+      close() {}
+    }
+    window.alerts = []
+    window.Notification = MockNotification
+    const encoder = new TextEncoder()
+    let selected = 0
+    function makePort(byte) {
+      const settings = new Uint8Array(60)
+      settings.set([5, 1]); settings.fill(byte, 4, 36); settings.set(encoder.encode('Me'), 58)
+      const capability = new Uint8Array(82)
+      capability.set([13, 14, 1, 1])
+      const slot = new Uint8Array(50)
+      slot.set([18, 0]); slot.set(encoder.encode('Public'), 2)
+      const contact = (value) => {
+        const frame = new Uint8Array(148)
+        frame[0] = 3; frame.fill(value, 1, 33); frame[33] = 1; frame[35] = 255
+        frame.set(encoder.encode(`Contact ${value}`), 100)
+        return frame
+      }
+      let controller
+      const emit = (bytes) => controller.enqueue(Uint8Array.of(0x3e, bytes.length, 0, ...bytes))
+      const port = new EventTarget()
+      window.emitDiscovery = () => emit(Uint8Array.of(0x80, ...new Uint8Array(32).fill(0xef)))
+      Object.assign(port, {
+        readable: new ReadableStream({ start(stream) { controller = stream } }),
+        writable: new WritableStream({ write(frame) {
+          if (frame[3] === 22) emit(capability)
+          else if (frame[3] === 1) emit(settings)
+          else if (frame[3] === 4) {
+            emit([2, 2, 0, 0, 0]); emit(contact(1)); emit(contact(2)); emit([4, 0, 0, 0, 0])
+          } else if (frame[3] === 31) emit(slot)
+          else throw Error(`Unexpected command ${frame[3]}`)
+        } }),
+        async open() {}, async close() {},
+      })
+      return port
+    }
+    Object.defineProperty(navigator, 'serial', {
+      value: { async requestPort() { return makePort(selected++ === 0 ? 0xab : 0xcd) } },
+    })
+  })
+  const page = await context.newPage()
+  page.setDefaultTimeout(10000)
+  await page.goto(`${url}#settings`)
+  await page.getByLabel('Alert for newly discovered contacts (USB)').check()
+  await page.getByLabel('Alert when radio contact or channel storage is full').check()
+  await page.getByRole('button', { name: 'Connect USB' }).click()
+  await page.waitForFunction(() => window.alerts.filter((entry) => entry.options.tag.includes('ab'.repeat(32))).length === 2)
+  await page.evaluate(() => window.emitDiscovery())
+  await page.waitForFunction(() => window.alerts.filter((entry) => entry.options.tag.includes('ab'.repeat(32))).length === 3)
+  await page.getByRole('button', { name: 'Disconnect' }).click()
+  await page.getByRole('button', { name: 'Connect USB' }).click()
+  await page.waitForFunction(() => window.alerts.some((entry) => entry.options.tag.includes('cd'.repeat(32))))
+  for (const kind of ['discovery', 'full:' + 'ab'.repeat(32) + ':contacts', 'full:' + 'ab'.repeat(32) + ':channels']) {
+    await page.evaluate((kind) => window.alerts.find((entry) =>
+      entry.options.tag.includes('ab'.repeat(32)) && entry.options.tag.includes(kind)).onclick(), kind)
+    await page.getByRole('alert').filter({ hasText: 'The alert belongs to a different radio' }).first().waitFor()
+    assert.equal(new URL(page.url()).hash, '#settings')
+  }
+  await page.getByRole('button', { name: 'Disconnect' }).click()
+  for (const [kind, label] of [['discovery', 'Discovery cache radio'], ['contacts', 'Cached radio'], ['channels', 'Cached radio']]) {
+    await page.evaluate((kind) => window.alerts.find((entry) => entry.options.tag.includes('ab'.repeat(32))
+      && (kind === 'discovery' ? entry.options.tag.includes('discovery') : entry.options.tag.endsWith(`:${kind}`))).onclick(), kind)
+    const radio = page.getByRole('combobox', { name: label })
+    await radio.waitFor()
+    await page.waitForFunction(({ label }) => Array.from(document.querySelectorAll('select'))
+      .some((element) => (element.getAttribute('aria-label') === label || element.closest('label')?.textContent.includes(label))
+        && element.value === 'ab'.repeat(32)), { label })
+    assert.equal(await radio.inputValue(), 'ab'.repeat(32))
+  }
+})
+
 test('matching channel receipts remain inspectable when possible repeats are hidden', async (t) => {
   const context = await browser.newContext({ viewport: { width: 1260, height: 900 } })
   t.after(() => context.close())

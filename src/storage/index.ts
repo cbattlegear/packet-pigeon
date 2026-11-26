@@ -30,6 +30,8 @@ export type StoredChannel = {
 export type ChannelRetentionDays = 1 | 7 | 30 | 90
 export type ChannelRetention = { index: number; channelName: string; days: ChannelRetentionDays; paused?: boolean }
 export type ChannelScopeSetting = { index: number; channelName: string; scope: ChannelScope; paused?: boolean }
+export type ChannelNotificationMode = 'all' | 'mentions' | 'muted'
+export type ChannelNotification = { index: number; channelName: string; mode: ChannelNotificationMode; paused?: boolean }
 
 export type ContactPreference = { publicKey: string; customName: string | null; favorite: boolean }
 export type ContactPreferenceEdit = { publicKey: string; customName?: string | null; favorite?: boolean }
@@ -124,6 +126,8 @@ export type RadioData = {
   channelScopes?: ChannelScopeSetting[]
   blockedChannelSenders?: string[]
   channelRetention?: ChannelRetention[]
+  channelNotifications?: ChannelNotification[]
+  mutedDirectConversations?: string[]
   contacts: StoredContact[]
   channels: StoredChannel[]
   messages: StoredMessage[]
@@ -144,6 +148,8 @@ export type RadioUpdate = {
   resetChannelScopes?: true
   blockedChannelSender?: { name: string; blocked: boolean }
   channelRetention?: { index: number; channelName: string; days: ChannelRetentionDays | null }
+  channelNotification?: { index: number; channelName: string; mode: ChannelNotificationMode }
+  directNotification?: { conversationId: string; muted: boolean }
   channelRetentionRename?: { index: number; from: string; to: string }
   resetChannelRetention?: true
   contacts?: readonly StoredContact[]
@@ -207,6 +213,11 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   }
   if (channels) {
     next.channels = channels.map(({ index, name }) => ({ index, name }))
+    if (next.channelNotifications) {
+      const slots = new Map(next.channels.map(({ index, name }) => [index, name]))
+      next.channelNotifications = next.channelNotifications.map((entry) =>
+        slots.get(entry.index) !== entry.channelName ? { ...entry, paused: true } : entry)
+    }
     if (next.channelRetention) {
       const slots = new Map(next.channels.map(({ index, name }) => [index, name]))
       next.channelRetention = next.channelRetention.filter(({ index }) => slots.has(index)).map((entry) =>
@@ -218,6 +229,24 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
       next.channelScopes = next.channelScopes.filter(({ index }) => slots.has(index)).map((entry) =>
         slots.get(entry.index) !== entry.channelName ? { ...entry, paused: true } : entry)
     }
+  }
+  if (update.channelNotification) {
+    const { index, channelName, mode } = update.channelNotification
+    if (!validChannelIndex(index) || !['all', 'mentions', 'muted'].includes(mode)
+      || !next.channels.some((channel) => channel.index === index && channel.name === channelName)) {
+      throw new RadioStorageError('update', 'The channel or notification setting changed. Refresh the channel list and retry.')
+    }
+    next.channelNotifications = (next.channelNotifications ?? []).filter((entry) => entry.index !== index)
+    next.channelNotifications.push({ index, channelName, mode })
+  }
+  if (update.directNotification) {
+    const { conversationId, muted } = update.directNotification
+    if (!/^direct:(?:[\da-f]{12}|[\da-f]{64})$/.test(conversationId) || typeof muted !== 'boolean') {
+      throw new RadioStorageError('update', 'Invalid direct conversation notification setting.')
+    }
+    const prefix = conversationId.slice(0, 'direct:'.length + 12)
+    next.mutedDirectConversations = (next.mutedDirectConversations ?? []).filter((id) => id !== prefix)
+    if (muted) next.mutedDirectConversations.push(prefix)
   }
   if (update.channelScope) {
     const { index, channelName } = update.channelScope

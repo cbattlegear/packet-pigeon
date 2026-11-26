@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanionSession, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import { MessageSync } from './integration/message-sync.ts'
@@ -20,10 +20,12 @@ import { useScreenWakeLock } from './preferences/use-screen-wake-lock.ts'
 import { ImportShare, ShareCode } from './sharing/ShareDialogs.tsx'
 import { formatCompanionSetup } from './sharing/setupLink.ts'
 import { RxInspector } from './diagnostics/RxInspector.tsx'
+import { openRadioStorage, radioKeyFromPublicKey } from './storage/index.ts'
+import type { RadioKey } from './storage/index.ts'
+import { messageAlert } from './chats/notification.ts'
 import { TraceWorkspace } from './paths/TraceWorkspace.tsx'
 import type { MapPath } from './paths/model.ts'
 import { contactPosition, contactRole } from './contacts/model.ts'
-import { openRadioStorage } from './storage/index.ts'
 
 const session = new CompanionSession()
 const cache = new SessionCache(session)
@@ -78,6 +80,18 @@ function StateMessage({ kind, title, description }: StateMessageProps) {
 
 function App() {
   const settings = useAppPreferences()
+  const activeChat = useRef<{ key: RadioKey | null; id: string | null }>({ key: null, id: null })
+  const [navigationRequest, setNavigationRequest] = useState<{ key: RadioKey; id: string; sequence: number } | null>(null)
+  const [radioNavigation, setRadioNavigation] = useState<{ key: RadioKey; section: 'Contacts' | 'Channels'; sequence: number } | null>(null)
+  const navigationSequence = useRef(0)
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
+    () => typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
+  )
+  const [notificationError, setNotificationError] = useState('')
+  const fullStorageNotified = useRef(new Set<string>())
+  const setActiveChat = useCallback((key: RadioKey | null, id: string | null) => {
+    activeChat.current = { key, id }
+  }, [])
   const wake = useScreenWakeLock(settings.preferences.keepScreenOn)
   const [retention, setRetention] = useState<{ checking: boolean; removed: number; error: string | null }>({
     checking: true, removed: 0, error: null,
@@ -107,6 +121,25 @@ function App() {
   const discoveryConnected = snapshot.phase === 'syncing' || snapshot.phase === 'ready'
   const discovery = useRadioDiscoveries(snapshot.device?.publicKey, discoveryConnected,
     hasOpenedDiscovery || hasOpenedMap || hasOpenedDiagnostics || hasOpenedContacts, cacheStatus.saving)
+  const selectDiscoveryRadio = discovery.selectRadio
+  const clearRadioNavigation = useCallback(() => setRadioNavigation(null), [])
+  const navigateRadioAlert = useCallback((key: RadioKey, section: 'Chats' | 'Discovery' | 'Contacts' | 'Channels', id?: string) => {
+    const current = session.getSnapshot()
+    if (['choosing', 'opening', 'handshake', 'reconnecting', 'closing'].includes(current.phase)
+      || (['ready', 'syncing'].includes(current.phase) && current.device?.publicKey.toLowerCase() !== key)) {
+      setNotificationError('The alert belongs to a different radio or a connection is changing. Disconnect or finish connecting, then open the alert again.')
+      window.focus()
+      return false
+    }
+    setNotificationError('')
+    const sequence = ++navigationSequence.current
+    if (section === 'Chats' && id) setNavigationRequest({ key, id, sequence })
+    if (section === 'Discovery') selectDiscoveryRadio(key)
+    if (section === 'Contacts' || section === 'Channels') setRadioNavigation({ key, section, sequence })
+    window.location.hash = section.toLowerCase()
+    window.focus()
+    return true
+  }, [selectDiscoveryRadio])
   const radioContacts = useMemo(() => snapshot.contacts.map(storedContact), [snapshot.contacts])
   const adverts = useMemo(() => discoveryEntries(discovery.data,
     discoveryConnected && snapshot.progress?.stage !== 'contacts' ? radioContacts : undefined),
@@ -142,6 +175,81 @@ function App() {
   const syncStatus = progress
     ? `${progress.stage}: ${progress.completed}${progress.total === null ? '' : ` / ${progress.total}`}`
     : snapshot.phase === 'syncing' ? 'Syncing' : snapshot.phase === 'ready' ? 'Idle' : 'Not syncing'
+
+  useEffect(() => {
+    const refresh = () => setNotificationPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [])
+
+  useEffect(() => messageSync.subscribeToSavedReceipts((key, message, data) => {
+    if (!settings.preferences.syncedMessageAlerts || typeof Notification === 'undefined'
+      || Notification.permission !== 'granted') return
+    const alert = messageAlert(data, message, snapshot.device?.publicKey.toLowerCase() === key ? snapshot.device.name : '')
+    if (!alert || (!document.hidden && document.hasFocus()
+      && activeChat.current.key === key && activeChat.current.id === alert.conversationId)) return
+    try {
+      const notification = new Notification(`Packet Pigeon: ${alert.title}`, { body: message.text, tag: `packet-pigeon:${key}:${message.id}` })
+      notification.onclick = () => {
+        if (navigateRadioAlert(key, 'Chats', alert.conversationId)) notification.close()
+      }
+    } catch (error) {
+      setNotificationError(error instanceof Error ? `Could not show browser notification: ${error.message}` : 'Could not show browser notification.')
+    }
+  }), [settings.preferences.syncedMessageAlerts, snapshot.device, navigateRadioAlert])
+
+  useEffect(() => cache.subscribeToDiscoveries((key, discovery) => {
+    if (!settings.preferences.discoveredContactAlerts || typeof Notification === 'undefined'
+      || Notification.permission !== 'granted') return
+    try {
+      const notification = new Notification('Packet Pigeon: New discovered contact', {
+        body: discovery.name || discovery.publicKey.slice(0, 12),
+        tag: `packet-pigeon:discovery:${key}:${discovery.publicKey}`,
+      })
+      notification.onclick = () => {
+        if (navigateRadioAlert(key, 'Discovery')) notification.close()
+      }
+    } catch (error) {
+      setNotificationError(error instanceof Error ? `Could not show browser notification: ${error.message}` : 'Could not show browser notification.')
+    }
+  }), [settings.preferences.discoveredContactAlerts, navigateRadioAlert])
+
+  useEffect(() => {
+    if (snapshot.phase !== 'ready' || !snapshot.device) return
+    const key = radioKeyFromPublicKey(snapshot.device.publicKey)
+    const capacities = [
+      ['contacts', snapshot.contacts.length, snapshot.device.capabilities.maxContacts],
+      ['channels', snapshot.channels.length, snapshot.device.capabilities.maxChannels],
+    ] as const
+    for (const [kind, count, limit] of capacities) {
+      const id = `${key}:${kind}`
+      if (!limit || count < limit) {
+        fullStorageNotified.current.delete(id)
+      } else if (settings.preferences.fullStorageAlerts && typeof Notification !== 'undefined'
+        && Notification.permission === 'granted' && !fullStorageNotified.current.has(id)) {
+        try {
+          const notification = new Notification(`Packet Pigeon: Radio ${kind} full`, {
+            body: `The connected radio reports ${count} of ${limit} ${kind} slots used.`,
+            tag: `packet-pigeon:full:${id}`,
+          })
+          notification.onclick = () => {
+            if (navigateRadioAlert(key, kind === 'contacts' ? 'Contacts' : 'Channels')) notification.close()
+          }
+          fullStorageNotified.current.add(id)
+        } catch (error) {
+          setNotificationError(error instanceof Error ? `Could not show browser notification: ${error.message}` : 'Could not show browser notification.')
+        }
+      }
+    }
+  }, [settings.preferences.fullStorageAlerts, snapshot, navigateRadioAlert])
+
+  function requestNotifications() {
+    if (typeof Notification === 'undefined') return
+    void Notification.requestPermission().then((permission) => {
+      setNotificationPermission(permission)
+      setNotificationError('')
+    }, (error: unknown) => setNotificationError(error instanceof Error ? error.message : 'Could not request notification permission.'))
+  }
 
   useEffect(() => {
     let active = true
@@ -264,7 +372,7 @@ function App() {
 
       <main className="main-content" id="main-content" tabIndex={-1}>
         {(!usbSupport.supported || !bluetoothSupport.supported || snapshot.error || retention.error || retention.removed > 0
-          || cacheStatus.error || messageStatus.error || messageStatus.pending || directStatus.error) && (
+          || cacheStatus.error || messageStatus.error || messageStatus.pending || directStatus.error || notificationError) && (
           <div className="notices">
             {retention.error && <p role="alert">Channel retention could not finish: {retention.error} Check the radio cache and channel settings, then reload to retry.</p>}
             {retention.removed > 0 && <p role="status">Channel retention removed {retention.removed} cached message{retention.removed === 1 ? '' : 's'}.</p>}
@@ -272,6 +380,7 @@ function App() {
             {!bluetoothSupport.supported && <p role="status">{bluetoothSupport.error.message}</p>}
             {snapshot.error && <p role="alert">{snapshot.error.message}</p>}
             {messageStatus.error && <p role="alert">Message sync: {messageStatus.error}</p>}
+            {notificationError && <p role="alert">{notificationError}</p>}
             {directStatus.error && (
               <div role="alert">
                 <p>Messages: {directStatus.error}</p>
@@ -305,6 +414,7 @@ function App() {
             active={activeSection === 'Chats'} preferences={settings.preferences} locale={settings.locale}
             mapPosition={sharePosition}
             observationSource={session}
+            navigationRequest={navigationRequest} onActiveConversation={setActiveChat}
             pathNodes={knownPathNodes} mapPathNodes={mapPathNodes} onPathMap={showPathOnMap}
             readChannelKey={(key, channel) => session.readChannelShareKey(key, channel.index, channel.name)} />
         </div>
@@ -320,7 +430,8 @@ function App() {
         {activeSection === 'Settings' && (
           <div className="section-pane">
             <div className="pane-heading"><h1>Settings</h1></div>
-            <PreferencesPanel preferences={settings.preferences} saveFailed={settings.saveFailed} update={settings.update} wake={wake} />
+            <PreferencesPanel preferences={settings.preferences} saveFailed={settings.saveFailed} update={settings.update} wake={wake}
+              notifications={{ permission: notificationPermission, error: notificationError, request: requestNotifications }} />
             <section className="preferences" aria-label="Companion setup links">
               <h2>Companion setup links</h2>
               <div className="share-actions">
@@ -348,6 +459,7 @@ function App() {
           <div className="section-pane">
             <div className="pane-heading"><h1>Channels</h1></div>
             <ChannelsPanel snapshot={snapshot} session={session} cache={cache} cacheSaving={cacheStatus.saving} messageSyncing={messageStatus.syncing}
+              radioNavigation={radioNavigation?.section === 'Channels' ? radioNavigation : null} onRadioNavigationHandled={clearRadioNavigation}
               onImport={() => setShareDialog({ kind: 'import' })}
               onBlockedSendersChanged={(key) => {
                 if (directMessages.getSnapshot().key === key) void directMessages.load(key)
@@ -359,6 +471,7 @@ function App() {
             <div className="section-pane">
               <div className="pane-heading"><h1>Contacts</h1><a href="#discovery">Browse discovered adverts</a></div>
               <ContactsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving}
+                radioNavigation={radioNavigation?.section === 'Contacts' ? radioNavigation : null} onRadioNavigationHandled={clearRadioNavigation}
                 messageSyncing={messageStatus.syncing} messageSending={directStatus.activeId !== null}
                 onImport={() => setShareDialog({ kind: 'import' })}
                 onShare={(link) => setShareDialog({ kind: 'export', link })}

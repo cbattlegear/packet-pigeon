@@ -25,6 +25,8 @@ type ContactsProps = {
   onMap: (position: Coordinates, terrain: boolean) => void
   onImport?: () => void
   onShare?: (link: string) => void
+  radioNavigation?: { key: RadioKey; sequence: number } | null
+  onRadioNavigationHandled?: () => void
   onPathMap?: (path: MapPath) => void
   mapPathNodes?: readonly PathNode[]
   discoveredHops?: readonly PathNode[]
@@ -67,7 +69,7 @@ function exportContacts(contacts: readonly ContactEntry[]) {
 }
 
 export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare,
-  onPathMap, mapPathNodes, discoveredHops, discoveredRadio }: ContactsProps) {
+  radioNavigation, onRadioNavigationHandled, onPathMap, mapPathNodes, discoveredHops, discoveredRadio }: ContactsProps) {
   const live = snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [offlineChoice, setOfflineChoice] = useState<RadioKey | '' | null>(null)
@@ -88,6 +90,12 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
       ? discoveredHops : discoveryPathNodes(discoveryEntries(data))),
     ...(mapPathNodes ?? []),
   ], [data, discoveredHops, discoveredRadio, mapPathNodes, radioKey])
+
+  useEffect(() => {
+    if (!radioNavigation) return
+    setOfflineChoice(radioNavigation.key)
+    onRadioNavigationHandled?.()
+  }, [radioNavigation, onRadioNavigationHandled])
 
   useEffect(() => {
     let active = true
