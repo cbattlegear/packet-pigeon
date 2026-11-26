@@ -742,6 +742,17 @@ The confirmed `reboot` command may interrupt mesh traffic and normally sends no
 reply; acceptance by the radio does not prove execution. The app clears the
 reported access and status after an accepted or unconfirmed reboot. Log in again
 when the repeater is available; a delayed reboot may still arrive over the mesh.
+For clock recovery, the separately confirmed `clkreboot` action attempts to
+set the repeater clock back to 2024-05-15 10:52:31 UTC and then reboot on
+v1.14.1. This can disrupt time-sensitive messages, advertisements and access,
+interrupt traffic, lose unsaved access-list or region changes, and cancel
+temporary radio overrides. Have a local recovery method available. Firmware
+and clock hardware can behave differently; the reset may not persist and GPS or
+another administrator may change the clock again. Acceptance does not prove
+execution; no reply is expected on v1.14.1, and a delayed command may still
+arrive. The app clears reported access and status after accepted or unconfirmed
+dispatch. Log in again, then explicitly read and set the clock using a trusted
+time; neither is automatic.
 Use `get repeat` to check forwarding before changing it. Disabling forwarding
 can disrupt mesh routes and some firmware also stops responding to discovery
 requests. Position edits change one coordinate at a time; current values can be

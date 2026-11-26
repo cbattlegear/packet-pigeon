@@ -32,6 +32,19 @@ test('manual UTC clock setting validates calendar and firmware timestamp bounds'
   }
 })
 
+test('clock recovery reboot is exact and confirmation-gated', () => {
+  const action = repeaterCliCommand('clkreboot')
+  assert.equal(action.confirm, true)
+  assert.match(action.warning, /2024-05-15 10:52:31 UTC/)
+  assert.match(action.warning, /move the clock backwards/)
+  assert.match(action.warning, /lose unsaved access-list or region changes/)
+  assert.match(action.warning, /local recovery method/)
+  assert.match(action.warning, /delayed command may still arrive/)
+  for (const command of ['clkreboot ', 'clkreboot now', 'clkreboot\n', 'clkreboot\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('CLI queries use the repeater text type and a tagged command', async () => {
   let command
   const link = { async request(bytes, receive) {
