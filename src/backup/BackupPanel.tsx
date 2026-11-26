@@ -208,9 +208,11 @@ export default function BackupPanel({ snapshot, session, radioBusy, canPurge, on
     if (!key || !knownCache || !offline || !canPurge ||
       !confirmKey(`Permanently clear this browser’s cache for radio ${selectedLabel}? The radio itself keeps its data.`)) return
     void run(async () => {
-      const storage = await openRadioStorage()
-      try { await storage.purge(key) }
-      finally { storage.close() }
+      await session.whileRadioDisconnected(async () => {
+        const storage = await openRadioStorage()
+        try { await storage.purge(key) }
+        finally { storage.close() }
+      })
       onCacheChanged(key, true)
       setRevision((value) => value + 1)
       setNotice('Cleared the selected radio’s browser cache.')

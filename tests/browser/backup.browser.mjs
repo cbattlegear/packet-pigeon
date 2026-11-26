@@ -189,6 +189,40 @@ test('backs up selected settings, restores data and identity, and guards mainten
   await reset.click()
   await panel.getByText('Radio command sent. Reconnect to verify the result.', { exact: true }).waitFor()
   assert.equal(await page.evaluate(() => window.backupCommands.includes(51)), true)
+
+  const archive = page.waitForEvent('download')
+  page.once('dialog', (dialog) => dialog.accept())
+  await panel.getByRole('button', { name: 'Download local chat archive' }).click()
+  const archiveJson = JSON.parse(await readFile(await (await archive).path(), 'utf8'))
+  assert.equal(archiveJson.format, 'packet-pigeon-chat-archive')
+  assert.equal(archiveJson.public_key, target.publicKey)
+  assert.equal(Object.hasOwn(archiveJson, 'private_key'), false)
+
+  await page.evaluate(() => new Promise((acquired) => {
+    window.otherRadioSession = navigator.locks.request('packet-pigeon-usb-session', () => new Promise((release) => {
+      window.releaseOtherRadio = release
+      acquired()
+    }))
+  }))
+  const purge = panel.getByRole('button', { name: 'Purge local radio cache' })
+  page.once('dialog', (dialog) => dialog.accept(target.publicKey.slice(0, 12)))
+  await purge.click()
+  await panel.getByText(/Disconnect the radio in the other Packet Pigeon tab/).waitFor()
+  await page.evaluate(() => {
+    window.releaseOtherRadio()
+    return window.otherRadioSession
+  })
+  page.once('dialog', (dialog) => dialog.accept(target.publicKey.slice(0, 12)))
+  await purge.click()
+  await panel.getByText('Cleared the selected radio’s browser cache.', { exact: true }).waitFor()
+  const remaining = await page.evaluate(async () => {
+    const { openRadioStorage } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return await storage.listRadioKeys() }
+    finally { storage.close() }
+  })
+  assert.ok(remaining.includes(current.publicKey))
+  assert.ok(!remaining.includes(target.publicKey))
   await page.setViewportSize({ width: 390, height: 844 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
 })

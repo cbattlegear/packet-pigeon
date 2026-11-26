@@ -76,6 +76,9 @@ interface LockProvider {
   request(name: string, options: { ifAvailable: true }, callback: (lock: unknown | null) => Promise<void>): Promise<void>
 }
 
+// Keep the same ownership lock as existing USB-only tabs.
+const companionOwnershipLock = 'packet-pigeon-usb-session'
+
 const initial: CompanionSnapshot = {
   phase: 'idle', transport: null, error: null, device: null, contacts: [], channels: [], messages: [], progress: null,
 }
@@ -189,8 +192,7 @@ export class CompanionSession {
     if (!this.locks) throw new CompanionError('ownership', 'This browser cannot safely coordinate radio access between tabs.')
     let resolveAcquired: (acquired: boolean) => void = () => {}
     const acquired = new Promise<boolean>((resolve) => { resolveAcquired = resolve })
-    // Use the same ownership lock as existing USB-only tabs.
-    this.ownership = this.locks.request('packet-pigeon-usb-session', { ifAvailable: true }, async (lock) => {
+    this.ownership = this.locks.request(companionOwnershipLock, { ifAvailable: true }, async (lock) => {
       resolveAcquired(lock !== null)
       if (lock !== null) await new Promise<void>((resolve) => { this.releaseOwnership = resolve })
     })
@@ -329,6 +331,17 @@ export class CompanionSession {
         error: cleanupError(error),
       })
     }
+  }
+
+  readonly whileRadioDisconnected = async (work: () => Promise<void>) => {
+    if (this.snapshot.phase !== 'idle' && this.snapshot.phase !== 'error') {
+      throw new Error('Disconnect the radio before clearing its cache.')
+    }
+    if (!this.locks) return work()
+    await this.locks.request(companionOwnershipLock, { ifAvailable: true }, async (lock) => {
+      if (!lock) throw new Error('Disconnect the radio in the other Packet Pigeon tab before clearing the cache.')
+      await work()
+    })
   }
 
   readonly reserveQueuedMessage = (publicKey: string): QueuedMessageLease => {

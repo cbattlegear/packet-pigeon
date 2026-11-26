@@ -11,7 +11,7 @@ import type { BackupChannel, BackupData, BackupSection } from './model.ts'
 export type BackupSession = Pick<CompanionSession, 'getSnapshot' | 'exportDeviceIdentity' | 'restoreDeviceIdentity'
   | 'exportBackupChannels' | 'exportBackupContacts' | 'importBackupChannels' | 'importBackupContacts'
   | 'exportBackupDefaultRegion' | 'importBackupDefaultRegion'
-  | 'getAutoAdd' | 'setAutoAdd' | 'saveDevicePreferences' | 'sendMaintenance'>
+  | 'getAutoAdd' | 'setAutoAdd' | 'saveDevicePreferences' | 'sendMaintenance' | 'whileRadioDisconnected'>
 
 export type BackupResult = BackupWrite | DeviceSaveResult
 type RestoredChannels = Awaited<ReturnType<BackupSession['importBackupChannels']>>
