@@ -32,7 +32,7 @@ import type { AdvancedDeviceEdits, DeviceEdits, DeviceSaveResult } from './devic
 import { assertScopeSupported, channelScopeCommand, validateChannelScope, writeChannelScope } from './channel-scope.ts'
 import type { ChannelScope } from './channel-scope.ts'
 import { requestOwnTelemetry, requestRemoteTelemetry, telemetryProtocolVersion } from './telemetry.ts'
-import { repeaterRequest } from './repeater-management.ts'
+import { repeaterRequest, UncertainRepeaterRequestError } from './repeater-management.ts'
 import type { RepeaterLogin, RepeaterStatus } from './repeater-management.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { IdentityRecoveryPreparation } from './identity-backup.ts'
@@ -503,7 +503,7 @@ export class CompanionSession {
           }
           return result
         } catch (error) {
-          if (request.aborted || (error instanceof Error && error.message.startsWith('No repeater reply'))) {
+          if (error instanceof UncertainRepeaterRequestError) {
             uncertain.add(key)
           }
           throw error

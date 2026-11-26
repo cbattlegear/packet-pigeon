@@ -406,6 +406,86 @@ test('uncertain repeater logins reject retries and cannot regain a role from a l
   }
 })
 
+test('unclassifiable repeater confirmations block retries despite a late admin reply', async (t) => {
+  for (const operation of ['login', 'status']) {
+    for (const confirmation of [[6, 0], [6, 2, ...new Uint8Array(8)], [0], [1]]) {
+      await t.test(`${operation}: ${confirmation.join(',')}`, async (t) => {
+        const contact = contactInfo()
+        contact[33] = 2
+        contact[35] = 0
+        let malformed = operation === 'login'
+        const port = new FixturePort(([code], serial) => {
+          if (code === 22) serial.emit(...deviceInfo())
+          else if (code === 1) serial.emit(...selfInfo())
+          else if (code === 4) {
+            serial.emit(2, 1, 0, 0, 0)
+            serial.emit(...contact)
+            serial.emit(4, 0, 0, 0, 0)
+          } else if (code === 26 || code === 27) {
+            if (malformed) serial.emit(...confirmation)
+            else {
+              serial.emit(6, 0, ...new Uint8Array(8))
+              serial.emit(0x85, 0, ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+            }
+          } else assert.fail(`Unexpected command ${code}`)
+        })
+        const session = sessionWith(port)
+        await session.connect()
+        t.after(() => session.disconnect())
+        const key = 'ab'.repeat(32)
+        const target = 'bc'.repeat(32)
+        const route = { pathLength: 0, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+        if (operation === 'status') {
+          await session.manageRepeater(key, target, route, 'login', '', new AbortController().signal)
+          malformed = true
+        }
+        await assert.rejects(session.manageRepeater(key, target, route, operation, '', new AbortController().signal), /Reconnect/)
+        const dispatched = port.commands.length
+        await assert.rejects(session.manageRepeater(key, target, route, 'login', '', new AbortController().signal), /Reconnect/)
+        port.emit(0x85, 1, ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+        await setImmediate()
+        await assert.rejects(session.manageRepeater(key, target, route, 'login', '', new AbortController().signal), /Reconnect/)
+        await assert.rejects(session.manageRepeater(key, target, route, 'status', '', new AbortController().signal), /Reconnect/)
+        assert.equal(port.commands.length, dispatched)
+        assert.equal(session.getSnapshot().phase, 'ready')
+      })
+    }
+  }
+})
+
+test('definite companion rejection leaves repeater login retryable', async (t) => {
+  const contact = contactInfo()
+  contact[33] = 2
+  contact[35] = 0
+  let reject = true
+  const port = new FixturePort(([code], serial) => {
+    if (code === 22) serial.emit(...deviceInfo())
+    else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) {
+      serial.emit(2, 1, 0, 0, 0)
+      serial.emit(...contact)
+      serial.emit(4, 0, 0, 0, 0)
+    } else if (code === 26) {
+      if (reject) serial.emit(1, 2)
+      else {
+        serial.emit(6, 0, ...new Uint8Array(8))
+        serial.emit(0x85, 0, ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+      }
+    } else assert.fail(`Unexpected command ${code}`)
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  t.after(() => session.disconnect())
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const route = { pathLength: 0, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+  await assert.rejects(session.manageRepeater(key, target, route, 'login', '', new AbortController().signal), /companion rejected/)
+  reject = false
+  assert.deepEqual(await session.manageRepeater(key, target, route, 'login', '', new AbortController().signal),
+    { role: 'guest', route: 'direct' })
+  assert.equal(port.commands.filter(([code]) => code === 26).length, 2)
+})
+
 test('repeater details verify the current contact and direct route before sending', async () => {
   const contact = contactInfo()
   contact[33] = 2

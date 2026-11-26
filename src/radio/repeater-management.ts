@@ -10,6 +10,8 @@ export type RepeaterStatus = {
   received: number; sent: number; uptime: number; txAir: number
 }
 
+export class UncertainRepeaterRequestError extends Error {}
+
 export async function repeaterRequest(
   link: SerialLink, key: string, operation: 'login' | 'status', password: string,
   subscribe: Subscribe, signal: AbortSignal,
@@ -35,12 +37,17 @@ export async function repeaterRequest(
   const abort = () => settle(null)
   signal.addEventListener('abort', abort, { once: true })
   let timer: ReturnType<typeof setTimeout> | undefined
+  let dispatched = false
+  let rejected = false
   try {
     signal.throwIfAborted()
+    dispatched = true
     const receipt = await link.request(command, (frame) => {
       accepted = frame[0] === Response.sent && frame.length === 10 && frame[1] <= 1
       return { value: frame }
     })
+    rejected = (receipt[0] === Response.error && receipt.length === 2) ||
+      (receipt[0] === Response.disabled && receipt.length === 1)
     expectResponse(receipt, Response.sent)
     if (!accepted) throw new CompanionError('protocol', 'The radio returned an invalid repeater request confirmation.')
     signal.throwIfAborted()
@@ -50,7 +57,11 @@ export async function repeaterRequest(
     signal.throwIfAborted()
     if (!push) throw new Error('No repeater reply arrived before the timeout. The request may still have reached the repeater.')
     if (operation === 'login') {
-      if (push.code === 0x86) throw new Error('The repeater rejected the login.')
+      if (push.code === 0x86) {
+        rejected = push.payload.length === 7 && push.payload[0] === 0
+        if (!rejected) throw new CompanionError('protocol', 'The repeater returned an invalid login rejection.')
+        throw new Error('The repeater rejected the login.')
+      }
       if (push.payload[0] > 1) throw new CompanionError('protocol', 'The repeater returned invalid login permissions.')
       return { role: push.payload[0] === 1 ? 'admin' : push.payload.length === 7 ? 'guest-or-legacy' : 'guest',
         route: receipt[1] === 1 ? 'flood' : 'direct' }
@@ -64,6 +75,12 @@ export async function repeaterRequest(
       txAir: data.getUint32(16, true), uptime: data.getUint32(20, true),
       snr: data.getInt16(42, true) / 4,
     }
+  } catch (cause) {
+    if (dispatched && !rejected) {
+      const message = cause instanceof Error ? cause.message : 'The repeater request outcome is unknown.'
+      throw new UncertainRepeaterRequestError(`${message} Reconnect before retrying.`, { cause })
+    }
+    throw cause
   } finally {
     command.fill(0)
     clearTimeout(timer)
