@@ -450,6 +450,12 @@ mode applies the role checkboxes. The hop limit and overwrite setting are
 available when supported by firmware. Discovery browsing and path lookup use
 passive adverts and a local cache lookup, with no active mesh discovery request.
 
+The live noise-floor monitor starts only when requested and polls local radio
+statistics every two seconds over USB on companion protocol v8 or newer. It
+does not transmit a mesh request. Stop polling or leave Discovery to prevent
+further reads; a read already in flight must finish or time out. Active
+nearby-node and region discovery requests are not implemented.
+
 ## Static hosting and offline browsing
 
 Run `npm ci` and `npm run build`, then upload the complete contents of `dist`

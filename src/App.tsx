@@ -491,6 +491,7 @@ function App() {
               <div className="pane-heading"><h1>Discovery</h1></div>
               <DiscoveryPanel view={discovery} entries={adverts} radioContacts={radioContacts}
                 connected={discoveryConnected} ready={snapshot.phase === 'ready'} usb={snapshot.transport === 'usb'}
+                active={activeSection === 'Discovery'} firmware={snapshot.device?.capabilities.firmwareProtocolVersion ?? 0}
                 mapPathNodes={mapPathNodes} onPathMap={showPathOnMap}
                 pending={cacheStatus.pending}
                 session={session} openMap={() => {

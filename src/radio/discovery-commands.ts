@@ -39,6 +39,15 @@ function checkResponse(frame: Uint8Array) {
   if (frame[0] === Response.error) throw new CompanionError('device-error', 'The radio rejected the discovery command.')
 }
 
+export async function readNoiseFloor(link: SerialLink): Promise<number> {
+  const response = await discoveryResponse(link, Uint8Array.of(56, 1), 24)
+  checkResponse(response)
+  if (response.length !== 14 || response[1] !== 1) {
+    throw new CompanionError('protocol', 'The radio returned invalid radio statistics.')
+  }
+  return new DataView(response.buffer, response.byteOffset, response.byteLength).getInt16(2, true)
+}
+
 export async function readAdvertPath(link: SerialLink, key: string): Promise<AdvertPath | null> {
   const response = await discoveryResponse(link, Uint8Array.of(42, 0, ...keyBytes(key)), 22)
   if (response[0] === Response.error && response[1] === 2) return null
