@@ -4,7 +4,7 @@ import { readFile, realpath, stat } from 'node:fs/promises'
 import { extname, isAbsolute, relative, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { WebSocket, WebSocketServer } from 'ws'
-import { lanMarker, lanSocketPath, lanSocketProtocol } from '../src/radio/lan-bridge.ts'
+import { lanProtocolHeader, lanSocketPath, lanSocketProtocol, lanStatusPath } from '../src/radio/lan-bridge.ts'
 import { maxCompanionFrameSize } from '../src/radio/transport.ts'
 
 const browserHost = '127.0.0.1'
@@ -90,7 +90,7 @@ export async function startLanBridge({ radioHost, radioPort = defaultRadioPort, 
   const root = await realpath(distDir).catch(() => { throw new Error('Run npm run build before starting the local bridge.') })
   const html = await readFile(resolve(root, 'index.html'), 'utf8')
     .catch(() => { throw new Error('Run npm run build before starting the local bridge.') })
-  const index = { body: html.replace('</head>', `  ${lanMarker}\n</head>`), mime: mimeTypes['.html'] }
+  const index = { body: html, mime: mimeTypes['.html'] }
   const sockets = new WebSocketServer({ noServer: true, clientTracking: false, maxPayload: maxCompanionFrameSize + 3,
     handleProtocols: (offered) => offered.has(lanSocketProtocol) && lanSocketProtocol })
   let active
@@ -103,6 +103,9 @@ export async function startLanBridge({ radioHost, radioPort = defaultRadioPort, 
     try { path = new URL(request.url, origin) }
     catch { return response.writeHead(400).end() }
     if (path.origin !== origin) return response.writeHead(403).end()
+    if (path.pathname === lanStatusPath) {
+      return response.writeHead(204, { [lanProtocolHeader]: lanSocketProtocol, 'Cache-Control': 'no-store' }).end()
+    }
     let file
     try { file = path.pathname === '/' || path.pathname === '/index.html' ? index : await staticFile(root, path.pathname) }
     catch { return response.writeHead(404).end() }

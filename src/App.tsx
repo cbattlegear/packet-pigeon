@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { CompanionSession, getLanCompanionUrl, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
+import { CompanionSession, detectLanBridge, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
 import { framedTransport } from './radio/transport.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import { MessageSync } from './integration/message-sync.ts'
@@ -161,7 +161,7 @@ function App() {
   const knownPathNodes = useMemo(() => [...pathNodes, ...mapPathNodes], [pathNodes, mapPathNodes])
   const usbSupport = getWebSerialSupport()
   const bluetoothSupport = getWebBluetoothSupport()
-  const lanAvailable = getLanCompanionUrl() !== null
+  const [lanAvailable, setLanAvailable] = useState(false)
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
   const canDisconnect = ['opening', 'handshake', 'syncing', 'ready', 'reconnecting'].includes(snapshot.phase)
   const controlsDisabled = busy || snapshot.error?.code === 'cleanup-failed'
@@ -184,6 +184,15 @@ function App() {
     : messageStatus.pending || messageStatus.error ? 'Needs attention' : null
   const syncStatus = [radioSyncStatus, receiptSyncStatus].filter(Boolean).join(' · ')
     || (snapshot.phase === 'ready' ? 'Idle' : 'Not syncing')
+
+  useEffect(() => {
+    if (!import.meta.env.PROD) return
+    const probe = new AbortController()
+    void detectLanBridge(probe.signal).then((available) => {
+      if (!probe.signal.aborted) setLanAvailable(available)
+    })
+    return () => probe.abort()
+  }, [])
 
   useEffect(() => {
     const refresh = () => setNotificationPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)

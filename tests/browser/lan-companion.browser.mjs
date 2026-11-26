@@ -8,6 +8,7 @@ import test from 'node:test'
 import { chromium } from 'playwright-core'
 import { build } from 'vite'
 import { startLanBridge } from '../../scripts/lan-companion.mjs'
+import { lanStatusPath } from '../../src/radio/lan-bridge.ts'
 
 function frame(payload) {
   return Buffer.from([0x3e, payload.length, 0, ...payload])
@@ -70,8 +71,15 @@ test('uses the local bridge for a TCP companion session, durable message sync an
   browser = await chromium.launch({ channel: 'chrome' })
   const page = await browser.newPage({ viewport: { width: 1200, height: 840 } })
   page.setDefaultTimeout(15_000)
+  const probe = `${bridge.url}${lanStatusPath}`
+  await page.route(probe, (route) => route.fulfill({ status: 404 }))
+  const unavailable = page.waitForResponse((response) => response.url() === probe && response.status() === 404)
   await page.goto(`${bridge.url}/#chats`)
+  await unavailable
   const connect = page.getByRole('button', { name: 'Connect local network' })
+  assert.equal(await connect.count(), 0)
+  await page.unroute(probe)
+  await page.reload()
   assert.equal(connections, 0)
   await connect.click()
   const ready = page.getByRole('banner').getByText('Connected over local network', { exact: true })

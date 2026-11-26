@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { WebSocket } from 'ws'
 import { startLanBridge } from './lan-companion.mjs'
-import { lanMarker, lanSocketPath, lanSocketProtocol } from '../src/radio/lan-bridge.ts'
+import { lanProtocolHeader, lanSocketPath, lanSocketProtocol, lanStatusPath } from '../src/radio/lan-bridge.ts'
 
 test('serves the local app and bridges framed commands only for its own origin', async (t) => {
   const dist = await mkdtemp(join(tmpdir(), 'packet-pigeon-bridge-'))
@@ -35,7 +35,11 @@ test('serves the local app and bridges framed commands only for its own origin',
   const url = `${bridge.url.replace('http:', 'ws:')}${lanSocketPath}`
   const home = await fetch(bridge.url)
   assert.match(home.headers.get('content-type'), /^text\/html/)
-  assert.ok((await home.text()).includes(lanMarker))
+  assert.equal(await home.text(), '<html><head></head><body>Fixture</body></html>')
+  const status = await fetch(`${bridge.url}${lanStatusPath}`)
+  assert.equal(status.status, 204)
+  assert.equal(status.headers.get(lanProtocolHeader), lanSocketProtocol)
+  assert.equal(status.headers.get('cache-control'), 'no-store')
   assert.match((await fetch(`${bridge.url}/asset.js`)).headers.get('content-type'), /^text\/javascript/)
   assert.equal((await fetch(`${bridge.url}/missing`)).status, 404)
   assert.equal(radioConnections, 0)
