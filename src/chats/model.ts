@@ -11,7 +11,7 @@ export type Conversation = {
   messages: StoredMessage[]
 }
 
-export function conversations(data: RadioData): Conversation[] {
+export function conversations(data: RadioData, inMemoryDraftIds: readonly string[] = []): Conversation[] {
   const contacts = new Map(data.contacts.map((contact) => [contact.publicKey.toLowerCase(), contact]))
   const prefixes = new Map<string, StoredContact[]>()
   for (const contact of data.contacts) {
@@ -59,6 +59,8 @@ export function conversations(data: RadioData): Conversation[] {
     if (contact.details?.type === 1 || contact.details?.type === 3) add(`direct:${contact.publicKey.toLowerCase()}`)
   }
   for (const channel of data.channels) add(`channel:${channel.index}`)
+  for (const draft of data.drafts) add(draft.conversationId)
+  for (const id of inMemoryDraftIds) add(id)
   for (const message of data.messages) {
     let id = message.outgoing ? `direct:${message.outgoing.recipient}` : message.conversationId
     if (id.startsWith('direct:')) {
@@ -74,12 +76,30 @@ export function conversations(data: RadioData): Conversation[] {
       conversation.messages.push(message)
     }
   }
+  for (const conversation of byId.values()) {
+    conversation.messages.sort((first, second) => {
+      const time = (message: StoredMessage) => message.timestamp !== null && Number.isFinite(message.timestamp)
+        ? message.timestamp : Infinity
+      return time(first) - time(second) || 0
+    })
+  }
   return [...byId.values()].sort((first, second) => {
     const latest = (conversation: Conversation) => conversation.messages.reduce(
       (latest, message) => Number.isFinite(message.timestamp) ? Math.max(latest, message.timestamp ?? 0) : latest, 0,
     )
     return latest(second) - latest(first) || first.title.localeCompare(second.title) || first.id.localeCompare(second.id)
   })
+}
+
+export function searchMessages(messages: readonly StoredMessage[], query: string) {
+  const term = query.trim().toLocaleLowerCase()
+  return term ? messages.filter((message) => message.text.toLocaleLowerCase().includes(term)) : messages
+}
+
+export function messageDay(timestamp: number | null) {
+  if (timestamp === null || !Number.isFinite(timestamp) || Math.abs(timestamp) > 8.64e15) return null
+  const date = new Date(timestamp)
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
 }
 
 function receiptIdentity(receipt: NonNullable<StoredMessage['receipt']>) {

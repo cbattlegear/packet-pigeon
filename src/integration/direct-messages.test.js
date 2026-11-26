@@ -109,6 +109,31 @@ test('draft edits kept for this visit survive switching caches without writing t
   storage.close()
 })
 
+test('exposes nonempty visit drafts per radio and notifies when their membership changes', async () => {
+  const { direct, openStorage } = await fixture()
+  const otherKey = radioKeyFromPublicKey('cc'.repeat(32))
+  const conversation = `direct:${recipient}`
+  let changes = 0
+  const unsubscribe = direct.subscribe(() => { changes++ })
+  await direct.saveDraft(key, conversation, 'Private', false)
+  assert.deepEqual(direct.inMemoryDraftIds(key), [conversation])
+  assert.equal(changes, 1)
+  await direct.saveDraft(key, conversation, 'Private edit', false)
+  assert.equal(changes, 1)
+  await direct.saveDraft(key, 'channel:3', 'Channel draft', false)
+  await direct.saveDraft(otherKey, 'channel:3', 'Other radio', false)
+  assert.deepEqual(direct.inMemoryDraftIds(key), [conversation, 'channel:3'])
+  assert.deepEqual(direct.inMemoryDraftIds(otherKey), ['channel:3'])
+  await direct.saveDraft(key, conversation, '', false)
+  assert.deepEqual(direct.inMemoryDraftIds(key), ['channel:3'])
+  assert.equal(changes, 4)
+  unsubscribe()
+  const storage = await openStorage()
+  assert.equal(await storage.read(key), null)
+  assert.equal(await storage.read(otherKey), null)
+  storage.close()
+})
+
 test('a 158-byte message remains intact across all direct and flood attempts', async () => {
   const { source, direct } = await fixture()
   const text = 'é'.repeat(79)
@@ -225,11 +250,17 @@ test('keeps unsaved draft edits in memory until a successful save', async () => 
   const conversation = `direct:${recipient}`
   await assert.rejects(direct.saveDraft(key, conversation, 'Unsaved text'), /Disk unavailable/)
   assert.equal(direct.draft(key, conversation), 'Unsaved text')
+  assert.deepEqual(direct.inMemoryDraftIds(key), [conversation])
   assert.equal(direct.getSnapshot().pending, 1)
+  await direct.saveDraft(key, conversation, '', false)
+  assert.deepEqual(direct.inMemoryDraftIds(key), [])
+  await direct.saveDraft(key, conversation, 'Visit-only edit', false)
+  assert.deepEqual(direct.inMemoryDraftIds(key), [conversation])
   failDraft = false
   await direct.retrySaving()
   const storage = await openStorage()
   assert.equal((await storage.read(key)).drafts[0].text, 'Unsaved text')
+  assert.equal(direct.draft(key, conversation), 'Visit-only edit')
   assert.equal(direct.getSnapshot().pending, 0)
   storage.close()
 })
