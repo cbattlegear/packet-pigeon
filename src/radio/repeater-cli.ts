@@ -75,6 +75,7 @@ export const repeaterCliCommands = [
   { command: 'powersaving off', description: 'Disable repeater power-saving preference', confirm: true,
     warning: 'This may increase repeater power consumption on boards that support sleep. Firmware support varies; verify the reply and preference.' },
   { command: 'get radio', description: 'Read radio parameter preferences' },
+  { command: 'get freq', description: 'Read frequency preference' },
   { command: 'get radio.rxgain', description: 'Read receiver boosted-gain preference' },
   { command: 'get agc.reset.interval', description: 'Read AGC reset interval' },
   { command: 'get int.thresh', description: 'Read interference threshold' },
@@ -295,6 +296,13 @@ export function repeaterNameCommand(value: string) {
 export function repeaterRegionQuery(value: string) {
   validateRegionName(value)
   return { command: `region get ${value}`, description: `Read region ${value}` }
+}
+
+export function repeaterCliQuery(command: string) {
+  const found = repeaterCliCommands.find((item) => item.command === command)
+  if (found && !('confirm' in found)) return found
+  if (command.startsWith('region get ')) return repeaterRegionQuery(command.slice('region get '.length))
+  throw new Error('Enter a supported read-only CLI query. Use the management controls for changes.')
 }
 
 function validateRegionName(value: string) {

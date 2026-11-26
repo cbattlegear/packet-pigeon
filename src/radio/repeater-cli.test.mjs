@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
+  allocateRepeaterCliTag, repeaterCliCommand, repeaterCliQuery, repeaterCliCommands, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
   repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand, repeaterRemoveAccessCommand,
   repeaterGrantAdminCommand, repeaterLimitedAccessCommand, repeaterRemoveNeighborCommand,
@@ -55,6 +55,20 @@ test('CLI queries use the repeater text type and a tagged command', async () => 
     tag: 'A7', route: 'flood', timeoutMs: 10_000,
   })
   assert.deepEqual([...command], [2, 1, 0, 0, 0, 0, 0, ...new Uint8Array(6).fill(0xbc), ...encoder.encode('A7|get name')])
+})
+
+test('typed CLI queries accept only supported read-only commands', () => {
+  for (const command of ['get freq', 'ver', 'clock', 'sensor get gps', 'region get #North']) {
+    assert.equal(repeaterCliQuery(command).command, command)
+  }
+  for (const { command } of repeaterCliCommands.filter((item) => 'confirm' in item)) {
+    assert.throws(() => repeaterCliQuery(command), /read-only CLI query/)
+  }
+  for (const command of ['get guest.password', 'get prv.key', 'get bridge.secret', 'password fixture-secret',
+    'set guest.password fixture-secret', 'region put #North', 'region get #North\nreboot',
+    'get freq ', 'get freq extra', 'gps', 'unknown']) {
+    assert.throws(() => repeaterCliQuery(command), /read-only CLI query|region name or prefix/)
+  }
 })
 
 test('identity queries accept only exact commands and compare complete public-key replies', () => {
