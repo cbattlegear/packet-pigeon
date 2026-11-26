@@ -185,6 +185,74 @@ function contactInfo() {
   return frame
 }
 
+test('reads local and remote telemetry and ignores pushes outside the selected request', async (t) => {
+  const key = 'ab'.repeat(32)
+  const contact = 'bc'.repeat(32)
+  const data = [1, 116, 1, 132]
+  const remoteData = [1, 116, 1, 122]
+  const sent = response(6, 0, 1, 0, 0, 0, 0xf0, 0x49, 2, 0)
+  const telemetry = (byte, lpp) => response(0x8b, 0, ...Array(6).fill(byte), ...lpp)
+  let responseMode = 'normal'
+  let collision = false
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4: {
+        serial.emit(2, collision ? 2 : 1, 0, 0, 0)
+        const record = contactInfo()
+        serial.emit(...record)
+        if (collision) {
+          record[7] = 0x91
+          serial.emit(...record)
+        }
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      }
+      case 39: {
+        if (command.length === 4) {
+          assert.deepEqual(command, [39, 0, 0, 0])
+          if (responseMode === 'unsupported') {
+            serial.emit(1, 1)
+          } else {
+            serial.incoming.enqueue(Uint8Array.of(...telemetry(0xbc, remoteData), ...telemetry(0xab, data)))
+          }
+        } else {
+          assert.deepEqual(command, [39, 0, 0, 0, ...Array(32).fill(0xbc)])
+          const frames = [telemetry(0xbc, [1, 116, 0, 1]), sent, telemetry(0xab, data)]
+          if (responseMode === 'normal') frames.push(telemetry(0xbc, remoteData))
+          serial.incoming.enqueue(Uint8Array.of(...frames.flatMap((frame) => [...frame])))
+        }
+        break
+      }
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  t.after(() => session.disconnect())
+  await session.connect()
+  const signal = new AbortController().signal
+  const pushed = []
+  const stop = session.subscribeToPushes(({ code }) => pushed.push(code))
+  t.after(stop)
+  assert.deepEqual([...await session.readTelemetry(key, null, signal)], data)
+  assert.deepEqual([...await session.readTelemetry(key, contact, signal)], remoteData)
+  assert.equal(pushed.filter((code) => code === 0x8b).length, 5)
+
+  responseMode = 'hold'
+  const controller = new AbortController()
+  const remote = session.readTelemetry(key, contact, controller.signal)
+  await waitFor(() => port.commands.filter(([code]) => code === 39).length === 3)
+  controller.abort(new Error('Stopped waiting'))
+  await assert.rejects(remote, /Stopped waiting/)
+  collision = true
+  await assert.rejects(session.readTelemetry(key, contact, signal), /shares a telemetry reply prefix/)
+  assert.equal(port.commands.filter(([code]) => code === 39).length, 3)
+  responseMode = 'unsupported'
+  await assert.rejects(session.readTelemetry(key, null, signal), /firmware does not support telemetry/)
+  assert.equal(session.getSnapshot().phase, 'ready')
+})
+
 function scopeFixture(options = {}) {
   const factory = options.factory ?? new IDBFactory()
   const key = (options.key ?? 'ab').repeat(32)

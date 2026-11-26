@@ -1,0 +1,61 @@
+.telemetry {
+  min-width: 0;
+}
+
+.own-telemetry {
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.telemetry summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.telemetry > label,
+.telemetry-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.telemetry :is(select, button) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.telemetry-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.telemetry-content h3 {
+  margin: 8px 0;
+  font-size: 1rem;
+}
+
+.telemetry-content dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.telemetry-content dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 10px;
+}
+
+.telemetry-content dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}

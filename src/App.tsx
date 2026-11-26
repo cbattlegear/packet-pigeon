@@ -5,6 +5,7 @@ import { MessageSync } from './integration/message-sync.ts'
 import { DirectMessages } from './integration/direct-messages.ts'
 import { ChatPanel } from './chats/ChatPanel.tsx'
 import { ContactsPanel } from './contacts/ContactsPanel.tsx'
+import { OwnTelemetry } from './telemetry/TelemetryPanel.tsx'
 import { DiscoveryPanel } from './discovery/DiscoveryPanel.tsx'
 import { ChannelsPanel } from './channels/ChannelsPanel.tsx'
 import { discoveryEntries, discoveryMapNodes, discoveryPathNodes } from './discovery/model.ts'
@@ -421,6 +422,8 @@ function App() {
         {hasOpenedDiagnostics && <div hidden={activeSection !== 'Diagnostics'}>
           <div className="section-pane">
             <div className="pane-heading"><h1>Diagnostics</h1></div>
+            <OwnTelemetry active={activeSection === 'Diagnostics'} snapshot={snapshot} session={session}
+              radioBusy={messageStatus.syncing || directStatus.activeId !== null} />
             <TraceWorkspace active={activeSection === 'Diagnostics'} snapshot={snapshot} session={session}
               nodes={knownPathNodes} mapSelection={mapTrace} mapRequest={mapTraceRequest} onMap={showPathOnMap} />
             <RxInspector snapshot={snapshot} session={session} prefs={settings.preferences} locale={settings.locale}
