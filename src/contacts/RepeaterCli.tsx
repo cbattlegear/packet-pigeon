@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import type { FormEvent } from 'react'
 import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
-import { repeaterCliCommand, repeaterCliCommands, repeaterOwnerInfoCommand, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
+import { repeaterCliCommand, repeaterCliCommands, repeaterOwnerInfoCommand, repeaterPositionCommand, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 
 export type RepeaterMessageSync = Pick<MessageSync, 'subscribe' | 'getSnapshot' | 'subscribeToSavedReceipts' | 'sync'>
@@ -36,6 +36,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [intervalKind, setIntervalKind] = useState<'advert.interval' | 'flood.advert.interval'>('advert.interval')
   const [interval, setInterval] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
+  const [latitude, setLatitude] = useState('')
+  const [longitude, setLongitude] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [now, setNow] = useState(() => Date.now())
   const [pending, setPending] = useState(false)
@@ -130,6 +132,19 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitPosition(event: FormEvent<HTMLFormElement>, axis: 'lat' | 'lon', value: string) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterPositionCommand(axis, value)
+      const coordinate = axis === 'lat' ? 'latitude' : 'longitude'
+      void send(command.command, `Change advertised ${coordinate}`,
+        true, 'This changes the repeater location published in future advertisements. Check the value carefully before confirming.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid advertised position.')
+    }
+  }
+
   return <details>
     <summary>Administrator CLI</summary>
     <p>Choose a supported query or confirmed management action. Commands are never retried automatically.
@@ -195,6 +210,25 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           onChange={(event) => setOwnerInfo(event.currentTarget.value)} />
         <p>Maximum 119 UTF-8 bytes, including line breaks.</p>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set owner information</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change advertised position</summary>
+      <p>These coordinates are published in future repeater advertisements. Read the current values with <code>get lat</code> and <code>get lon</code>.
+        Changing one coordinate does not change the other. Confirm each update carefully.</p>
+      <form className="repeater-position-form" onSubmit={(event) => submitPosition(event, 'lat', latitude)}>
+        <label htmlFor={`${ownerInfoId}-latitude`}>Latitude (-90 to 90)</label>
+        <input id={`${ownerInfoId}-latitude`} type="text" inputMode="decimal" required
+          value={latitude} disabled={!ready || busy || pending || syncStatus.syncing}
+          onChange={(event) => setLatitude(event.currentTarget.value)} />
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set latitude</button>
+      </form>
+      <form className="repeater-position-form" onSubmit={(event) => submitPosition(event, 'lon', longitude)}>
+        <label htmlFor={`${ownerInfoId}-longitude`}>Longitude (-180 to 180)</label>
+        <input id={`${ownerInfoId}-longitude`} type="text" inputMode="decimal" required
+          value={longitude} disabled={!ready || busy || pending || syncStatus.syncing}
+          onChange={(event) => setLongitude(event.currentTarget.value)} />
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set longitude</button>
       </form>
     </details>
     {pending && <p role="status">Sending to the radio…</p>}

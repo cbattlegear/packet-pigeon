@@ -534,11 +534,13 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
+  await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
+  await assert.rejects(send('set lat 45', true), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
   for (const command of ['get guest.password', 'set guest.password test', 'reboot']) {
@@ -547,6 +549,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('advert'), /Confirm/)
   await assert.rejects(send('clock sync'), /Confirm/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
+  await assert.rejects(send('set lat 45'), /Confirm/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
@@ -594,6 +597,13 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const owner = await send('set owner.info Public|info', true)
   const ownerFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(ownerFrame.slice(13))), `${owner.tag}|set owner.info Public|info`)
+  for (const command of ['set lat 90.1', 'set lon -180.1', 'set lat 1.1234567', 'set lon 1e2']) {
+    await assert.rejects(send(command, true), /latitude|longitude/)
+  }
+  const position = await send('set lat 47.123456', true)
+  const positionFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(positionFrame.slice(13))),
+    `${position.tag}|set lat 47.123456`)
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {
