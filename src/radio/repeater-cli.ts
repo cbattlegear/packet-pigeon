@@ -54,6 +54,10 @@ export function repeaterPositionCommand(axis: 'lat' | 'lon', value: string) {
   return repeaterCliCommand(`set ${axis} ${value}`)
 }
 
+export function repeaterNameCommand(value: string) {
+  return repeaterCliCommand(`set name ${value}`)
+}
+
 function validatePosition(axis: 'lat' | 'lon', value: string) {
   const maximum = axis === 'lat' ? 90 : 180
   const coordinate = Number(value)
@@ -67,6 +71,18 @@ function validatePosition(axis: 'lat' | 'lon', value: string) {
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
+  const namePrefix = 'set name '
+  if (command.startsWith(namePrefix)) {
+    const value = command.slice(namePrefix.length)
+    const bytes = new TextEncoder().encode(value)
+    if (!value || value !== value.trim() || bytes.length > 31 ||
+      bytes.some((byte) => byte < 32 || byte === 127) ||
+      [...'[]/\\:,?*'].some((character) => value.includes(character)) ||
+      new TextDecoder().decode(bytes) !== value) {
+      throw new Error('Enter a name of 1 to 31 UTF-8 bytes without leading or trailing spaces, control characters, or []/\\:,?*.')
+    }
+    return { command, description: 'Set repeater name', confirm: true as const }
+  }
   const ownerPrefix = 'set owner.info '
   if (command.startsWith(ownerPrefix)) {
     const value = command.slice(ownerPrefix.length)
