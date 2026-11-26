@@ -1969,6 +1969,37 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     await powerHistory.getByText(reply, { exact: true }).waitFor()
     await powerHistory.getByText(help, { exact: false }).waitFor()
   }
+  await search.fill('bridge')
+  assert.equal(await page.getByRole('button', { name: /get bridge\.secret/ }).count(), 0)
+  assert.equal(await page.getByRole('button', { name: /set bridge\./ }).count(), 0)
+  for (const [command, description, reply, help] of [
+    ['get bridge.type', 'Read compiled bridge type', '> none', 'compiled bridge type, not whether a bridge is enabled or working'],
+    ['get bridge.enabled', 'Read bridge enabled preference', '??: bridge.enabled', 'not whether bridge hardware is connected or forwarding'],
+    ['get bridge.delay', 'Read bridge delay preference', '> 500', 'delay preference in milliseconds, not measured forwarding latency'],
+    ['get bridge.source', 'Read bridge packet source preference', '> logRx', 'not proof that packets are bridged'],
+    ['get bridge.baud', 'Read RS-232 bridge baud preference', '> 115200', 'not whether an interface or peer is working'],
+    ['get bridge.channel', 'Read ESP-NOW bridge channel preference', '> 1', 'not whether a peer is connected'],
+  ]) {
+    await search.fill(command)
+    const beforeBridgeQuery = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+    const beforeBridgeSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+    await page.getByRole('button', { name: `${command} — ${description}`, exact: true }).click()
+    await page.getByText(help, { exact: false }).first().waitFor()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeBridgeQuery)
+    await page.getByRole('button', { name: `Send ${command}`, exact: true }).click()
+    const bridgeHistory = page.locator('.repeater-cli-history li').first()
+    await bridgeHistory.getByText(/Accepted by radio/).waitFor()
+    assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+      window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), command)
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeBridgeSync)
+    await page.evaluate((text) => window.queueRepeaterReply(text), reply)
+    await sync.click()
+    await bridgeHistory.getByText(reply, { exact: true }).waitFor()
+    await bridgeHistory.getByText(help, { exact: false }).waitFor()
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 1280, height: 720 })
   await search.fill('gps setloc')
   const beforeCopyPosition = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
   await page.getByRole('button', { name: 'Open form: Change stored position' }).click()

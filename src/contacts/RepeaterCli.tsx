@@ -77,6 +77,23 @@ function powerDiagnosticHelp(command: string): string | undefined {
   }
 }
 
+function bridgeDiagnosticHelp(command: string): string | undefined {
+  switch (command) {
+    case 'get bridge.type':
+      return 'In v1.14.1 this reports the compiled bridge type, not whether a bridge is enabled or working.'
+    case 'get bridge.enabled':
+      return 'This reports a preference, not whether bridge hardware is connected or forwarding.'
+    case 'get bridge.delay':
+      return 'In v1.14.1 this reports the delay preference in milliseconds, not measured forwarding latency.'
+    case 'get bridge.source':
+      return 'In v1.14.1 logRx and logTx select received or transmitted packets, not proof that packets are bridged.'
+    case 'get bridge.baud':
+      return 'This reports the RS-232 baud preference, not whether an interface or peer is working.'
+    case 'get bridge.channel':
+      return 'This reports the ESP-NOW channel preference, not whether a peer is connected.'
+  }
+}
+
 const managementForms = {
   regions: { title: 'Inspect repeater regions', terms: 'region get region home region put region remove region allowf region denyf region save region list region default' },
   removeNeighbor: { title: 'Remove a cached neighbor', terms: 'neighbor.remove neighbors' },
@@ -598,6 +615,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       Replies may be delayed or misattributed and firmware support varies.</p>}
     {selected === 'get role' && <p>This reads the node's firmware role, not the current user's access level. Firmware support varies.</p>}
     {powerDiagnosticHelp(selected) && <p>{powerDiagnosticHelp(selected)} Firmware and hardware support vary; replies may be delayed.</p>}
+    {bridgeDiagnosticHelp(selected) && <p>{bridgeDiagnosticHelp(selected)} Firmware and build support vary; replies may be delayed or unsupported.</p>}
     {selected === 'sensor get gps' && <p>This reads the reported GPS activity setting, not a fix or hardware power state.
       In v1.14.1, 1 means active and 0 inactive; null means the setting was not found. Other firmware may differ and replies may be stale.</p>}
     {selected === 'gps sync' && gpsClockSync && <p>{gpsClockSync.warning}</p>}
@@ -1185,6 +1203,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">This is the reported firmware role, not your access level. Firmware support varies.</p>}
           {powerDiagnosticHelp(item.command) && item.reply !== null &&
             <p className="contact-status">{powerDiagnosticHelp(item.command)} Firmware and hardware support vary; replies may be delayed.</p>}
+          {bridgeDiagnosticHelp(item.command) && item.reply !== null &&
+            <p className="contact-status">{bridgeDiagnosticHelp(item.command)} Firmware and build support vary; replies may be delayed or unsupported.</p>}
           {item.command === 'sensor get gps' && item.reply !== null &&
             <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.
               In v1.14.1, 1 means active and 0 inactive. A null or unsupported reply does not establish hardware support. Firmware and hardware support vary.</p>}
