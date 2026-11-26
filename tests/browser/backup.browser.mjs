@@ -76,7 +76,7 @@ test('backs up selected settings, restores data and identity, and guards mainten
           commands.push(code)
           if (code === 22) send([13, 14, 1, slots.length, ...new Uint8Array(78)])
           else if (code === 56) {
-            const stats = Uint8Array.of(24, 0, ...new Uint8Array(11))
+            const stats = Uint8Array.of(24, 0, ...new Uint8Array(9))
             new DataView(stats.buffer).setUint32(4, Math.floor((performance.now() - bootedAt) / 1_000), true)
             send(stats)
           }

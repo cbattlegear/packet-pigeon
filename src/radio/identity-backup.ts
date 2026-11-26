@@ -43,7 +43,7 @@ export async function writeBackupIdentity(link: SerialLink, key: Uint8Array, exp
 export async function readBootTime(link: SerialLink) {
   const frame = await link.request(Uint8Array.of(56, 0), (reply) => ({ value: reply }))
   expectResponse(frame, 24)
-  if (frame.length < 13 || frame[1] !== 0) throw new Error('The radio did not report its uptime.')
+  if (frame.length < 11 || frame[1] !== 0) throw new Error('The radio did not report its uptime.')
   const uptime = new DataView(frame.buffer, frame.byteOffset, frame.byteLength).getUint32(4, true)
   return performance.now() - uptime * 1_000
 }

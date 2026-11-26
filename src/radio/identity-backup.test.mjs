@@ -1,7 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { restoreContactsAfterIdentity } from './backup-commands.ts'
-import { maintenanceCommand, verifyRebootTime } from './identity-backup.ts'
+import { maintenanceCommand, readBootTime, verifyRebootTime } from './identity-backup.ts'
+
+test('reads uptime from the firmware’s 11-byte core stats reply', async () => {
+  const frame = Uint8Array.of(24, 0, 0x30, 0x10, 30, 0, 0, 0, 0, 0, 1)
+  const link = (reply) => ({ async request(command, receive) {
+    assert.deepEqual(command, Uint8Array.of(56, 0))
+    return receive(reply).value
+  } })
+  const before = performance.now()
+  const startedAt = await readBootTime(link(frame))
+  assert.ok(startedAt >= before - 30_000 && startedAt <= performance.now() - 30_000)
+  await assert.rejects(readBootTime(link(frame.subarray(0, 10))), /did not report its uptime/)
+})
 
 test('requires a new boot after requesting an identity recovery reboot', () => {
   const preparation = { bootTime: 5_000, requestedAt: 31_000 }
