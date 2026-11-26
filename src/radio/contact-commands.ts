@@ -70,14 +70,20 @@ export function removeContactCommand(publicKey: string) {
   return Uint8Array.of(removeContact, ...keyBytes(contactPublicKey(publicKey)))
 }
 
-export async function readContactFrame(link: SerialLink, publicKey: string) {
+export async function findContactFrame(link: SerialLink, publicKey: string) {
   const frame = await link.request(Uint8Array.of(getContactByKey, ...keyBytes(publicKey)), (response) => {
     if (response[0] !== Response.error && response[0] !== Response.disabled) expectResponse(response, Response.contact)
     return { value: response }
   })
-  if (frame[0] === Response.error && frame[1] === 2) throw new Error('This contact is no longer saved on the radio.')
+  if (frame[0] === Response.error && frame[1] === 2) return null
   if (frame[0] !== Response.contact) throw new Error('The radio could not read this contact. Check firmware support and try again.')
   if (decodeContact(frame).publicKey !== publicKey) throw new Error('The radio returned a different contact.')
+  return frame
+}
+
+export async function readContactFrame(link: SerialLink, publicKey: string) {
+  const frame = await findContactFrame(link, publicKey)
+  if (!frame) throw new Error('This contact is no longer saved on the radio.')
   return frame
 }
 

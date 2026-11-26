@@ -3,6 +3,8 @@ import type { CompanionContact } from './protocol.ts'
 import type { SerialLink } from './serial-link.ts'
 import { expectResponse } from './serial-link.ts'
 import { contactPublicKey } from './contact-commands.ts'
+import { decodeContactPath } from './contact-path.ts'
+import type { ContactPathWidth } from './contact-path.ts'
 import type { CompanionPush } from './companion-session.ts'
 
 export type AdvertPath = { receivedAt: number; hops: number; width: number; hex: string }
@@ -17,6 +19,10 @@ export type NearbyNode = {
 export type RepeaterDetails =
   | { kind: 'regions'; regions: string[] }
   | { kind: 'owner'; name: string; owner: string }
+export type RepeaterRequestOptions = {
+  expectedRoute: { pathLength: number; pathHex: string } | null
+  replyPath: { width: ContactPathWidth; text: string }
+}
 
 type PushSubscription = (listener: (push: CompanionPush) => void) => () => void
 
@@ -157,8 +163,15 @@ export async function requestRepeaterDetails(
   subscribe: PushSubscription,
   signal: AbortSignal,
   onWaiting: () => void,
+  replyPath: { encoded: number; hex: string } = { encoded: 0, hex: '' },
+  routed = false,
 ): Promise<RepeaterDetails> {
   signal.throwIfAborted()
+  const decodedPath = decodeContactPath(replyPath.encoded, replyPath.hex)
+  if (!decodedPath || replyPath.hex.length !== decodedPath.hops.length * decodedPath.width * 2) {
+    throw new Error('The reply path is invalid.')
+  }
+  const pathBytes = Uint8Array.from(replyPath.hex.match(/../g) ?? [], (byte) => parseInt(byte, 16))
   let tag: number | undefined
   const early = new Map<number, Uint8Array>()
   let settle!: (payload: Uint8Array | null) => void
@@ -174,20 +187,22 @@ export async function requestRepeaterDetails(
   let timeout: ReturnType<typeof setTimeout> | undefined
   try {
     signal.throwIfAborted()
-    const reply = await discoveryResponse(link, Uint8Array.of(57, ...keyBytes(key), kind === 'regions' ? 1 : 2, 0), Response.sent)
+    const reply = await discoveryResponse(link,
+      Uint8Array.of(57, ...keyBytes(key), kind === 'regions' ? 1 : 2, replyPath.encoded, ...pathBytes), Response.sent)
     checkResponse(reply)
     if (reply.length !== 10 || reply[1] > 1) {
       throw new CompanionError('protocol', 'The radio did not confirm a direct discovery request.')
     }
     if (reply[1] === 1) {
-      throw new CompanionError('protocol', 'The radio sent the request by a flood route instead of zero hop. Check its route before retrying.')
+      throw new CompanionError('protocol', 'The radio sent the request by a flood route instead of a direct route. Check its route before retrying.')
     }
     const receipt = new DataView(reply.buffer, reply.byteOffset, reply.byteLength)
     tag = receipt.getUint32(2, true)
     signal.throwIfAborted()
     onWaiting()
     if (early.has(tag)) settle(early.get(tag)!)
-    const wait = Math.min(30_000, Math.max(5_000, receipt.getUint32(6, true) + 2_000))
+    const wait = routed || decodedPath.hops.length
+      ? 120_000 : Math.min(30_000, Math.max(5_000, receipt.getUint32(6, true) + 2_000))
     timeout = setTimeout(() => settle(null), wait)
     const result = await response
     signal.throwIfAborted()
