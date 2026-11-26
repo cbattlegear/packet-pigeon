@@ -848,6 +848,14 @@ in Settings first: this command cannot move the repeater clock backwards, and
 setting it too far ahead can disrupt later commands. Companion firmware v1.11
 and earlier may forward a zero timestamp for CLI commands, which the repeater
 may ignore.
+Administrators can instead enter a specific UTC time under **Set repeater
+clock in UTC** and confirm the exact value before sending it. This does not use
+the browser or connected radio's clock. Check against a trusted source: the
+requested value is fixed and may be behind on arrival. Repeater v1.14.1 only
+allows the clock to move forward; a clock set too far ahead can disrupt later
+commands and cannot be corrected backwards by this control. GPS or another
+administrator may change the clock too. Sync the reply and read the clock
+separately; delayed changes may still arrive later.
 Neighbor replies contain short key prefixes, seconds since heard when the
 repeater generated the reply, and SNR multiplied by 4; the repeater limits the
 list. The displayed sync time is browser time, not the reply's generation time;

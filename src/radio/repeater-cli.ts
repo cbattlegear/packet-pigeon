@@ -16,6 +16,8 @@ export const repeaterRadioSettingsSafety = 'Changing radio parameters can discon
 export const repeaterRadioSettingsCaveats = 'In repeater v1.14.1 these preferences normally apply at reboot, but can apply sooner when an existing temporary radio override expires. A reboot or override may be initiated elsewhere. The reply does not prove persistence or successful application. Read-back reports preferences, not active radio settings; frequency uses floating-point precision and bandwidth is rounded to three decimals. Read-back can require more precision than this control accepts. A delayed change may arrive after a later read or change. Reboot is a separate action and is not sent automatically.'
 export const repeaterRadioSettingsWarning = `${repeaterRadioSettingsSafety} ${repeaterRadioSettingsCaveats}`
 
+export const repeaterClockWarning = 'Verify this UTC time against a trusted clock. Repeater v1.14.1 only moves its clock forward; a clock set too far ahead may disrupt later commands and cannot be corrected backwards with this action. The specified time is fixed and can be behind by the time the command arrives. GPS or another administrator may also change the clock. Firmware support varies. Sync the reply and read the clock separately; a delayed change may still arrive later.'
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -167,6 +169,17 @@ export function repeaterPositionCommand(axis: 'lat' | 'lon', value: string) {
 
 export function repeaterTransmitPowerCommand(value: string) {
   return repeaterCliCommand(`set tx ${value}`)
+}
+
+export function repeaterClockCommand(value: string) {
+  const normalized = value.length === 16 ? `${value}:00` : value
+  const timestamp = Date.parse(`${normalized}Z`) / 1000
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(normalized) ||
+    !Number.isInteger(timestamp) || timestamp < 1 || timestamp > 0xffff_ffff ||
+    new Date(timestamp * 1000).toISOString() !== `${normalized}.000Z`) {
+    throw new Error('Enter a valid UTC time from 1970-01-01 00:00:01 through 2106-02-07 06:28:15.')
+  }
+  return repeaterCliCommand(`time ${timestamp}`)
 }
 
 function validateGuestPassword(value: string) {
@@ -322,6 +335,10 @@ function validatePosition(axis: 'lat' | 'lon', value: string) {
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
+  const clock = /^time ([1-9][0-9]*)$/.exec(command)
+  if (clock && clock[0] === command && Number(clock[1]) <= 0xffff_ffff) {
+    return { command, description: 'Set repeater clock', confirm: true as const, warning: repeaterClockWarning }
+  }
   const removeNeighbor = /^neighbor\.remove ([0-9a-f]{64})$/i.exec(command)
   if (removeNeighbor && removeNeighbor[0] === command) return repeaterRemoveNeighborCommand(removeNeighbor[1])
   const removeAccess = /^setperm ([0-9a-f]{64}) 0$/i.exec(command)

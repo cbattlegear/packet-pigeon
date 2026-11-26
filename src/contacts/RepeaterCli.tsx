@@ -10,6 +10,7 @@ import {
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
   repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning,
+  repeaterClockCommand, repeaterClockWarning,
   UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -119,6 +120,7 @@ const managementForms = {
   guestPassword: { title: 'Change guest login password', terms: 'set guest.password' },
   name: { title: 'Change repeater name', terms: 'set name get name' },
   owner: { title: 'Change owner information', terms: 'set owner.info' },
+  clock: { title: 'Set repeater clock in UTC', terms: 'time clock utc' },
   gps: { title: 'Manage GPS receiver', terms: 'gps on gps off gps sync clock sensor get gps activity' },
   position: { title: 'Change stored position', terms: 'set lat set lon gps setloc gps advert location' },
 } as const
@@ -149,6 +151,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [regionName, setRegionName] = useState('')
   const [homeRegion, setHomeRegion] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
+  const [clockTime, setClockTime] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [guestPassword, setGuestPassword] = useState('')
   const [neighborKey, setNeighborKey] = useState('')
@@ -294,6 +297,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         `This information can be requested over the mesh. Do not include passwords or private data.${preview}`)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid owner information.')
+    }
+  }
+
+  function submitClock(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterClockCommand(clockTime)
+      const utc = new Date(Number(command.command.slice(5)) * 1000).toISOString().replace('.000Z', ' UTC')
+      void send(command.command, `Set repeater clock to ${utc}`, true, repeaterClockWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid UTC time.')
     }
   }
 
@@ -657,6 +672,22 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }}>Sync messages for replies</button>
       <button type="button" disabled={!history.length || pending} onClick={() => setHistory([])}>Clear CLI history</button>
     </div>
+    <details data-cli-section="clock">
+      <summary>{managementForms.clock.title}</summary>
+      <p>{repeaterClockWarning} This sends the entered time, not the browser or connected radio's clock.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('clock', 'Read the repeater clock', false)}>Read repeater clock</button>
+      </div>
+      <form className="contact-actions" onSubmit={submitClock}>
+        <label>Time in UTC
+          <input type="datetime-local" step="1" required min="1970-01-01T00:00:01" max="2106-02-07T06:28:15"
+            value={clockTime} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setClockTime(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set repeater clock</button>
+      </form>
+    </details>
     <details data-cli-section="removeNeighbor">
       <summary>{managementForms.removeNeighbor.title}</summary>
       <p>{repeaterRemoveNeighborWarning} Enter the full 64-character hexadecimal public key, not the prefix in
