@@ -6,7 +6,7 @@ import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
   repeaterRegionRemoveCommand,
-  repeaterGuestPasswordCommand, repeaterRemoveAccessCommand,
+  repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
   repeaterTransmitPowerCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -67,6 +67,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [repeaterName, setRepeaterName] = useState('')
   const [guestPassword, setGuestPassword] = useState('')
   const [accessKey, setAccessKey] = useState('')
+  const [adminAccessKey, setAdminAccessKey] = useState('')
   const [advertPolicy, setAdvertPolicy] = useState('')
   const powerSavingCommands = repeaterCliCommands.filter((item) =>
     item.command === 'powersaving on' || item.command === 'powersaving off')
@@ -369,6 +370,21 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }
       void send(command.command, `${command.description} for ${command.accessTarget}`, command.confirm, command.warning,
         command.command, () => { setAccessKey(''); onAccessChange() })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid client public key.')
+    }
+  }
+
+  function submitGrantAdmin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterGrantAdminCommand(adminAccessKey)
+      if (command.accessTarget === radioKey || command.accessTarget === contactKey) {
+        throw new Error('Cannot grant administrator access to the connected radio or repeater.')
+      }
+      void send(command.command, `${command.description} for ${command.accessTarget}`, command.confirm, command.warning,
+        command.command, () => { setAdminAccessKey(''); onAccessChange() })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid client public key.')
     }
@@ -724,6 +740,20 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
+      <summary>Grant repeater administrator access</summary>
+      <p>Enter the client's full 64-character hexadecimal public key, not an access-list prefix.
+        The connected radio and repeater are not offered as targets.</p>
+      <p>{repeaterGrantAdminWarning}</p>
+      <form className="contact-actions" onSubmit={submitGrantAdmin}>
+        <label>Administrator full public key
+          <input type="text" required value={adminAccessKey} autoComplete="off" spellCheck={false}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setAdminAccessKey(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Grant administrator access</button>
+      </form>
+    </details>
+    <details>
       <summary>Change guest login password</summary>
       <p>Changes the password used for guest repeater access, not the administrator password. Changing it does not
         revoke already-authorized guest identities; they may still access the repeater. Firmware stores a
@@ -836,9 +866,12 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">An OK reply does not prove a broadcast occurred or that any neighbors replied.
               Discovery responses are unauthenticated and do not prove identity. Wait up to 60 seconds, then request neighbors
               separately; old entries may remain and the list can be incomplete.</p>}
-          {item.command.startsWith('setperm ') && item.reply !== null &&
+          {item.command.startsWith('setperm ') && item.command.endsWith(' 0') && item.reply !== null &&
             <p className="contact-status">An OK reply does not verify persistence. Firmware v1.14.1 may misdirect the reply,
               and absence from the access list does not prove removal.</p>}
+          {item.command.startsWith('setperm ') && item.command.endsWith(' 3') && item.reply !== null &&
+            <p className="contact-status">An OK reply does not verify persistence. Adding an entry to a full table can evict
+              another client, including an administrator; the access list can omit entries.</p>}
           {item.command === 'neighbors' && item.reply !== null &&
             <NeighborReport reply={item.reply.text} syncedAt={item.reply.syncedAt} name={name} repeaterPosition={repeaterPosition}
               nodes={neighborNodes} onMap={onMap} />}

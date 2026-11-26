@@ -4,6 +4,7 @@ import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
   repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand, repeaterRemoveAccessCommand,
+  repeaterGrantAdminCommand,
   parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
@@ -77,6 +78,29 @@ test('access removal requires an exact full public key and confirmation', () => 
   }
   for (const value of ['ab'.repeat(6), 'gg'.repeat(32), 'ab'.repeat(33)]) {
     assert.throws(() => repeaterRemoveAccessCommand(value), /64-character hex public key/)
+  }
+})
+
+test('administrator grants require a full key and confirmation and explain eviction risks', () => {
+  const key = 'dd'.repeat(32)
+  const action = repeaterGrantAdminCommand(key.toUpperCase())
+  assert.equal(action.command, `setperm ${key} 3`)
+  assert.equal(action.accessTarget, key)
+  assert.equal(action.confirm, true)
+  assert.match(action.warning, /full administrator control/)
+  assert.match(action.warning, /log in without the password/)
+  assert.match(action.warning, /Existing permission bits are replaced/)
+  assert.match(action.warning, /full table can evict another client, even an administrator or the connected radio/)
+  assert.match(action.warning, /may misdirect the reply/)
+  assert.match(action.warning, /reported login role may then be stale/)
+  assert.match(action.warning, /OK reply does not verify persistence/)
+  assert.equal(repeaterCliCommand(`setperm ${key} 3`).confirm, true)
+  for (const command of [`setperm ${key.slice(0, 12)} 3`, `setperm ${key} 2`, `setperm ${key} 03`,
+    `setperm ${key} 3 extra`, `setperm ${key} 3\nreboot`, `setperm ${key} 3\n`]) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+  for (const value of ['dd'.repeat(6), 'gg'.repeat(32), 'dd'.repeat(33)]) {
+    assert.throws(() => repeaterGrantAdminCommand(value), /64-character hex public key/)
   }
 })
 

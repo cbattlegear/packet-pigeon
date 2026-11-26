@@ -708,7 +708,9 @@ export class CompanionSession {
         throw new Error('Log in to this repeater as an administrator before using its CLI.')
       }
       if ('accessTarget' in action && (action.accessTarget === contactPublicKey(radioKey) || action.accessTarget === key)) {
-        throw new Error('Cannot remove the connected radio or repeater from its access list.')
+        throw new Error(action.command.endsWith(' 0')
+          ? 'Cannot remove the connected radio or repeater from its access list.'
+          : 'Cannot grant administrator access to the connected radio or repeater.')
       }
       const disconnected = new AbortController()
       const stop = this.subscribe(() => {

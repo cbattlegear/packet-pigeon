@@ -149,6 +149,23 @@ export function repeaterRemoveAccessCommand(value: string) {
   }
 }
 
+export const repeaterGrantAdminWarning = 'This grants full administrator control, including password changes, access changes and reboot. ' +
+  'Verify the complete public key independently; access-list prefixes can collide. The client can log in without the password while its entry remains. ' +
+  'Existing permission bits are replaced. On repeater firmware v1.14.1, adding a new entry to a full table can evict another client, even an administrator or the connected radio, and may misdirect the reply. ' +
+  'The reported login role may then be stale. Logging in again can also evict an entry if the table is full. ' +
+  'Saving is delayed and can fail; an OK reply does not verify persistence. The access list can omit entries, so it cannot prove the complete state.'
+
+export function repeaterGrantAdminCommand(value: string) {
+  const accessTarget = contactPublicKey(value)
+  return {
+    command: `setperm ${accessTarget} 3`,
+    description: 'Grant repeater administrator access',
+    confirm: true as const,
+    accessTarget,
+    warning: repeaterGrantAdminWarning,
+  }
+}
+
 export function repeaterNameCommand(value: string) {
   return repeaterCliCommand(`set name ${value}`)
 }
@@ -229,6 +246,8 @@ export function repeaterCliCommand(command: string) {
   if (found) return found
   const removeAccess = /^setperm ([0-9a-f]{64}) 0$/i.exec(command)
   if (removeAccess && removeAccess[0] === command) return repeaterRemoveAccessCommand(removeAccess[1])
+  const grantAdmin = /^setperm ([0-9a-f]{64}) 3$/i.exec(command)
+  if (grantAdmin && grantAdmin[0] === command) return repeaterGrantAdminCommand(grantAdmin[1])
   const homeRegionPrefix = 'region home '
   if (command.startsWith(homeRegionPrefix)) return repeaterHomeRegionCommand(command.slice(homeRegionPrefix.length))
   const regionPrefix = 'region get '
