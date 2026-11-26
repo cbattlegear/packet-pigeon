@@ -82,10 +82,16 @@ function tunnel(browser, radio) {
 }
 
 export async function startLanBridge({ radioHost, radioPort = defaultRadioPort, browserPort = defaultBrowserPort,
+  bindHost = browserHost, publicPort,
   distDir = fileURLToPath(new URL('../dist/', import.meta.url)) }) {
-  if (!localAddress(radioHost)) throw new Error('Enter a private, link-local, or loopback IPv4 address for the companion.')
+  if (radioHost !== undefined && !localAddress(radioHost)) {
+    throw new Error('Enter a private, link-local, or loopback IPv4 address for the companion.')
+  }
   if (!Number.isInteger(radioPort) || radioPort < 1 || radioPort > 65535 ||
-    !Number.isInteger(browserPort) || browserPort < 0 || browserPort > 65535) throw new Error('Enter valid TCP port numbers.')
+    !Number.isInteger(browserPort) || browserPort < 0 || browserPort > 65535 ||
+    (publicPort !== undefined && (!Number.isInteger(publicPort) || publicPort < 1 || publicPort > 65535))) {
+    throw new Error('Enter valid TCP port numbers.')
+  }
 
   const root = await realpath(distDir).catch(() => { throw new Error('Run npm run build before starting the local bridge.') })
   const html = await readFile(resolve(root, 'index.html'), 'utf8')
@@ -104,6 +110,7 @@ export async function startLanBridge({ radioHost, radioPort = defaultRadioPort, 
     catch { return response.writeHead(400).end() }
     if (path.origin !== origin) return response.writeHead(403).end()
     if (path.pathname === lanStatusPath) {
+      if (!radioHost) return response.writeHead(404, { 'Cache-Control': 'no-store' }).end()
       return response.writeHead(204, { [lanProtocolHeader]: lanSocketProtocol, 'Cache-Control': 'no-store' }).end()
     }
     let file
@@ -115,7 +122,7 @@ export async function startLanBridge({ radioHost, radioPort = defaultRadioPort, 
   })
   server.on('upgrade', (request, socket, head) => {
     const offered = request.headers['sec-websocket-protocol']?.split(',').map((value) => value.trim())
-    if (request.headers.host !== host || request.headers.origin !== origin || request.url !== lanSocketPath ||
+    if (!radioHost || request.headers.host !== host || request.headers.origin !== origin || request.url !== lanSocketPath ||
       !offered?.includes(lanSocketProtocol)) {
       return socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
     }
@@ -129,10 +136,11 @@ export async function startLanBridge({ radioHost, radioPort = defaultRadioPort, 
   })
   await new Promise((ready, reject) => {
     server.once('error', reject)
-    server.listen(browserPort, browserHost, () => {
+    server.listen(browserPort, bindHost, () => {
       server.removeListener('error', reject)
-      host = `${browserHost}:${server.address().port}`
-      origin = `http://${host}`
+      const url = new URL(`http://${browserHost}:${publicPort ?? server.address().port}`)
+      host = url.host
+      origin = url.origin
       ready()
     })
   })
