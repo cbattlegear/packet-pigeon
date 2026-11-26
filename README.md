@@ -429,8 +429,10 @@ For a saved repeater, **Repeater login and status** sends a login using its
 current saved route (or flood if no route is known). The reported guest or
 admin role comes from the repeater. Status is requested separately and never
 automatically. Passwords are not remembered; closing the view does not revoke
-the repeater's access list. Reconnect and log in again after an interrupted or
-timed-out request; the firmware does not tag these replies, so even after
+the repeater's access list. An interrupted or timed-out request blocks further
+login and status requests to that repeater for the current connection; a late
+reply cannot remove that block. Reconnect and log in again to retry. The
+firmware does not tag these replies, so even after
 reconnecting a delayed reply cannot be conclusively distinguished from a new
 one. The reported role is not a guarantee of current authorization. CLI, saved
 credentials, session resumption and repeater administration controls are not

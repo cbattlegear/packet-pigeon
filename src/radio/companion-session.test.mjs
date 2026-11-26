@@ -351,6 +351,61 @@ test('repeater login and explicit status use verified routes and distinguish rep
   await session.disconnect()
 })
 
+test('uncertain repeater logins reject retries and cannot regain a role from a late admin reply', async (t) => {
+  for (const outcome of ['cancel-before-confirmation', 'cancel-after-confirmation', 'timeout']) {
+    await t.test(outcome, async (t) => {
+      const contact = contactInfo()
+      contact[33] = 2
+      contact[35] = 0
+      let confirm
+      const port = new FixturePort(([code], serial) => {
+        if (code === 22) serial.emit(...deviceInfo())
+        else if (code === 1) serial.emit(...selfInfo())
+        else if (code === 4) {
+          serial.emit(2, 1, 0, 0, 0)
+          serial.emit(...contact)
+          serial.emit(4, 0, 0, 0, 0)
+        } else if (code === 26) {
+          confirm = () => serial.emit(6, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+          if (outcome !== 'cancel-before-confirmation') confirm()
+        } else assert.fail(`Unexpected command ${code}`)
+      })
+      const session = sessionWith(port)
+      await session.connect()
+      t.after(() => session.disconnect())
+      if (outcome === 'timeout') t.mock.timers.enable({ apis: ['setTimeout'] })
+      const key = 'ab'.repeat(32)
+      const target = 'bc'.repeat(32)
+      const route = { pathLength: 0, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+      const controller = new AbortController()
+      const pending = session.manageRepeater(key, target, route, 'login', 'fixture', controller.signal)
+      const rejected = assert.rejects(pending, outcome === 'timeout' ? /before the timeout/ : /Stopped waiting/)
+      for (let i = 0; i < 20 && !confirm; i++) await setImmediate()
+      assert.equal(typeof confirm, 'function')
+      // Allow the confirmation to be processed and the remote-reply timer to start.
+      await setImmediate()
+      if (outcome === 'timeout') {
+        t.mock.timers.tick(10_000)
+      } else {
+        controller.abort(new Error('Stopped waiting'))
+        if (outcome === 'cancel-before-confirmation') confirm()
+      }
+      await rejected
+      t.mock.timers.reset()
+      const commandsBeforeRetry = port.commands.length
+      await assert.rejects(session.manageRepeater(key, target, route, 'login', '', new AbortController().signal), /Reconnect/)
+      port.emit(0x85, 1, ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+      await setImmediate()
+      await assert.rejects(session.manageRepeater(key, target, route, 'login', '', new AbortController().signal), /Reconnect/)
+      await assert.rejects(session.manageRepeater(key, target, route, 'status', '', new AbortController().signal), /Reconnect/)
+      assert.equal(port.commands.length, commandsBeforeRetry)
+      assert.equal(port.commands.filter(([code]) => code === 26).length, 1)
+      assert.equal(port.commands.some(([code]) => code === 27), false)
+      assert.equal(session.getSnapshot().phase, 'ready')
+    })
+  }
+})
+
 test('repeater details verify the current contact and direct route before sending', async () => {
   const contact = contactInfo()
   contact[33] = 2

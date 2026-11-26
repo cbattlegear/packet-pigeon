@@ -59,6 +59,8 @@ export function RepeaterManagement({ session, contact, radioKey, ready, busy }: 
     <summary>Repeater login and status</summary>
     <p>Current route: {route}. Login and status each send a remote request; no requests are automatic.</p>
     <p>Passwords are used only for this login and are not saved. A repeater may grant access based on its existing access list.</p>
+    <p>After cancelling or timing out, requests to this repeater are blocked until reconnecting.
+      Reconnecting cannot rule out a delayed over-the-air reply; the reported role is not proof of current authorization.</p>
     <form className="contact-actions" onSubmit={submit}>
       <label>Repeater password
         <input ref={password} type="password" autoComplete="off" disabled={!ready || busy || pending} />
