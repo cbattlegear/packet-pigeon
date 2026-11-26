@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
-  repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, parseRepeaterNeighbors,
+  repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -152,7 +152,7 @@ test('region inspection allows bounded names but rejects injected and unsupporte
     assert.throws(() => repeaterRegionQuery(name), /region name or prefix/)
   }
   for (const command of ['region load', 'region default North',
-    'region denyf North', 'region allowf #North', 'region denyf * extra',
+    'region denyf * extra',
     'region save extra', 'region get North\nregion save']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command|region name or prefix/)
   }
@@ -161,6 +161,21 @@ test('region inspection allows bounded names but rejects injected and unsupporte
   }
   for (const command of ['region allowf *', 'region denyf *', 'region save', 'region home *']) {
     assert.equal(repeaterCliCommand(command).confirm, true)
+  }
+})
+
+test('named region flood changes are validated and require confirmation', () => {
+  for (const [action, allow] of [['allowf', true], ['denyf', false]]) {
+    for (const name of ['#North', '$private', 'North-É', 'é'.repeat(15)]) {
+      const command = repeaterRegionFloodCommand(name, allow)
+      assert.equal(command.command, `region ${action} ${name}`)
+      assert.equal(repeaterCliCommand(command.command).confirm, true)
+      assert.match(command.warning, /OK reply does not identify/)
+    }
+    for (const name of ['', '#', 'bad/name', 'a b', 'é'.repeat(16), 'North\nregion save']) {
+      assert.throws(() => repeaterRegionFloodCommand(name, allow), /region name or prefix/)
+      assert.throws(() => repeaterCliCommand(`region ${action} ${name}`), /region name or prefix/)
+    }
   }
 })
 
