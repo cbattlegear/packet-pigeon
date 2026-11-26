@@ -586,6 +586,11 @@ affect responsiveness; disabling it may increase power consumption. An `on`
 reply reports the preference, not actual sleep: Pico W repeater firmware
 v1.14.1, for example, does not implement sleep. Read the preference explicitly
 and sync replies; radio acceptance alone does not confirm success.
+Administrators can also change transmit power to a whole value from 1 to 22 dBm.
+The appropriate setting depends on the board and any external power amplifier;
+check the device manual and local radio regulations, since excessive power may
+be unlawful. The setting takes effect immediately and is saved by the repeater.
+Read `get tx` before and after, and sync replies to verify the configured value.
 Owner information can be requested
 over the mesh; do not put passwords or private data in it. Editing it requires
 repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line

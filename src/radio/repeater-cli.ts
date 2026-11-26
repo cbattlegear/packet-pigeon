@@ -106,6 +106,10 @@ export function repeaterPositionCommand(axis: 'lat' | 'lon', value: string) {
   return repeaterCliCommand(`set ${axis} ${value}`)
 }
 
+export function repeaterTransmitPowerCommand(value: string) {
+  return repeaterCliCommand(`set tx ${value}`)
+}
+
 export function repeaterNameCommand(value: string) {
   return repeaterCliCommand(`set name ${value}`)
 }
@@ -175,6 +179,14 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a name of 1 to 31 UTF-8 bytes without leading or trailing spaces, control characters, or []/\\:,?*.')
     }
     return { command, description: 'Set repeater name', confirm: true as const }
+  }
+  const txPowerPrefix = 'set tx '
+  if (command.startsWith(txPowerPrefix)) {
+    const value = command.slice(txPowerPrefix.length)
+    if (!/^(?:[1-9]|1[0-9]|2[0-2])$/.test(value)) {
+      throw new Error('Enter a whole repeater transmit power from 1 to 22 dBm.')
+    }
+    return { command, description: 'Set repeater transmit power', confirm: true as const }
   }
   const ownerPrefix = 'set owner.info '
   if (command.startsWith(ownerPrefix)) {

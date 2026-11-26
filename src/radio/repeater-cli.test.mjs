@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
-  repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, parseRepeaterNeighbors,
+  repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
+  repeaterTransmitPowerCommand, parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -132,6 +133,21 @@ test('flood hop limits accept exact whole values and require confirmation', () =
     for (const value of ['', '-1', '65', '256', '01', '1.0', '1e1', ' 1', '1 ', '1\n', '1\nreboot', '999999999999999999999']) {
       assert.throws(() => repeaterCliCommand(`set ${kind} ${value}`), /flood hop limit|supported/)
     }
+  }
+})
+
+test('transmit power uses the documented whole dBm range and requires confirmation', () => {
+  assert.equal(repeaterCliCommand('get tx').command, 'get tx')
+  for (const value of ['1', '9', '10', '21', '22']) {
+    const command = repeaterTransmitPowerCommand(value)
+    assert.equal(command.command, `set tx ${value}`)
+    assert.equal(command.confirm, true)
+    assert.equal(repeaterCliCommand(command.command).confirm, true)
+  }
+  for (const value of ['', '0', '-1', '23', '01', '1.5', '1e1', ' 1', '1 ', '999999999999999999999',
+    '12\nreboot']) {
+    assert.throws(() => repeaterTransmitPowerCommand(value), /transmit power from 1 to 22/)
+    assert.throws(() => repeaterCliCommand(`set tx ${value}`), /transmit power from 1 to 22/)
   }
 })
 
