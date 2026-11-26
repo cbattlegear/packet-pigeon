@@ -566,6 +566,12 @@ and evict older entries. Discovery responses are unauthenticated and do not
 prove identity. An `OK` reply does not prove a broadcast occurred or that any
 neighbors replied. Wait up to 60 seconds, then request `neighbors` separately.
 Old entries may remain, and the reported list can be incomplete.
+Logged-in guests and administrators can also explicitly request pages of up to
+three full neighbor public keys, ordered by most recently heard. Repeater
+firmware v1.14.1 supports this binary request; other builds may not. Entries can
+change between pages, causing omissions or duplicates. Discovery responses are
+unauthenticated, so independently verify a full key before using it. Request
+tags can repeat after a radio restart, making delayed replies ambiguous.
 Administrators can confirm removal of a neighbor from the repeater's cache
 using its full public key. The four-byte prefixes in neighbor replies can
 collide and do not establish the full identity; verify the key independently.

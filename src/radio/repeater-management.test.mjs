@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { repeaterRequest } from './repeater-management.ts'
+import { parseRepeaterNeighborPage, repeaterNeighborRequest, repeaterRequest } from './repeater-management.ts'
 
 const key = 'bc'.repeat(32)
 const prefix = new Uint8Array(6).fill(0xbc)
@@ -51,4 +51,22 @@ test('status rejects truncated replies and cancellation stops listening', async 
   } }
   await assert.rejects(repeaterRequest(link, key, 'status', '', () => () => { unsubscribe = true }, controller.signal), /cancelled/)
   assert.equal(unsubscribe, true)
+})
+
+test('full-key neighbor request and page parsing enforce bounds and preserve signed SNR', () => {
+  const request = repeaterNeighborRequest(258)
+  assert.deepEqual([...request.slice(0, 7)], [6, 0, 3, 2, 1, 0, 32])
+  assert.equal(request.length, 11)
+  for (const offset of [-1, 65536, 1.5, NaN]) assert.throws(() => repeaterNeighborRequest(offset), /offset/)
+  const row = Uint8Array.of(...new Uint8Array(32).fill(0xdd), 0x78, 0x56, 0x34, 0x12, 0xec)
+  const reply = Uint8Array.of(7, 0, 1, 0, ...row)
+  assert.deepEqual(parseRepeaterNeighborPage(reply, 3), {
+    total: 7, entries: [{ publicKey: 'dd'.repeat(32), secondsAgo: 0x12345678, snrDb: -5 }],
+  })
+  assert.deepEqual(parseRepeaterNeighborPage(Uint8Array.of(0, 0, 0, 0), 3), { total: 0, entries: [] })
+  for (const [payload, offset] of [
+    [Uint8Array.of(0, 0, 0), 0], [reply.slice(0, -1), 0],
+    [Uint8Array.of(...reply, 0), 0], [Uint8Array.of(4, 0, 4, 0), 0],
+    [reply, 7], [reply, -1],
+  ]) assert.throws(() => parseRepeaterNeighborPage(payload, offset), /invalid neighbor page/)
 })

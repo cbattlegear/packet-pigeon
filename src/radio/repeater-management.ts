@@ -10,6 +10,42 @@ export type RepeaterStatus = {
   received: number; sent: number; uptime: number; txAir: number
 }
 
+export type RepeaterNeighborPage = {
+  total: number
+  entries: { publicKey: string; secondsAgo: number; snrDb: number }[]
+}
+
+export function repeaterNeighborRequest(offset: number) {
+  if (!Number.isInteger(offset) || offset < 0 || offset > 0xffff) {
+    throw new Error('Choose a valid neighbor page offset.')
+  }
+  const request = Uint8Array.of(6, 0, 3, offset & 0xff, offset >> 8, 0, 32, 0, 0, 0, 0)
+  crypto.getRandomValues(request.subarray(7))
+  return request
+}
+
+export function parseRepeaterNeighborPage(payload: Uint8Array, offset: number): RepeaterNeighborPage {
+  if (!Number.isInteger(offset) || offset < 0 || offset > 0xffff || payload.length < 4) {
+    throw new Error('The repeater returned an invalid neighbor page.')
+  }
+  const data = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+  const total = data.getUint16(0, true)
+  const count = data.getUint16(2, true)
+  if (count > 3 || payload.length !== 4 + count * 37 || (count > 0 && offset + count > total)) {
+    throw new Error('The repeater returned an invalid neighbor page.')
+  }
+  const entries: RepeaterNeighborPage['entries'] = []
+  for (let i = 0; i < count; i++) {
+    const start = 4 + i * 37
+    entries.push({
+      publicKey: Array.from(payload.subarray(start, start + 32), (byte) => byte.toString(16).padStart(2, '0')).join(''),
+      secondsAgo: data.getUint32(start + 32, true),
+      snrDb: data.getInt8(start + 36) / 4,
+    })
+  }
+  return { total, entries }
+}
+
 export class UncertainRepeaterRequestError extends Error {}
 
 export async function repeaterRequest(

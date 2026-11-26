@@ -76,6 +76,14 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
         } else if (command[0] === 50) {
           const tag = [commands.length & 255, 2, 3, 4]
           emit([6, 0, ...tag, 0xe8, 3, 0, 0])
+          if (command[33] === 6) {
+            const offset = command[36] + 256 * command[37]
+            const pageSize = window.fixtureShortNeighborPage && offset === 0 ? 2 : 3
+            const entries = [neighborOne, neighborTwo, neighborThree, neighborCollision].slice(offset, offset + pageSize)
+            const rows = entries.flatMap((entry, index) => [...entry.slice(1, 33), 42 + index, 0, 0, 0, 0xec])
+            emit([0x8c, 0, ...tag, 4, 0, entries.length, 0, ...rows])
+            return
+          }
           const reply = () => emit([0x8c, 0, ...tag, ...new Uint8Array(6).fill(0xdd), 3])
           if (window.holdAccessList) window.releaseAccessList = reply
           else {
@@ -111,6 +119,35 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   assert.equal(await page.getByText('Administrator CLI', { exact: true }).count(), 0)
   assert.equal(await page.getByText('Inspect repeater access', { exact: true }).count(), 0)
   assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).length), 0)
+  await page.getByText('Inspect nearby repeater keys', { exact: true }).click()
+  await page.getByText(/Discovery responses are unauthenticated, so even a full key does not/).waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).length), 0)
+  await page.getByRole('button', { name: 'Request first neighbor page' }).click()
+  const neighborKeys = page.getByRole('list', { name: 'Reported nearby repeater keys' })
+  await neighborKeys.getByText(`${'1234abcd' + 'bc'.repeat(28)} · 42s · -5 dB`).waitFor()
+  assert.equal(await neighborKeys.getByRole('listitem').count(), 3)
+  assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33, 40)),
+    [6, 0, 3, 0, 0, 0, 32])
+  await page.getByRole('button', { name: 'Request next page' }).click()
+  await page.getByText(/Reported total: 4; page offset: 3/).waitFor()
+  assert.equal(await neighborKeys.getByRole('listitem').count(), 1)
+  assert.deepEqual(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).at(-1).slice(33, 40)),
+    [6, 0, 3, 3, 0, 0, 32])
+  await page.getByRole('button', { name: 'Request previous page' }).click()
+  await page.getByText(/Reported total: 4; page offset: 0/).waitFor()
+  assert.equal(await neighborKeys.getByRole('listitem').count(), 3)
+  await page.evaluate(() => { window.fixtureShortNeighborPage = true })
+  await page.getByRole('button', { name: 'Request first neighbor page' }).click()
+  await page.waitForFunction(() => document.querySelectorAll('[aria-label="Reported nearby repeater keys"] li').length === 2)
+  await page.getByRole('button', { name: 'Request next page' }).click()
+  await page.getByText(/Reported total: 4; page offset: 2/).waitFor()
+  assert.equal(await neighborKeys.getByRole('listitem').count(), 2)
+  await page.getByRole('button', { name: 'Request previous page' }).click()
+  await page.getByText(/Reported total: 4; page offset: 0/).waitFor()
+  assert.equal(await neighborKeys.getByRole('listitem').count(), 2)
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 1280, height: 720 })
   await page.evaluate(() => { window.fixtureRole = 1 })
   await password.fill('fixture-secret')
   await page.getByRole('button', { name: 'Log in', exact: true }).click()
@@ -119,8 +156,9 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.getByText('Inspect repeater access', { exact: true }).click()
   await page.getByText(/Guest entries can be omitted and the list can be truncated/).waitFor()
   await page.getByText(/some companion firmware does not surface an empty reply/).waitFor()
-  await page.getByText(/Request tags can repeat after a radio restart/).waitFor()
-  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 50).length), 0)
+  await page.getByText('Inspect repeater access', { exact: true }).locator('..')
+    .getByText(/Request tags can repeat after a radio restart/).waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code, ...rest]) => code === 50 && rest[32] === 5).length), 0)
   await page.getByRole('button', { name: 'Request access list' }).click()
   await page.getByRole('list', { name: 'Reported access entries' }).getByText(/dddddddddddd.*admin.*0x03/).waitFor()
   await page.getByText(/It may have been delayed, and this snapshot can become stale/).waitFor()
@@ -1175,6 +1213,9 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   await page.setViewportSize({ width: 1280, height: 720 })
   await page.getByText(/The neighbor list shows only four-byte prefixes, which can collide/).waitFor()
+  await page.getByText('Inspect nearby repeater keys', { exact: true }).click()
+  await page.getByRole('button', { name: 'Request first neighbor page' }).click()
+  await neighborKeys.waitFor()
   const neighborKey = page.getByLabel('Neighbor full public key')
   const removeNeighbor = page.getByRole('button', { name: 'Remove cached neighbor' })
   const beforeNeighborRemoval = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
@@ -1193,10 +1234,12 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   })
   await removeNeighbor.click()
   assert.equal(await neighborKey.inputValue(), 'DD'.repeat(32))
+  assert.equal(await neighborKeys.count(), 1)
   assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeNeighborRemoval)
   page.once('dialog', (dialog) => dialog.accept())
   await removeNeighbor.click()
   assert.equal(await neighborKey.inputValue(), '')
+  assert.equal(await neighborKeys.count(), 0)
   assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeNeighborSync)
   assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
     window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), `neighbor.remove ${'dd'.repeat(32)}`)
