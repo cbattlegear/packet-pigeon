@@ -7,6 +7,7 @@ export function messageAlert(data: RadioData, message: StoredMessage, ownName: s
     || data.readMessages?.includes(message.id) || possibleRepeats(data.messages).has(message.id)) return null
   const conversation = conversations(data).find((item) => item.messages.some((entry) => entry.id === message.id))
   if (!conversation) return null
+  if (conversation.node && message.receipt.kind === 'direct-text' && message.receipt.textType === 1) return null
   if (conversation.id.startsWith('direct:') && data.mutedDirectConversations?.includes(conversation.id.slice(0, 19))) return null
   if (message.receipt.kind === 'channel-text') {
     const index = message.receipt.channelIndex

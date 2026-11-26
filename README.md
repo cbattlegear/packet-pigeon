@@ -156,7 +156,7 @@ on a trusted LAN because MeshCore's TCP link is unencrypted.
 
 ## Direct messages
 
-Choose a companion or room contact in **Chats**, write a message, and select
+Choose a companion contact in **Chats**, write a message, and select
 **Send message** while the selected radio is connected. Messages use at most
 158 UTF-8 bytes and cannot contain NUL characters. The limit leaves room for
 retry metadata on all eight attempts and fits older companion frame sizes.
@@ -203,6 +203,32 @@ is unsaved can lose its delivery state; a packet may already have been sent.
 Possible repeated receipts are labeled and can be hidden, but are retained
 separately because MeshCore does not provide a guaranteed unique message ID.
 Browser data clearing or eviction can remove saved history.
+
+## Room servers and sensors
+
+To join a room, select its saved contact in **Chats** and use **Room access**.
+Leave the password empty to request access already granted to your radio. The
+server reports whether the current connection has read-only, posting, or
+administrator access. Reconnect and sign in again to refresh that access.
+Room posts can contain up to 150 UTF-8 bytes.
+
+Choose **Sync messages** to fetch queued room posts and sensor alerts. The
+browser keeps received entries for history, search, unread markers, and optional
+notifications. Room history supplied by the server depends on the companion's
+firmware cursor. A room post's author is resolved from the four-byte key prefix
+when there is a unique matching contact. Management replies appear in the same
+conversation with a label and stay quiet in browser notifications.
+
+In **Contacts**, sign in to a room server to request its status. Administrators
+can read reported access entries, change a client's permissions, set the name,
+control read-only entry, or post an announcement. The room firmware reports
+administrator entries in its access list. For sensors, **Sensor telemetry** shows
+current readings and **Request sensor history** asks for the selected time window.
+Sensor administrators can also set low- and high-priority alert permissions for
+a client. Commands report when the radio queues them. Sync to read the node's
+reply. These workflows were exercised with simulated radios.
+[Room-server firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/simple_room_server/MyMesh.cpp) ·
+[Sensor firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/simple_sensor/SensorMesh.cpp)
 
 ## Channel messages
 
@@ -278,7 +304,7 @@ on** uses the browser's Screen Wake Lock API while the tab is visible and
 depends on browser and device support.
 
 Browser notifications are opt-in in Settings and require browser permission.
-They alert for direct and channel text saved during manual message sync while
+They alert for direct and channel text, room posts, and sensor alerts saved during manual message sync while
 the app remains open, not after closure or through background push. The Channels
 page offers all, mentions-only and muted modes per radio and channel. Mentions
 match the connected radio's name without regard to case and are not authenticated. Direct
@@ -291,8 +317,7 @@ same-name replacement channels cannot be detected without an observed removal.
 Alert previews contain message text.
 Optional discovered-contact alerts cover newly cached USB adverts, not BLE
 adverts or previously known contacts. Optional full-storage alerts use the
-connected radio's reported contact and channel counts and capacities. Room-server
-messages and their notifications require the unimplemented room workflows (#24).
+connected radio's reported contact and channel counts and capacities.
 
 ## Sharing and companion setup
 

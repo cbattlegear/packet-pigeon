@@ -66,3 +66,26 @@ export function decodeTelemetry(input: Uint8Array): { readings: Reading[]; issue
   }
   return { readings }
 }
+
+export function decodeSensorSummary(input: Uint8Array) {
+  if (input.length < 4) throw new Error('The sensor returned an incomplete history report.')
+  const timestamp = new DataView(input.buffer, input.byteOffset, input.byteLength).getUint32(0, true)
+  const readings = []
+  for (let offset = 4; offset < input.length;) {
+    if (offset + 2 > input.length) throw new Error('The sensor returned an incomplete history reading.')
+    const channel = input[offset]
+    const type = input[offset + 1]
+    const format = formats[type]
+    if (!format || (format.components ?? 1) !== 1) throw new Error('The sensor returned an unsupported history type.')
+    const start = offset + 2
+    // The firmware's history encoder uses a two-byte value in tenths for humidity.
+    const size = type === 104 ? 2 : format.size
+    const scale = type === 104 ? 10 : format.scale ?? 1
+    if (start + size * 3 > input.length) throw new Error('The sensor returned an incomplete history reading.')
+    const value = (index: number) => readInteger(input, start + size * index, size, format.signed) / scale
+    readings.push({ channel, type, label: channel === 1 && type === 116 ? 'Battery voltage' : format.label,
+      unit: format.unit, minimum: value(0), maximum: value(1), average: value(2) })
+    offset = start + size * 3
+  }
+  return { timestamp, readings }
+}

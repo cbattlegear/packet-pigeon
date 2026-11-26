@@ -8,6 +8,7 @@ export type Conversation = {
   description: string
   recipient: string | null
   channel: { index: number; name: string } | null
+  node?: { type: 'room' | 'sensor'; publicKey: string }
   messages: StoredMessage[]
 }
 
@@ -27,12 +28,14 @@ export function conversations(data: RadioData, inMemoryDraftIds: readonly string
     const contact = contacts.get(key)
     const matches = prefixes.get(key.slice(0, 12)) ?? []
     const role = contact?.details?.type
+    const node = contact && matches.length === 1 && (role === 3 || role === 4)
+      ? { type: role === 3 ? 'room' as const : 'sensor' as const, publicKey: contact.publicKey } : undefined
     const recipient = contact && matches.length === 1 && (role === 1 || role === 3) ? contact.publicKey : null
     const title = contact ? names.get(key) || contact.name || 'Unnamed contact' : `Unknown contact ${key.slice(0, 12)}`
-    const description = contact
+    const description = node ? `${node.type === 'room' ? 'Room server' : 'Sensor alerts'} · ${node.publicKey}` : contact
       ? recipient ? contact.publicKey : matches.length > 1 ? 'Ambiguous key prefix; sending is unavailable.' : 'This contact cannot receive direct messages.'
       : 'Sender or former contact is not uniquely identified.'
-    return { id, title, description, recipient, channel: null, messages: [] }
+    return { id, title, description, recipient, channel: null, ...(node ? { node } : {}), messages: [] }
   }
 
   function add(id: string) {
@@ -56,7 +59,7 @@ export function conversations(data: RadioData, inMemoryDraftIds: readonly string
   }
 
   for (const contact of data.contacts) {
-    if (contact.details?.type === 1 || contact.details?.type === 3) add(`direct:${contact.publicKey.toLowerCase()}`)
+    if ([1, 3, 4].includes(contact.details?.type ?? 0)) add(`direct:${contact.publicKey.toLowerCase()}`)
   }
   for (const channel of data.channels) add(`channel:${channel.index}`)
   for (const draft of data.drafts) add(draft.conversationId)
@@ -89,6 +92,16 @@ export function conversations(data: RadioData, inMemoryDraftIds: readonly string
     )
     return latest(second) - latest(first) || first.title.localeCompare(second.title) || first.id.localeCompare(second.id)
   })
+}
+
+export function nodeMessageSender(conversation: Conversation, message: StoredMessage, contacts: readonly StoredContact[]) {
+  const receipt = message.receipt
+  if (!conversation.node || receipt?.kind !== 'direct-text') return conversation.title
+  if (receipt.textType === 1) return `${conversation.title} · Management reply`
+  if (conversation.node.type !== 'room' || receipt.textType !== 2 || !receipt.signatureHex) return conversation.title
+  const prefix = receipt.signatureHex
+  const matches = contacts.filter(({ publicKey }) => publicKey.toLowerCase().startsWith(prefix))
+  return matches.length === 1 && matches[0].name ? matches[0].name : `Room member ${prefix}`
 }
 
 export function searchMessages(messages: readonly StoredMessage[], query: string) {

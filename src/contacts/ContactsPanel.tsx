@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { storedContact } from '../integration/contact-record.ts'
 import { mapPosition, roles } from '../map/nodes.ts'
@@ -13,6 +13,7 @@ import type { ContactEntry, ContactSort } from './model.ts'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { ContactRadioActions } from './ContactRadioActions.tsx'
 import type { ContactRadioSession } from './ContactRadioActions.tsx'
+import type { RemoteNodeSession } from './RemoteNodePanel.tsx'
 import { ContactTelemetry } from '../telemetry/TelemetryPanel.tsx'
 import type { TelemetrySession } from '../telemetry/TelemetryPanel.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
@@ -23,7 +24,7 @@ import './contacts.css'
 
 type ContactsProps = {
   snapshot: CompanionSnapshot
-  session: ContactRadioSession & TelemetrySession
+  session: ContactRadioSession & TelemetrySession & RemoteNodeSession
   cacheSaving: boolean
   messageSyncing: boolean
   messageSending: boolean
@@ -45,6 +46,7 @@ const emptyCache: CacheView = { keys: [], key: null, data: null, error: null }
 const noContacts: StoredContact[] = []
 const dates = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 const relativeTime = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' })
+const RemoteNodePanel = lazy(async () => ({ default: (await import('./RemoteNodePanel.tsx')).RemoteNodePanel }))
 
 function advertAge(timestamp: number | undefined) {
   if (!timestamp) return 'Never heard'
@@ -361,8 +363,14 @@ function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite,
           <ContactDetails contact={detail} busy={busy} canWrite={canWrite} location={location} locate={locate}
             onMap={onMap} onShare={onShare} copyKey={copyKey} edit={edit} remove={() => void remove([detail])}
             radioControls={<>
+              {(detail.details?.type === 3 || detail.details?.type === 4) && detail.publicKey !== radioKey &&
+                <Suspense fallback={null}>
+                  <RemoteNodePanel key={`node:${detail.publicKey}`} session={session} radioKey={radioKey} nodeKey={detail.publicKey}
+                    name={detail.displayName} type={detail.details.type} active={active} ready={canWrite} busy={busy || radioBusy} />
+                </Suspense>}
               {detail.publicKey !== radioKey && <ContactTelemetry key={`telemetry:${detail.publicKey}`} active={active} session={session}
-                radioKey={radioKey} contactKey={detail.publicKey} ready={canWrite} firmware={firmware} radioBusy={busy || radioBusy} />}
+                radioKey={radioKey} contactKey={detail.publicKey} ready={canWrite} firmware={firmware} radioBusy={busy || radioBusy}
+                label={detail.details?.type === 4 ? 'Sensor telemetry' : undefined} />}
               {detail.details && <ContactRadioActions key={detail.publicKey} session={session}
                 contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} framed={framed}
                 firmware={firmware} busy={busy || radioBusy} onMap={onPathMap} additionalPathNodes={additionalPathNodes} />}

@@ -442,7 +442,7 @@ function App() {
           </div>
         )}
         <div className="chat-slot" hidden={activeSection !== 'Chats'}>
-          <ChatPanel snapshot={snapshot} messageSync={messageSync} messageStatus={messageStatus}
+          <ChatPanel snapshot={snapshot} messageSync={messageSync} messageStatus={messageStatus} nodeSession={session}
             direct={directMessages} status={directStatus} cacheSaving={cacheStatus.saving}
             active={activeSection === 'Chats'} preferences={settings.preferences} locale={settings.locale}
             mapPosition={sharePosition}
