@@ -97,7 +97,7 @@ const managementForms = {
   name: { title: 'Change repeater name', terms: 'set name get name' },
   owner: { title: 'Change owner information', terms: 'set owner.info' },
   gps: { title: 'Manage GPS receiver', terms: 'gps on gps off sensor get gps activity' },
-  position: { title: 'Change stored position', terms: 'set lat set lon gps advert location' },
+  position: { title: 'Change stored position', terms: 'set lat set lon gps setloc gps advert location' },
 } as const
 
 export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onNeighborChange, onReboot,
@@ -134,6 +134,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const receiverGainCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set radio.rxgain on' || item.command === 'set radio.rxgain off')
   const gpsCommands = repeaterCliCommands.filter((item) => item.command === 'gps on' || item.command === 'gps off')
+  const gpsSetLocation = repeaterCliCommands.find((item) => item.command === 'gps setloc')
   const multiAckCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set multi.acks 1' || item.command === 'set multi.acks 0')
   const [latitude, setLatitude] = useState('')
@@ -578,6 +579,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {powerDiagnosticHelp(selected) && <p>{powerDiagnosticHelp(selected)} Firmware and hardware support vary; replies may be delayed.</p>}
     {selected === 'sensor get gps' && <p>This reads the reported GPS activity setting, not a fix or hardware power state.
       In v1.14.1, 1 means active and 0 inactive; null means the setting was not found. Other firmware may differ and replies may be stale.</p>}
+    {selected === 'gps setloc' && gpsSetLocation && <p>{gpsSetLocation.warning}</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
@@ -1071,6 +1073,16 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       <p>Advertisements use these stored coordinates only when the GPS advert policy is <code>prefs</code>.
         Policy <code>none</code> omits location; <code>share</code> uses sensor coordinates.
         Read the current values with <code>get lat</code> and <code>get lon</code>. Changing one coordinate does not change the other.</p>
+      <p>Copying sensor coordinates replaces both stored values. They can be stale or zero even without a GPS fix or receiver.
+        Firmware support varies. Sync replies and read both stored coordinates separately; an ok reply does not prove a valid fix or persistence.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get lat', 'Read stored latitude', false)}>Read stored latitude</button>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get lon', 'Read stored longitude', false)}>Read stored longitude</button>
+        {gpsSetLocation && <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => sendChoice(gpsSetLocation)}>{gpsSetLocation.description}</button>}
+      </div>
       <p>Check the policy explicitly below. Some firmware builds do not support this command; an unsupported reply does not establish the policy.
         Changes affect newly created advertisements but do not send one or recall already queued or transmitted locations. Sensor coordinates may be stale or zero;
         selecting share does not enable GPS. Sync replies and read the policy again to check the change.</p>
@@ -1130,6 +1142,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
               In v1.14.1, 1 means active and 0 inactive. A null or unsupported reply does not establish hardware support. Firmware and hardware support vary.</p>}
           {(item.command === 'gps on' || item.command === 'gps off') && item.reply !== null &&
             <p className="contact-status">An ok reply does not prove a fix, hardware state, or persistence. Request the GPS activity setting separately.</p>}
+          {item.command === 'gps setloc' && item.reply !== null &&
+            <p className="contact-status">An ok reply does not prove a valid fix or persistence. Read both stored coordinates separately; firmware support varies.</p>}
           {item.command === 'region' && item.reply !== null &&
             <p className="contact-status">The region tree may be truncated without an indication; it is not a complete inventory.
               F marks flood permission, ^ marks the home region, and * is the unscoped wildcard.</p>}

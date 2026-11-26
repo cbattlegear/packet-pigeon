@@ -722,6 +722,14 @@ prove a fix, hardware state, or persistence. In v1.14.1, `1` means active and
 `0` inactive; `null` means the setting was not found.
 The `gps` status command is not offered: repeater v1.14.1 may crash when a GPS
 receiver is not detected.
+Administrators can confirm copying sensor coordinates to both stored position
+fields. In v1.14.1, the command does not check for a receiver or a valid fix;
+the sensor values may be stale or zero. New advertisements can publish the
+stored coordinates when the policy is `prefs`. This does not send an advert or
+recall previously queued or sent locations. Saving also sets a local advert
+interval below 60 minutes to zero; an already scheduled advert may still be
+sent. An `ok` reply does not prove a valid fix or persistence. Sync replies and
+read both stored coordinates separately; firmware support varies.
 Administrators can explicitly query power-management support, reported power
 source, boot reset and shutdown reasons, and boot voltage. In v1.14.1, support
 reflects a firmware build flag rather than proof of board functionality; source
