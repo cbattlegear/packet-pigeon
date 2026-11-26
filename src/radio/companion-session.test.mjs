@@ -487,6 +487,7 @@ test('definite companion rejection leaves repeater login retryable', async (t) =
 })
 
 test('repeater CLI requires current admin access, a verified route, and confirmed advertisements', async (t) => {
+  t.mock.method(globalThis.crypto, 'getRandomValues', (values) => { values[0] = 0; return values })
   const contact = contactInfo()
   contact[33] = 2
   contact[35] = 1
@@ -494,6 +495,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   let admin = false
   let duplicate = false
   let malformed = false
+  let delayed = false
   const port = new FixturePort((command, serial) => {
     switch (command[0]) {
       case 22: serial.emit(...deviceInfo()); break
@@ -513,6 +515,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
         serial.emit(0x85, Number(admin), ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
         break
       case 2:
+        if (delayed) break
         if (malformed) serial.emit(6, 0)
         else serial.emit(6, 0, 0, 0, 0, 0, 0xe8, 3, 0, 0)
         break
@@ -560,7 +563,53 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   assert.equal(port.commands.filter(([code]) => code === 2).length, 3)
   malformed = false
   const retry = await send('ver')
-  assert.notEqual(retry.tag, unconfirmedTag)
+  assert.equal(unconfirmedTag, '02')
+  assert.equal(retry.tag, '03')
+  delayed = true
+  const pending = send('board')
+  await waitFor(() => port.commands.filter(([code]) => code === 2).length === 5)
+  assert.throws(() => session.reserveQueuedMessage(key), /contact change/)
+  port.emit(6, 0, ...new Uint8Array(8))
+  await pending
+})
+
+test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {
+  t.mock.method(globalThis.crypto, 'getRandomValues', (values) => { values[0] = 0; return values })
+  const contact = contactInfo()
+  contact[33] = 2
+  contact[35] = 0
+  const fixture = () => new FixturePort(([code], serial) => {
+    if (code === 22) serial.emit(...deviceInfo())
+    else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) {
+      serial.emit(2, 1, 0, 0, 0)
+      serial.emit(...contact)
+      serial.emit(4, 0, 0, 0, 0)
+    } else if (code === 26) {
+      serial.emit(6, 0, ...new Uint8Array(8))
+      serial.emit(0x85, 1, ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+    } else if (code === 2) serial.emit(6, 0, ...new Uint8Array(8))
+    else assert.fail(`Unexpected command ${code}`)
+  })
+  const ports = [fixture(), fixture()]
+  const session = sessionWith(ports[0], 1000, {
+    environment: { secureContext: true, serial: { requestPort: async () => ports.shift(), getPorts: async () => [] } },
+  })
+  t.after(() => session.disconnect())
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const route = { pathLength: 0, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+  const signal = () => new AbortController().signal
+  const sendAfterLogin = async () => {
+    await session.connect()
+    await session.manageRepeater(key, target, route, 'login', '', signal())
+    return session.sendRepeaterCommand(key, target, route, 'ver', false, signal())
+  }
+  const first = await sendAfterLogin()
+  await session.disconnect()
+  const second = await sendAfterLogin()
+  assert.equal(first.tag, '00')
+  assert.equal(second.tag, '01')
 })
 
 test('repeater CLI respects uncertain login state and an active message lease', async (t) => {
