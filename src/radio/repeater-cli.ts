@@ -305,12 +305,23 @@ export function repeaterCliQuery(command: string) {
   throw new Error('Enter a supported read-only CLI query. Use the management controls for changes.')
 }
 
-function validateRegionName(value: string) {
+export function isRepeaterCliQuery(command: string): boolean {
+  const found = repeaterCliCommands.find((item) => item.command === command)
+  if (found && !('confirm' in found)) return true
+  const prefix = 'region get '
+  return command.startsWith(prefix) && isValidRegionName(command.slice(prefix.length))
+}
+
+function isValidRegionName(value: string): boolean {
   const bytes = new TextEncoder().encode(value)
-  if (value !== '*' && (!value || value === '#' || bytes.length > 30 ||
-    new TextDecoder().decode(bytes) !== value || /[\s\p{Cc}]/u.test(value) ||
-    bytes.some((byte) => byte !== 35 && byte !== 36 && byte !== 45 &&
-      !(byte >= 48 && byte <= 57) && !(byte >= 65 && byte !== 127)))) {
+  return value === '*' || !!value && value !== '#' && bytes.length <= 30 &&
+    new TextDecoder().decode(bytes) === value && !/[\s\p{Cc}]/u.test(value) &&
+    !bytes.some((byte) => byte !== 35 && byte !== 36 && byte !== 45 &&
+      !(byte >= 48 && byte <= 57) && !(byte >= 65 && byte !== 127))
+}
+
+function validateRegionName(value: string) {
+  if (!isValidRegionName(value)) {
     throw new Error('Enter * or a valid region name or prefix of up to 30 UTF-8 bytes without spaces or control characters.')
   }
 }

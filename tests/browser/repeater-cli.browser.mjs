@@ -63,6 +63,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     const textFrame = (prefix, type, text) => Uint8Array.of(16, 0, 0, 0, ...new Uint8Array(6).fill(prefix),
       0, type, 1, 0, 0, 0, ...encoder.encode(text))
     window.queueRepeaterReply = (text) => queue.push(textFrame(0xbc, 1, `${lastTag}|${text}`))
+    window.queueTaggedRepeaterReply = (tag, text) => queue.push(textFrame(0xbc, 1, `${tag}|${text}`))
     const port = Object.assign(new EventTarget(), {
       readable: new ReadableStream({ start(incoming) { controller = incoming } }),
       writable: new WritableStream({ write(packet) {
@@ -1507,6 +1508,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   assert.equal(guestPasswordCommand.slice(3), 'set guest.password VerySecret9')
   const guestPasswordHistory = page.locator('.repeater-cli-history li').filter({ hasText: 'set guest.password [redacted]' })
   await guestPasswordHistory.getByText(/Accepted by radio/).waitFor()
+  assert.equal(await guestPasswordHistory.getByRole('button', { name: /Repeat query/ }).count(), 0)
   await page.evaluate(() => window.queueRepeaterReply('OK'))
   await sync.click()
   await guestPasswordHistory.getByText('OK', { exact: true }).waitFor()
@@ -2861,6 +2863,43 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     await history.getByText(reply, { exact: true }).waitFor()
     if (command === 'get freq') await history.getByText(/not the active frequency or proof of persistence/).waitFor()
   }
+  const historyList = page.locator('.repeater-cli-history')
+  assert.equal(await historyList.locator('li').filter({ hasText: 'log erase' }).getByRole('button', { name: /Repeat query/ }).count(), 0)
+  const frequencyHistory = historyList.locator('li').filter({ hasText: 'get freq' })
+  const beforeRepeat = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  const beforeRepeatSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+  const repeatFrequency = frequencyHistory.first().getByRole('button', { name: 'Repeat query: get freq' })
+  await repeatFrequency.focus()
+  await page.keyboard.press('Enter')
+  await frequencyHistory.first().getByText(/Accepted by radio/).waitFor()
+  const firstRepeat = await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))))
+  await page.evaluate(() => { window.fixtureUnconfirmed = true })
+  await frequencyHistory.first().getByRole('button', { name: 'Repeat query: get freq' }).click()
+  await frequencyHistory.first().getByText(/Send unconfirmed/).waitFor()
+  const secondRepeat = await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))))
+  assert.equal(firstRepeat.slice(3), 'get freq')
+  assert.equal(secondRepeat.slice(3), 'get freq')
+  assert.notEqual(firstRepeat.slice(0, 2), secondRepeat.slice(0, 2))
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeRepeat + 2)
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeRepeatSync)
+  await page.evaluate(([first, second]) => {
+    window.queueTaggedRepeaterReply(second, '> second frequency')
+    window.queueTaggedRepeaterReply(first, '> first frequency')
+  }, [firstRepeat.slice(0, 2), secondRepeat.slice(0, 2)])
+  await sync.click()
+  await frequencyHistory.nth(0).getByText('> second frequency', { exact: true }).waitFor()
+  await frequencyHistory.nth(1).getByText('> first frequency', { exact: true }).waitFor()
+  await page.evaluate(() => { window.fixtureUnconfirmed = false })
+  const regionHistory = historyList.locator('li').filter({ hasText: 'region get #North' })
+  await regionHistory.first().getByRole('button', { name: 'Repeat query: region get #North' }).click()
+  await regionHistory.first().getByText(/Accepted by radio/).waitFor()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'region get #North')
+  await page.evaluate(() => window.queueRepeaterReply('> repeated region'))
+  await sync.click()
+  await regionHistory.first().getByText('> repeated region', { exact: true }).waitFor()
   assert.ok(await page.locator('.repeater-cli-history li').count() > 0)
   const beforeFinalEnd = await page.evaluate(() => window.fixtureCommands.length)
   await page.getByRole('button', { name: 'End local repeater access' }).click()
