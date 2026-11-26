@@ -135,6 +135,8 @@ export class CompanionSession {
   private repeaterLogin?: { attempt: Attempt; key: string; pathLength: number; pathHex: string; role: RepeaterLogin['role'] }
   private readonly uncertainRepeaterRequests = new WeakMap<Attempt, Set<string>>()
   private readonly repeaterCliTags = new Map<string, Set<string>>()
+  readonly #repeaterPasswords = new Map<string, Uint8Array>()
+  readonly #repeaterPasswordRevisions = new Map<string, number>()
   private readonly openScopeStorage: typeof openRadioStorage
   private scopeTail: Promise<void> = Promise.resolve()
 
@@ -574,12 +576,36 @@ export class CompanionSession {
       return route
     })
 
+  readonly hasRememberedRepeaterPassword = (radioKey: string, contactKey: string) =>
+    this.#repeaterPasswords.has(`${contactPublicKey(radioKey)}:${contactPublicKey(contactKey)}`)
+
+  readonly forgetRepeaterPassword = (radioKey: string, contactKey: string) => {
+    const key = `${contactPublicKey(radioKey)}:${contactPublicKey(contactKey)}`
+    this.#repeaterPasswords.get(key)?.fill(0)
+    this.#repeaterPasswords.delete(key)
+    this.#repeaterPasswordRevisions.set(key, (this.#repeaterPasswordRevisions.get(key) ?? 0) + 1)
+  }
+
+  readonly resumeRepeater = (
+    radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string }, signal: AbortSignal,
+  ) => {
+    const key = `${contactPublicKey(radioKey)}:${contactPublicKey(contactKey)}`
+    const password = this.#repeaterPasswords.get(key)
+    if (!password) throw new Error('No repeater password is remembered in this tab.')
+    return this.manageRepeater(radioKey, contactKey, expectedRoute, 'login', new TextDecoder().decode(password), signal)
+  }
+
   readonly manageRepeater = async (
     radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
-    operation: 'login' | 'status', password: string, signal: AbortSignal,
+    operation: 'login' | 'status', password: string, signal: AbortSignal, rememberPassword = false,
   ): Promise<RepeaterLogin | RepeaterStatus> => {
     const key = contactPublicKey(contactKey)
     if (key === radioKey) throw new Error('Choose a different repeater from the connected radio.')
+    if (rememberPassword && (operation !== 'login' || !password)) {
+      throw new Error('Enter a nonempty password to remember it.')
+    }
+    const passwordKey = `${contactPublicKey(radioKey)}:${key}`
+    const passwordRevision = this.#repeaterPasswordRevisions.get(passwordKey) ?? 0
     signal.throwIfAborted()
     return this.runRadioCommand(radioKey, async (link) => {
       const attempt = this.attempt!
@@ -607,6 +633,10 @@ export class CompanionSession {
           const result = await repeaterRequest(link, key, operation, password, this.subscribeToPushes, request)
           if (operation === 'login' && 'role' in result) {
             this.repeaterLogin = { attempt, key, pathLength: target.pathLength, pathHex: target.pathHex, role: result.role }
+            if (rememberPassword && (this.#repeaterPasswordRevisions.get(passwordKey) ?? 0) === passwordRevision) {
+              this.#repeaterPasswords.get(passwordKey)?.fill(0)
+              this.#repeaterPasswords.set(passwordKey, new TextEncoder().encode(password))
+            }
           }
           return result
         } catch (error) {

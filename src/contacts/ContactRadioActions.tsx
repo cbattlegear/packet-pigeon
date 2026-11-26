@@ -17,7 +17,8 @@ import type { RepeaterMessageSync } from './RepeaterCli.tsx'
 
 export type ContactRadioSession = Pick<CompanionSession,
   'addContact' | 'removeContact' | 'saveContactPath' | 'resetContactPath' | 'saveContactPermissions' | 'pingContact' |
-  'manageRepeater' | 'readRepeaterAccessList' | 'sendRepeaterCommand'>
+  'manageRepeater' | 'readRepeaterAccessList' | 'sendRepeaterCommand' | 'hasRememberedRepeaterPassword' |
+  'forgetRepeaterPassword' | 'resumeRepeater'>
 
 type Props = {
   session: ContactRadioSession
