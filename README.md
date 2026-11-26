@@ -132,6 +132,16 @@ for automatic transmission.
 Messages and, by default, drafts are stored in the browser's per-radio cache,
 including when the radio is offline.
 
+Use **New chat** to choose a cached contact or channel, or **Unread only** to
+filter the conversation list. Search filters messages in the selected chat.
+**Search all chats** finds cached messages on the selected radio and opens the
+matching message in its conversation.
+Date and New messages dividers mark the history; **Jump to bottom** returns to
+the latest messages. Press Enter to send, or Shift+Enter for a newline.
+Only receipts brought into view are marked read, including while searching.
+Contact unread badges use the same per-radio read markers as Chats; ambiguous
+sender prefixes are not attributed to a contact.
+
 The app saves the outgoing message and each expected acknowledgement before
 transmitting. It shows sending, sent, delivered, and failed states. Delivered
 means the radio received a matching MeshCore acknowledgement, not that a person

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { conversations, messageVisibility, oldestUnreadReceipt, possibleRepeats, receiptPathDescription, unreadReceipts } from './model.ts'
+import { conversations, messageDay, messageVisibility, oldestUnreadReceipt, possibleRepeats, receiptPathDescription, searchMessages, unreadReceipts } from './model.ts'
 
 const details = {
   type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
@@ -119,4 +119,29 @@ test('the oldest unread receipt uses the sender timestamp and skips outgoing and
   const unread = unreadReceipts([undated, received, oldest, sent, read], new Set([read.id]))
   assert.deepEqual(unread.map(({ id }) => id), [undated.id, received.id, oldest.id])
   assert.equal(oldestUnreadReceipt(unread), oldest)
+})
+
+test('orders cached history by time and searches without modifying receipts', () => {
+  const later = { ...received, id: 'later', timestamp: 200000, text: 'Radio Pigeon' }
+  const undated = { ...received, id: 'undated', timestamp: null, text: 'Unknown' }
+  const data = { contacts: [], channels: [], messages: [later, undated, received], drafts: [], preferences: null }
+  const messages = conversations(data)[0].messages
+  assert.deepEqual(messages.map(({ id }) => id), ['one', 'later', 'undated'])
+  assert.deepEqual(searchMessages(messages, ' PIGEON ').map(({ id }) => id), ['later'])
+  assert.deepEqual(searchMessages(messages, ' ').map(({ id }) => id), ['one', 'later', 'undated'])
+  assert.equal(messageDay(null), null)
+  assert.equal(messageDay(Infinity), null)
+  assert.equal(messageDay(new Date(2026, 0, 3, 10).getTime()), messageDay(new Date(2026, 0, 3, 23).getTime()))
+  assert.notEqual(messageDay(new Date(2026, 0, 3).getTime()), messageDay(new Date(2026, 0, 4).getTime()))
+  assert.deepEqual(data.messages.map(({ id }) => id), ['later', 'undated', 'one'])
+})
+
+test('keeps a draft accessible when its contact or channel is no longer cached', () => {
+  const data = {
+    contacts: [], channels: [], messages: [], preferences: null,
+    drafts: [{ conversationId: `direct:${first}`, text: 'Unsent' }, { conversationId: 'channel:3', text: 'Draft' }],
+  }
+  const items = conversations(data)
+  assert.equal(items.find((item) => item.id === `direct:${first}`).recipient, null)
+  assert.equal(items.find((item) => item.id === 'channel:3').channel, null)
 })

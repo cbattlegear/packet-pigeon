@@ -14,6 +14,8 @@ import { ContactRadioActions } from './ContactRadioActions.tsx'
 import type { ContactRadioSession } from './ContactRadioActions.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
 import { discoveryEntries, discoveryPathNodes } from '../discovery/model.ts'
+import { conversations, unreadReceipts } from '../chats/model.ts'
+import type { DirectStatus } from '../integration/direct-messages.ts'
 import './contacts.css'
 
 type ContactsProps = {
@@ -22,6 +24,8 @@ type ContactsProps = {
   cacheSaving: boolean
   messageSyncing: boolean
   messageSending: boolean
+  messageStatus: DirectStatus
+  active: boolean
   onMap: (position: Coordinates, terrain: boolean) => void
   onImport?: () => void
   onShare?: (link: string) => void
@@ -69,7 +73,8 @@ function exportContacts(contacts: readonly ContactEntry[]) {
 }
 
 export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare,
-  radioNavigation, onRadioNavigationHandled, onPathMap, mapPathNodes, discoveredHops, discoveredRadio }: ContactsProps) {
+  radioNavigation, onRadioNavigationHandled, onPathMap, mapPathNodes, discoveredHops, discoveredRadio,
+  messageStatus, active }: ContactsProps) {
   const live = snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [offlineChoice, setOfflineChoice] = useState<RadioKey | '' | null>(null)
@@ -85,6 +90,13 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
   const entries = useMemo(() => contactEntries(
     contacts, data?.contactPreferences ?? [], data?.messages ?? [],
   ), [contacts, data])
+  const unreadByContact = useMemo(() => {
+    const messages = messageStatus.key === radioKey ? messageStatus.data : data
+    if (!messages) return new Map<string, number>()
+    const read = new Set(messages.readMessages)
+    return new Map(conversations({ ...messages, contacts }).flatMap((conversation) =>
+      conversation.recipient ? [[conversation.recipient.toLowerCase(), unreadReceipts(conversation.messages, read).length] as const] : []))
+  }, [contacts, data, messageStatus, radioKey])
   const additionalPathNodes = useMemo(() => [
     ...(radioKey && discoveredRadio === radioKey && discoveredHops
       ? discoveredHops : discoveryPathNodes(discoveryEntries(data))),
@@ -116,7 +128,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
     }
     void read()
     return () => { active = false }
-  }, [radioKey, cacheSaving, messageSyncing, messageSending, refresh])
+  }, [radioKey, cacheSaving, messageSyncing, messageSending, refresh, active])
 
   async function savePreference(key: RadioKey, change: ContactPreferenceEdit) {
     const storage = await openRadioStorage()
@@ -151,6 +163,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
           key={radioKey}
           radioKey={radioKey}
           entries={entries}
+          unreadByContact={unreadByContact}
           session={session}
           canWrite={liveKey === radioKey && snapshot.phase === 'ready'}
           firmware={lastSessionKey === radioKey ? snapshot.device?.capabilities.firmwareProtocolVersion ?? 0 : 0}
@@ -171,6 +184,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
 type BrowserProps = {
   radioKey: RadioKey
   entries: ContactEntry[]
+  unreadByContact: ReadonlyMap<string, number>
   session: ContactsProps['session']
   canWrite: boolean
   firmware: number
@@ -183,7 +197,7 @@ type BrowserProps = {
   additionalPathNodes: readonly PathNode[]
 }
 
-function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, radioBusy, savePreference, onMap, onShare,
+function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite, firmware, usb, radioBusy, savePreference, onMap, onShare,
   onPathMap, additionalPathNodes }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
@@ -332,6 +346,8 @@ function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, r
                 <strong>{contact.displayName}</strong>
                 <span className="contact-meta">{roleLabel(contact.details?.type)} · {advertAge(contact.details?.lastAdvertisedAt)}
                   {contact.favorite ? ' · Favorite' : ''}</span>
+                {(unreadByContact.get(contact.publicKey.toLowerCase()) ?? 0) > 0 &&
+                  <span>{unreadByContact.get(contact.publicKey.toLowerCase())} unread</span>}
               </button>
             </li>
           ))}

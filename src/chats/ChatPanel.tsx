@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { FormEvent } from 'react'
 import type { DirectMessages, DirectStatus } from '../integration/direct-messages.ts'
 import type { MessageSync } from '../integration/message-sync.ts'
@@ -12,14 +12,13 @@ import { channelTextBytes, channelTextLimit } from '../radio/channel-message.ts'
 import { routeLabel } from '../radio/rx-packet.ts'
 import { channelSender } from '../channels/senders.ts'
 import { openRadioStorage, radioKeyFromPublicKey, validChannelScopeSettings } from '../storage/index.ts'
-import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredContact, StoredMessage } from '../storage/index.ts'
+import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredContact, StoredMessage, StoredOutgoing } from '../storage/index.ts'
 import type { Coordinates } from '../map/nodes.ts'
 import { ComposerTools } from '../sharing/ComposerTools.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
-import { conversations, correlateChannelObservations, deliveryLabel, matchingChannelReceipts, messageDate, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
+import { conversations, correlateChannelObservations, matchingChannelReceipts, messageDay, messageVisibility, oldestUnreadReceipt, receiptPathDescription, searchMessages, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
-import { ChatNavigation } from './ChatNavigation.tsx'
-import type { ChatDestination } from './ChatNavigation.tsx'
+import { ChatSearch } from './ChatSearch.tsx'
 import { channelMentionNames, channelMessageBody, channelReply, channelTextParts, insertChannelMention, isSelfMention, mentionableName } from './mentions.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
@@ -27,6 +26,8 @@ import { contactPosition } from '../contacts/model.ts'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
+
+type SearchTarget = { id: string }
 
 type Props = {
   snapshot: CompanionSnapshot
@@ -79,26 +80,20 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const [offlineChoice, setOfflineChoice] = useState<RadioKey | '' | null>(null)
   const [keys, setKeys] = useState<RadioKey[]>([])
   const [loadError, setLoadError] = useState('')
-  const [selection, setSelection] = useState<{ key: RadioKey; id: string; destination?: ChatDestination } | null>(null)
+  const [selection, setSelection] = useState<{ key: RadioKey; id: string; searchTarget?: SearchTarget } | null>(null)
+  const [unreadOnly, setUnreadOnly] = useState(false)
   const radioKey = live ?? (offlineChoice === null ? last : offlineChoice || null)
   const data = status.key === radioKey ? status.data : null
   const canSync = snapshot.phase === 'ready'
-  const items = useMemo(() => data ? conversations(data) : [], [data])
+  const items = useMemo(() => data && status.key ? conversations(data, direct.inMemoryDraftIds(status.key)) : [],
+    [data, direct, status])
   const read = useMemo(() => new Set(data?.readMessages), [data?.readMessages])
-  const unread = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const item of items) {
-      const count = unreadReceipts(item.messages, read).length
-      if (count) counts.set(item.id, count)
-    }
-    return counts
-  }, [items, read])
   const formatTime = useMemo(() => clockFormatter(locale, preferences.clock).format, [locale, preferences.clock])
-  const formatDate = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'long' }).format, [locale])
-  const currentSelection = selection?.key === radioKey ? selection : null
-  const preferred = currentSelection?.id ?? data?.preferences?.selectedConversationId
+  const formatDate = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format, [locale])
+  const radioSelection = selection?.key === radioKey ? selection : null
+  const preferred = radioSelection?.id ?? data?.preferences?.selectedConversationId
   const selected = items.find((item) => item.id === preferred) ?? items[0]
-  const destination = currentSelection?.id === selected?.id ? currentSelection?.destination : undefined
+  const searchTarget = radioSelection?.id === selected?.id ? radioSelection?.searchTarget : undefined
   const regionNames = data?.channelScopes === undefined ? []
     : validChannelScopeSettings(data.channelScopes)
       ? data.channelScopes.flatMap((setting) => !setting.paused && setting.scope.mode === 'region' ? [setting.scope.name] : [])
@@ -174,9 +169,16 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
               for safer sync.</p>
           )}
         </div>
-        {radioKey && data && <ChatNavigation key={radioKey} items={items} unread={unread} selectedId={selected?.id}
-          showPreviews={preferences.chatPreviews} onOpen={(id, destination) => setSelection({ key: radioKey, id, destination })} />}
-        {status.activeId && <p className="chat-active" role="status">A message is in progress.</p>}
+        {radioKey && data && <>
+          <ChatSearch key={radioKey} items={items} onOpen={(id, messageId) => {
+            setSelection({ key: radioKey, id, searchTarget: { id: messageId } })
+          }} />
+          <ConversationList items={items} selectedId={selected?.id} status={status} read={read} unreadOnly={unreadOnly}
+            showPreviews={preferences.chatPreviews}
+            onUnreadOnlyChange={setUnreadOnly}
+            onSelect={(id) => setSelection({ key: radioKey, id })}
+            onNewChat={(id) => { setUnreadOnly(false); setSelection({ key: radioKey, id }) }} />
+        </>}
       </section>
       {!radioKey ? (
         <section className="conversation-pane" aria-label="Conversation">
@@ -190,7 +192,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
           <div className="state-message" role="status"><h2>Loading cached chats</h2></div>
         </section>
       ) : (
-        <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} destination={destination}
+        <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} searchTarget={searchTarget}
           senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
           display={{
             active, preferences, read, formatTime, formatDate, mapPosition, ownContact,
@@ -214,10 +216,62 @@ type WorkspaceProps = {
   status: DirectStatus
   senderName: string | null
   display: ChatDisplay
-  destination?: ChatDestination
+  searchTarget?: SearchTarget
 }
 
-function ConversationPane({ radioKey, data, selected, direct, status, senderName, display, destination }: WorkspaceProps & { selected?: Conversation }) {
+function ConversationList({ items, selectedId, status, read, showPreviews, unreadOnly, onUnreadOnlyChange, onSelect, onNewChat }: {
+  items: Conversation[]
+  selectedId?: string
+  status: DirectStatus
+  read: ReadonlySet<string>
+  showPreviews: boolean
+  unreadOnly: boolean
+  onUnreadOnlyChange: (value: boolean) => void
+  onSelect: (id: string) => void
+  onNewChat: (id: string) => void
+}) {
+  const filtered = unreadOnly ? items.filter((item) => unreadReceipts(item.messages, read).length > 0) : items
+  const destinations = items.filter((item) => item.recipient || item.channel)
+  return (
+    <nav aria-label="Conversations">
+      <div className="chat-list-controls">
+        <label><input type="checkbox" checked={unreadOnly}
+          onChange={(event) => onUnreadOnlyChange(event.currentTarget.checked)} /> Unread only</label>
+        <label>New chat
+          <select value="" disabled={!destinations.length} onChange={(event) => {
+            if (event.currentTarget.value) onNewChat(event.currentTarget.value)
+          }}>
+            <option value="">Choose a contact or channel</option>
+            {destinations.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+          </select>
+        </label>
+      </div>
+      {filtered.length ? (
+        <ul className="chat-conversation-list">
+          {filtered.map((item) => {
+            const last = item.messages.findLast((message) => message.timestamp !== null && Number.isFinite(message.timestamp))
+              ?? item.messages.at(-1)
+            const unread = unreadReceipts(item.messages, read).length
+            return (
+              <li key={item.id}>
+                <button type="button" aria-current={selectedId === item.id ? 'page' : undefined}
+                  onClick={() => onSelect(item.id)}>
+                  <strong>{item.title}</strong>
+                  {unread > 0 && <small>{unread} unread</small>}
+                  {showPreviews && <span>{last?.text || (last ? 'Received entry' : 'No messages yet')}</span>}
+                  {showPreviews && last?.outgoing && <small>{deliveryLabel(last.outgoing)}</small>}
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : <p className="chat-empty-list">{unreadOnly ? 'No unread conversations.' : 'Sync contacts or messages to start a conversation.'}</p>}
+      {status.activeId && <p className="chat-active" role="status">A message is in progress.</p>}
+    </nav>
+  )
+}
+
+function ConversationPane({ radioKey, data, selected, direct, status, senderName, display, searchTarget }: WorkspaceProps & { selected?: Conversation }) {
   if (!selected) {
     return (
       <section className="conversation-pane" aria-label="Conversation">
@@ -227,7 +281,7 @@ function ConversationPane({ radioKey, data, selected, direct, status, senderName
   }
   return <ConversationView key={`${radioKey}:${selected.id}`} conversation={selected}
     radioKey={radioKey} options={data.directSendOptions ?? defaultOptions} direct={direct} status={status}
-    senderName={senderName} display={display} destination={destination}
+    senderName={senderName} display={display} searchTarget={searchTarget}
     muted={data.mutedDirectConversations?.includes(selected.id.slice(0, 19)) ?? false} />
 }
 
@@ -240,35 +294,47 @@ type ConversationProps = {
   status: DirectStatus
   senderName: string | null
   display: ChatDisplay
-  destination?: ChatDestination
+  searchTarget?: SearchTarget
+}
+
+function deliveryLabel(outgoing: StoredOutgoing) {
+  const total = outgoing.options.directAttempts + outgoing.options.floodAttempts
+  const progress = outgoing.attempt ? ` ${outgoing.attempt}/${total}` : ''
+  if (outgoing.status === 'delivered') return 'Delivered'
+  if (outgoing.status === 'failed') return `Failed${progress}`
+  if (outgoing.status === 'sent') return `Sent${progress}`
+  return `Sending${progress}`
 }
 
 function timestamp(value: number | null, format: ChatDisplay['formatTime']) {
-  const date = messageDate(value)
-  return date && <time dateTime={date.toISOString()}>{format(date)}</time>
+  if (value === null || !Number.isFinite(value) || Math.abs(value) > 8.64e15) return null
+  const date = new Date(value)
+  return <time dateTime={date.toISOString()}>{format(date)}</time>
 }
 
 const idleObservation = { phase: 'idle' as const, error: null, dropped: 0, evicted: 0, entries: [] }
 const noSubscription = () => () => {}
 const noObservation = () => idleObservation
 
-function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted, destination }: ConversationProps) {
+function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted, searchTarget }: ConversationProps) {
   const { active, preferences, read, formatTime, formatDate, ownContact, contacts, channels, readChannelKey, mapPosition,
     observationSource, canObserve, regionNames, pathNodes, onPathMap } = display
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
   const [savingNotification, setSavingNotification] = useState(false)
   const [readError, setReadError] = useState('')
-  const [repeatFilter, setRepeatFilter] = useState<{ destination: ChatDestination | undefined } | null>(null)
+  const [hideRepeats, setHideRepeats] = useState(false)
   const [mentionName, setMentionName] = useState('')
-  const [unreadStart, setUnreadStart] = useState<string>()
+  const [search, setSearch] = useState('')
+  const [previousSearchTarget, setPreviousSearchTarget] = useState(searchTarget)
+  const [awayFromBottom, setAwayFromBottom] = useState(false)
   const composer = useRef<HTMLTextAreaElement>(null)
   const mentionPicker = useRef<HTMLDetailsElement>(null)
   const messageList = useRef<HTMLOListElement>(null)
   const positioned = useRef(false)
   const following = useRef(true)
-  const handledDestination = useRef<ChatDestination>(undefined)
-  const hideRepeats = repeatFilter !== null
+  const jumpedTo = useRef<SearchTarget>(undefined)
+  const unreadBoundary = useRef<string | null>(null)
   const { repeats, visible } = useMemo(
     () => messageVisibility(conversation.messages, hideRepeats), [conversation.messages, hideRepeats],
   )
@@ -283,23 +349,14 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     conversation.channel?.index ?? -1, conversation.messages, observed.entries,
   ), [conversation.channel, conversation.messages, observed.entries])
   const unread = useMemo(() => unreadReceipts(visible, read), [visible, read])
-  const firstUnreadId = oldestUnreadReceipt(unread)?.id
-  const jumpId = useMemo(() => {
-    if (destination?.kind === 'message') return destination.id
-    if (destination?.kind === 'unread') return oldestUnreadReceipt(unreadReceipts(conversation.messages, read))?.id
-  }, [destination, conversation.messages, read])
-  if (repeatFilter && repeatFilter.destination !== destination) {
-    setRepeatFilter(jumpId && repeats.has(jumpId) ? null : { destination })
+  if (searchTarget !== previousSearchTarget) {
+    setPreviousSearchTarget(searchTarget)
+    if (searchTarget) {
+      setSearch('')
+      if (repeats.has(searchTarget.id)) setHideRepeats(false)
+    }
   }
-  // Keep the divider in place as visible receipts are marked read during this visit.
-  const unreadBoundary = active
-    ? unreadStart && visible.some(({ id }) => id === unreadStart) ? unreadStart : firstUnreadId
-    : undefined
-  if (unreadStart !== unreadBoundary) setUnreadStart(unreadBoundary)
-  const dates = useMemo(() => visible.map(({ timestamp }) => {
-    const date = messageDate(timestamp)
-    return date ? formatDate(date) : 'Unknown date'
-  }), [visible, formatDate])
+  const shown = useMemo(() => searchMessages(visible, search), [visible, search])
   const bytes = new TextEncoder().encode(draft).length
   const isChannel = conversation.id.startsWith('channel:')
   const mentionNames = useMemo(() => conversation.channel
@@ -316,53 +373,58 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   } catch (error) {
     invalid = errorText(error)
   }
-  const canSubmit = Boolean(draft && !invalid && status.activeId === null)
+
+  useLayoutEffect(() => {
+    if (active && preferences.composerAutofocus && !searchTarget) composer.current?.focus({ preventScroll: true })
+  }, [active, preferences.composerAutofocus, searchTarget])
 
   useLayoutEffect(() => {
     if (!active) {
       positioned.current = false
+      unreadBoundary.current = null
       return
     }
     const list = messageList.current
-    const pending = destination !== handledDestination.current ? destination : undefined
-    if (pending?.kind === 'compose') {
-      handledDestination.current = pending
-      composer.current?.focus()
-    }
     if (!list) return
     const findRow = (id: string) => Array.from(list.children).find(
       (element): element is HTMLLIElement => (element as HTMLElement).dataset.receiptId === id,
     )
-    if (pending && pending.kind !== 'compose') {
-      handledDestination.current = pending
-      const row = jumpId ? findRow(jumpId) : undefined
+    if (searchTarget && searchTarget !== jumpedTo.current) {
+      jumpedTo.current = searchTarget
+      const row = findRow(searchTarget.id)
       if (row) {
         positioned.current = true
-        following.current = false
-        row.focus({ preventScroll: true })
-        list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top
+        const scrolls = list.scrollHeight > list.clientHeight
+        if (scrolls) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top
         const bounds = row.getBoundingClientRect()
-        if (bounds.top < 0 || bounds.bottom > window.innerHeight) row.scrollIntoView({ block: 'nearest' })
+        if (bounds.top < 0 || bounds.bottom > window.innerHeight) row.scrollIntoView({ block: 'start' })
+        row.focus({ preventScroll: true })
+        const away = scrolls ? list.scrollHeight - list.scrollTop - list.clientHeight >= 60 : row !== list.lastElementChild
+        following.current = !away
+        setAwayFromBottom(away)
         return
       }
     }
     if (!positioned.current) {
       positioned.current = true
-      following.current = true
-      const row = preferences.oldestUnread && firstUnreadId ? findRow(firstUnreadId) : undefined
+      const oldest = preferences.oldestUnread ? oldestUnreadReceipt(unread) : undefined
+      const row = oldest && findRow(oldest.id)
       if (row) {
-        list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top
+        if (list.scrollHeight > list.clientHeight) {
+          list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top
+        } else if (row.getBoundingClientRect().bottom > window.innerHeight) {
+          row.scrollIntoView({ block: 'start' })
+        }
         following.current = false
+        setAwayFromBottom(true)
       }
     }
     if (following.current) list.scrollTop = list.scrollHeight
-  }, [active, visible, firstUnreadId, preferences.oldestUnread, destination, jumpId])
+  }, [active, shown, unread, preferences.oldestUnread, searchTarget])
 
-  useLayoutEffect(() => {
-    if (active && preferences.composerAutofocus && (!destination || destination.kind === 'compose')) {
-      composer.current?.focus({ preventScroll: true })
-    }
-  }, [active, preferences.composerAutofocus, destination])
+  if (active && unreadBoundary.current === null && unread.length) {
+    unreadBoundary.current = oldestUnreadReceipt(unread)?.id ?? null
+  }
 
   useEffect(() => {
     const list = messageList.current
@@ -372,7 +434,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       if (document.hidden) return
       const seen: string[] = []
       for (const entry of entries) {
-        const id = entry.target.parentElement?.dataset.receiptId
+        const id = (entry.target as HTMLElement).dataset.receiptId
         if (entry.intersectionRatio >= 0.01 && id && ids.delete(id)) {
           observer.unobserve(entry.target)
           seen.push(id)
@@ -387,8 +449,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       if (document.hidden || !list) return
       for (const row of list.children) {
         const id = (row as HTMLElement).dataset.receiptId
-        const content = row.querySelector('.chat-message')
-        if (id && ids.has(id) && content) observer.observe(content)
+        if (id && ids.has(id)) observer.observe(row)
       }
     }
     observeVisibleTab()
@@ -397,11 +458,10 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       document.removeEventListener('visibilitychange', observeVisibleTab)
       observer.disconnect()
     }
-  }, [active, direct, radioKey, unread])
+  }, [active, direct, radioKey, unread, shown])
 
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!canSubmit) return
     const text = draft
     setActionError('')
     try {
@@ -495,13 +555,6 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     return null
   }
 
-  function jumpToBottom() {
-    const list = messageList.current
-    if (!list) return
-    following.current = true
-    list.scrollTop = list.scrollHeight
-  }
-
   return (
     <section className="conversation-pane" aria-label={`Conversation with ${conversation.title}`}>
       <div className="conversation-heading">
@@ -557,129 +610,137 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       </div>}
       {repeats.size > 0 && (
         <label className="chat-repeat-filter">
-          <input type="checkbox" checked={hideRepeats}
-            onChange={(event) => setRepeatFilter(event.currentTarget.checked ? { destination } : null)} />
+          <input type="checkbox" checked={hideRepeats} onChange={(event) => setHideRepeats(event.currentTarget.checked)} />
           <span>Hide {repeats.size} possible repeat{repeats.size === 1 ? '' : 's'}.
             These may be distinct messages; all receipts are kept.</span>
         </label>
       )}
-      {conversation.messages.length ? <>
-        <div className="chat-scroll-actions">
-          <button type="button" onClick={jumpToBottom}>Jump to bottom</button>
-        </div>
-        <ol className="received-messages chat-message-list" aria-label="Message history" ref={messageList} onScroll={(event) => {
+      <label className="chat-search">Search messages
+        <input type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
+      </label>
+      {conversation.messages.length ? (
+        <ol className="received-messages chat-message-list" ref={messageList} onScroll={(event) => {
           const element = event.currentTarget
-          const remaining = element.scrollHeight - element.scrollTop - element.clientHeight
-          following.current = remaining < 60
+          following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60
+          setAwayFromBottom(!following.current)
         }}>
-          {visible.map((message, index) => {
+          {shown.map((message, index) => {
             const sender = channelSender(message)
             const body = channelMessageBody(message)
             const matches = channelMatches.get(message.id)
             const correlation = correlations.get(message.id)
-            const outgoing = Boolean(message.outgoing || message.channelOutgoing)
+            const day = messageDay(message.timestamp)
+            const previousDay = index ? messageDay(shown[index - 1].timestamp) : undefined
             return (
-              <li key={message.id} data-receipt-id={message.id} tabIndex={-1}>
-                {dates[index] !== dates[index - 1] && <div className="chat-divider">{dates[index]}</div>}
-                {message.id === unreadBoundary && <div className="chat-divider chat-divider--unread">New Messages</div>}
-                <div className={outgoing ? 'chat-message chat-message--outgoing' : 'chat-message'}>
-                  <div className="chat-message-header">
-                    <strong>{outgoing ? 'You' : isChannel ? sender ?? 'Unknown sender' : conversation.title}</strong>
-                    {timestamp(message.timestamp, formatTime)}
-                  </div>
-                  {message.text && <p>{isChannel ? <ChannelMessageText text={body} ownName={senderName} /> : body}</p>}
-                  {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
-                  {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
-                  {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
-                  {repeats.has(message.id) && <p className="chat-meta">Possible repeat; both receipts are kept.</p>}
-                  {matches && <details className="chat-meta">
-                    <summary>{matches.length} matching queued receipts (possible repeats)</summary>
-                    <p>Matching text and timestamps can belong to separate messages. The radio may not queue every heard copy;
-                      this is not a delivery or complete repeat count.</p>
-                    {preferences.pathMetadata && <ul>{matches.map((match) => <li key={match.id}>
-                      {match.receipt && <ReceiptPath receipt={match.receipt} />}
-                    </li>)}</ul>}
-                  </details>}
-                  {correlation && <RxObservationDetails correlation={correlation} outgoing={Boolean(message.channelOutgoing)}
-                    preferences={preferences} formatTime={formatTime} pathNodes={pathNodes} onPathMap={onPathMap} />}
-                  {preferences.pathMetadata && message.receipt && <ReceiptPath receipt={message.receipt} />}
-                  {preferences.regionMetadata && message.region && <p className="chat-meta">Region {message.region}</p>}
-                  {message.outgoing && (
-                    <div className="chat-delivery">
-                      <strong className={message.outgoing.status === 'failed' ? 'chat-failed' : undefined}>
-                        {deliveryLabel(message.outgoing)}
-                      </strong>
-                      {preferences.pathMetadata && message.outgoing.attempt > 0 && message.outgoing.status !== 'delivered' && (
-                        <span>{message.outgoing.route
-                          ? message.outgoing.route === 'direct' ? 'Direct' : 'Flood'
-                          : message.outgoing.attempt <= message.outgoing.options.directAttempts ? 'Direct phase' : 'Flood phase'}</span>
-                      )}
-                      {message.outgoing.error && <p>{message.outgoing.error}</p>}
-                      {message.outgoing.status === 'failed' && (
-                        <button type="button" disabled={status.activeId !== null || status.pending > 0}
-                          aria-label={`Retry message: ${message.text.slice(0, 40)}`} onClick={() => void retry(message)}>Retry</button>
-                      )}
-                      {status.activeId === message.id && (
-                        <button type="button" disabled={status.cancelling} onClick={direct.cancel}>
-                          {status.cancelling ? 'Cancelling…' : 'Cancel sending'}
-                        </button>
-                      )}
-                    </div>
+            <Fragment key={message.id}>
+            {day !== previousDay && <li className="chat-divider">{day === null ? 'Unknown date' : formatDate(new Date(message.timestamp!))}</li>}
+            {message.id === unreadBoundary.current && <li className="chat-divider chat-divider--unread">New messages</li>}
+            <li data-receipt-id={message.id} tabIndex={-1}
+              className={message.outgoing || message.channelOutgoing ? 'chat-message--outgoing' : undefined}>
+              <div className="chat-message-header">
+                <strong>{message.outgoing || message.channelOutgoing ? 'You' : isChannel ? sender ?? 'Unknown sender' : conversation.title}</strong>
+                {timestamp(message.timestamp, formatTime)}
+              </div>
+              {message.text && <p>{isChannel ? <ChannelMessageText text={body} ownName={senderName} /> : body}</p>}
+              {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
+              {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
+              {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
+              {repeats.has(message.id) && <p className="chat-meta">Possible repeat; both receipts are kept.</p>}
+              {matches && <details className="chat-meta">
+                <summary>{matches.length} matching queued receipts (possible repeats)</summary>
+                <p>Matching text and timestamps can belong to separate messages. The radio may not queue every heard copy;
+                  this is not a delivery or complete repeat count.</p>
+                {preferences.pathMetadata && <ul>{matches.map((match) => <li key={match.id}>
+                  {match.receipt && <ReceiptPath receipt={match.receipt} />}
+                </li>)}</ul>}
+              </details>}
+              {correlation && <RxObservationDetails correlation={correlation} outgoing={Boolean(message.channelOutgoing)}
+                preferences={preferences} formatTime={formatTime} pathNodes={pathNodes} onPathMap={onPathMap} />}
+              {preferences.pathMetadata && message.receipt && <ReceiptPath receipt={message.receipt} />}
+              {preferences.regionMetadata && message.region && <p className="chat-meta">Region {message.region}</p>}
+              {message.outgoing && (
+                <div className="chat-delivery">
+                  <strong className={message.outgoing.status === 'failed' ? 'chat-failed' : undefined}>
+                    {deliveryLabel(message.outgoing)}
+                  </strong>
+                  {preferences.pathMetadata && message.outgoing.attempt > 0 && message.outgoing.status !== 'delivered' && (
+                    <span>{message.outgoing.route
+                      ? message.outgoing.route === 'direct' ? 'Direct' : 'Flood'
+                      : message.outgoing.attempt <= message.outgoing.options.directAttempts ? 'Direct phase' : 'Flood phase'}</span>
                   )}
-                  {message.channelOutgoing && (
-                    <div className="chat-delivery">
-                      <strong className={message.channelOutgoing.status === 'uncertain' ? 'chat-failed' : undefined}>
-                        {message.channelOutgoing.status === 'sending' ? 'Sending' : message.channelOutgoing.status === 'accepted'
-                          ? 'Accepted by radio' : 'Send status uncertain'}
-                      </strong>
-                      {message.channelOutgoing.error && <p>{message.channelOutgoing.error}</p>}
-                      {preferences.regionMetadata && message.channelOutgoing.scope && <p>
-                        Requested sending scope: {message.channelOutgoing.scope.mode === 'region'
-                          ? message.channelOutgoing.scope.name : message.channelOutgoing.scope.mode === 'unscoped'
-                            ? 'Explicitly unscoped' : 'Radio default'}
-                      </p>}
-                      {message.channelOutgoing.status !== 'sending'
-                        && conversation.channel?.name === message.channelOutgoing.channelName && (
-                        <button type="button" disabled={status.activeId !== null || status.pending > 0}
-                          aria-label={`Resend channel message: ${message.text.slice(0, 40)}`}
-                          onClick={() => void resend(message)}>Resend</button>
-                      )}
-                    </div>
+                  {message.outgoing.error && <p>{message.outgoing.error}</p>}
+                  {message.outgoing.status === 'failed' && (
+                    <button type="button" disabled={status.activeId !== null || status.pending > 0}
+                      aria-label={`Retry message: ${message.text.slice(0, 40)}`} onClick={() => void retry(message)}>Retry</button>
                   )}
-                  {isChannel && (
-                    <div className="chat-message-actions" role="group" aria-label="Channel message actions">
-                      {message.text && <button type="button" onClick={() => void copy(message)}
-                        aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
-                      {conversation.channel && sender && (mentionableName(sender)
-                        ? <button type="button" onClick={() => reply(sender, body)} aria-label={`Reply to ${sender}`}>Reply</button>
-                        : <span className="chat-meta">Reply unavailable: the sender name contains a closing bracket (]).</span>)}
-                      {sender && <button type="button" onClick={() => void block(sender)} aria-label={`Block sender name ${sender}`}>Block</button>}
-                      <button type="button" disabled={message.channelOutgoing?.status === 'sending'}
-                        aria-label={`Delete channel message: ${message.text.slice(0, 40)}`} onClick={() => void remove(message)}>Delete</button>
-                    </div>
+                  {status.activeId === message.id && (
+                    <button type="button" disabled={status.cancelling} onClick={direct.cancel}>
+                      {status.cancelling ? 'Cancelling…' : 'Cancel sending'}
+                    </button>
                   )}
-                  {message.rawHex && <details><summary>Raw receipt</summary><code>{message.rawHex}</code></details>}
                 </div>
-              </li>
-            )
-          })}
+              )}
+              {message.channelOutgoing && (
+                <div className="chat-delivery">
+                  <strong className={message.channelOutgoing.status === 'uncertain' ? 'chat-failed' : undefined}>
+                    {message.channelOutgoing.status === 'sending' ? 'Sending' : message.channelOutgoing.status === 'accepted'
+                      ? 'Accepted by radio' : 'Send status uncertain'}
+                  </strong>
+                  {message.channelOutgoing.error && <p>{message.channelOutgoing.error}</p>}
+                  {preferences.regionMetadata && message.channelOutgoing.scope && <p>
+                    Requested sending scope: {message.channelOutgoing.scope.mode === 'region'
+                      ? message.channelOutgoing.scope.name : message.channelOutgoing.scope.mode === 'unscoped'
+                        ? 'Explicitly unscoped' : 'Radio default'}
+                  </p>}
+                  {message.channelOutgoing.status !== 'sending'
+                    && conversation.channel?.name === message.channelOutgoing.channelName && (
+                    <button type="button" disabled={status.activeId !== null || status.pending > 0}
+                      aria-label={`Resend channel message: ${message.text.slice(0, 40)}`}
+                      onClick={() => void resend(message)}>Resend</button>
+                  )}
+                </div>
+              )}
+              {isChannel && (
+                <div className="chat-message-actions" role="group" aria-label="Channel message actions">
+                  {message.text && <button type="button" onClick={() => void copy(message)}
+                    aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
+                  {conversation.channel && sender && (mentionableName(sender)
+                    ? <button type="button" onClick={() => reply(sender, body)} aria-label={`Reply to ${sender}`}>Reply</button>
+                    : <span className="chat-meta">Reply unavailable: the sender name contains a closing bracket (]).</span>)}
+                  {sender && <button type="button" onClick={() => void block(sender)} aria-label={`Block sender name ${sender}`}>Block</button>}
+                  <button type="button" disabled={message.channelOutgoing?.status === 'sending'}
+                    aria-label={`Delete channel message: ${message.text.slice(0, 40)}`} onClick={() => void remove(message)}>Delete</button>
+                </div>
+              )}
+              {message.rawHex && <details><summary>Raw receipt</summary><code>{message.rawHex}</code></details>}
+            </li>
+            </Fragment>
+          )})}
+          {!shown.length && <li className="chat-divider">No matching messages.</li>}
         </ol>
-      </> : <div className="state-message"><h2>No messages yet</h2><p>Messages in this conversation will appear here.</p></div>}
+      ) : <div className="state-message"><h2>No messages yet</h2><p>Messages in this conversation will appear here.</p></div>}
+      {conversation.messages.length > 0 && awayFromBottom && <button className="chat-jump" type="button" onClick={() => {
+        const list = messageList.current
+        if (!list) return
+        following.current = true
+        list.scrollTop = list.scrollHeight
+        if (list.getBoundingClientRect().bottom > window.innerHeight) list.lastElementChild?.scrollIntoView({ block: 'end' })
+        setAwayFromBottom(false)
+      }}>Jump to bottom</button>}
       {readError && <p className="chat-action-error" role="alert">{readError}</p>}
       {actionError && <p className="chat-action-error" role="alert">{actionError}</p>}
-      {(conversation.recipient || conversation.channel) && (
+      {(isChannel || conversation.id.startsWith('direct:')) && (
         <form className="chat-composer" onSubmit={(event) => void send(event)}>
           <label htmlFor="chat-draft">Message</label>
-          <textarea id="chat-draft" ref={composer} rows={3} value={draft}
-            aria-describedby="chat-keyboard-hint chat-byte-count chat-draft-error"
-            onChange={(event) => updateDraft(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey
-                || event.nativeEvent.isComposing || event.keyCode === 229) return
-              event.preventDefault()
-              if (canSubmit && !event.repeat) event.currentTarget.form?.requestSubmit()
+          <textarea id="chat-draft" ref={composer} rows={3} value={draft} aria-describedby="chat-byte-count chat-draft-error"
+            onChange={(event) => updateDraft(event.currentTarget.value)} onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !event.repeat) {
+                event.preventDefault()
+                if (draft && !invalid && status.activeId === null && (conversation.recipient || conversation.channel)) {
+                  event.currentTarget.form?.requestSubmit()
+                }
+              }
             }} />
-          <p id="chat-keyboard-hint">Enter sends. Shift+Enter adds a new line.</p>
           {isChannel && <details className="chat-mention-picker" ref={mentionPicker}>
             <summary>Mention a name</summary>
             <p>Mentions are plain text. Names are unverified and can be impersonated. Browser alerts depend on your notification settings.</p>
@@ -697,9 +758,11 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             <span id="chat-byte-count">{limit === null ? `${bytes} UTF-8 bytes; connect to check the limit` : `${bytes}/${limit} UTF-8 bytes`}</span>
             {active && <ComposerTools ownContact={ownContact} contacts={contacts} channels={channels}
               readChannelKey={readChannelKey} mapPosition={mapPosition} insert={insertInDraft} />}
-            <button type="submit" disabled={!canSubmit}>Send message</button>
+            <button type="submit" disabled={!draft || Boolean(invalid) || status.activeId !== null
+              || !(conversation.recipient || conversation.channel)}>Send message</button>
           </div>
           <p id="chat-draft-error" className="chat-action-error">{invalid}</p>
+          {!conversation.recipient && !conversation.channel && <p>Sending is unavailable for this cached conversation. Your draft is still editable.</p>}
           <p>{isChannel
             ? 'The radio adds its sender name. Sending scope is configured in Channels. A channel message is a broadcast and cannot be recalled.'
             : 'Flood fallback clears this contact’s saved radio route. Sent packets cannot be recalled.'}</p>
