@@ -53,6 +53,39 @@ test('status rejects truncated replies and cancellation stops listening', async 
   assert.equal(unsubscribe, true)
 })
 
+test('status decodes detailed counters and only complete optional fields', async () => {
+  const stats = new Uint8Array(56)
+  const view = new DataView(stats.buffer)
+  view.setUint32(24, 0x12345678, true)
+  view.setUint32(28, 2, true)
+  view.setUint32(32, 3, true)
+  view.setUint32(36, 0xffffffff, true)
+  view.setUint16(40, 0x8123, true)
+  view.setInt16(42, -7, true)
+  view.setUint16(44, 456, true)
+  view.setUint16(46, 789, true)
+  view.setUint32(48, 1234, true)
+  view.setUint32(52, 5678, true)
+  for (const [length, rxAir, receiveErrors] of [
+    [48, null, null], [51, null, null], [52, 1234, null],
+    [55, 1234, null], [56, 1234, 5678],
+  ]) {
+    const f = fixture(0x87, [0, ...prefix, ...stats.slice(0, length)])
+    const result = await repeaterRequest(f.link, key, 'status', '', f.subscribe, new AbortController().signal)
+    assert.deepEqual({
+      floodSent: result.floodSent, directSent: result.directSent,
+      floodReceived: result.floodReceived, directReceived: result.directReceived,
+      errorEvents: result.errorEvents, snr: result.snr,
+      directDuplicates: result.directDuplicates, floodDuplicates: result.floodDuplicates,
+      rxAir: result.rxAir, receiveErrors: result.receiveErrors,
+    }, {
+      floodSent: 0x12345678, directSent: 2, floodReceived: 3, directReceived: 0xffffffff,
+      errorEvents: 0x8123, snr: -1.75, directDuplicates: 456, floodDuplicates: 789,
+      rxAir, receiveErrors,
+    })
+  }
+})
+
 test('full-key neighbor request and page parsing enforce bounds and preserve signed SNR', () => {
   const request = repeaterNeighborRequest(258)
   assert.deepEqual([...request.slice(0, 7)], [6, 0, 3, 2, 1, 0, 32])

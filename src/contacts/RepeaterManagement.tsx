@@ -258,14 +258,31 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     {pending && <p role="status">Waiting for the repeater…
       <button type="button" onClick={() => request.current?.abort(new Error('Stopped waiting. A sent request cannot be recalled.'))}>Stop waiting</button>
     </p>}
-    {status && <dl>
-      <dt>Battery</dt><dd>{status.batteryMv} mV</dd>
-      <dt>Uptime</dt><dd>{status.uptime} seconds</dd>
-      <dt>Outbound queue</dt><dd>{status.queue}</dd>
-      <dt>Noise floor / last RSSI / last SNR</dt><dd>{status.noiseFloor} / {status.rssi} dBm / {status.snr} dB</dd>
-      <dt>Packets received / sent</dt><dd>{status.received} / {status.sent}</dd>
-      <dt>Transmit airtime</dt><dd>{status.txAir} seconds</dd>
-    </dl>}
+    {status && <>
+      <dl>
+        <dt>Battery</dt><dd>{status.batteryMv} mV</dd>
+        <dt>Uptime</dt><dd>{status.uptime} seconds</dd>
+        <dt>Outbound queue</dt><dd>{status.queue}</dd>
+        <dt>Noise floor / last RSSI / last SNR</dt><dd>{status.noiseFloor} / {status.rssi} dBm / {status.snr} dB</dd>
+        <dt>Packets received / sent</dt><dd>{status.received} / {status.sent}</dd>
+        <dt>Transmit airtime</dt><dd>{status.txAir} seconds</dd>
+      </dl>
+      <details>
+        <summary>Detailed packet statistics</summary>
+        <p>These are reported values, not live measurements. Counters may reset or wrap, and replies may be delayed.
+          Field meanings and availability can vary by firmware.</p>
+        <dl>
+          <dt>Flood packets received / sent</dt><dd>{status.floodReceived} / {status.floodSent}</dd>
+          <dt>Direct packets received / sent</dt><dd>{status.directReceived} / {status.directSent}</dd>
+          <dt>Duplicate direct / flood packets</dt><dd>{status.directDuplicates} / {status.floodDuplicates}</dd>
+          <dt>Error/event field</dt><dd>0x{status.errorEvents.toString(16).padStart(4, '0')}</dd>
+          <dt>Receive airtime</dt><dd>{status.rxAir === null ? 'Not included or incomplete' : `${status.rxAir} seconds`}</dd>
+          <dt>Receive errors</dt><dd>{status.receiveErrors === null ? 'Not included or incomplete' : status.receiveErrors}</dd>
+        </dl>
+        <p>In repeater v1.14.1 the error/event field is a bitmask; older firmware may report a different value.
+          Receive errors depend on the radio driver. Zero does not prove that no errors occurred.</p>
+      </details>
+    </>}
     {error && <p role="alert">{error}</p>}
   </details>
 }

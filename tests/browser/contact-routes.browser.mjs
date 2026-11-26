@@ -69,8 +69,18 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
           emit([6, 1, 0, 0, 0, 0, 100, 0, 0, 0])
           if (data[0] === 26) emit([0x85, 0, ...data.slice(1, 7), 1, 0, 0, 0, 1, 2])
           else {
-            const stats = new Uint8Array(48)
-            new DataView(stats.buffer).setUint16(0, 3900, true)
+            const stats = new Uint8Array(56)
+            const view = new DataView(stats.buffer)
+            view.setUint16(0, 3900, true)
+            view.setUint32(24, 12, true)
+            view.setUint32(28, 34, true)
+            view.setUint32(32, 56, true)
+            view.setUint32(36, 78, true)
+            view.setUint16(40, 0x23, true)
+            view.setUint16(44, 9, true)
+            view.setUint16(46, 10, true)
+            view.setUint32(48, 222, true)
+            view.setUint32(52, 333, true)
             emit([0x87, 0, ...data.slice(1, 7), ...stats])
           }
         } else throw Error('Unexpected command')
@@ -162,6 +172,15 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
   assert.equal(await page.evaluate(() => window.radioChanges.length), 5)
   await page.getByRole('button', { name: 'Request status' }).click()
   await page.getByText('3900 mV').waitFor()
+  await page.getByText('Detailed packet statistics', { exact: true }).click()
+  const details = page.locator('details').filter({ has: page.getByText('Detailed packet statistics', { exact: true }) }).last()
+  for (const value of ['56 / 12', '78 / 34', '9 / 10', '0x0023', '222 seconds', '333']) {
+    await details.getByText(value, { exact: true }).waitFor()
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 390, height: 844 })
   assert.deepEqual(await page.evaluate(() => window.radioChanges.slice(-2).map(([code]) => code)), [26, 27])
   const saved = await page.evaluate(async () => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
