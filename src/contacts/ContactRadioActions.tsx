@@ -49,9 +49,10 @@ export function ContactRadioActions({ session, messageSync, contact, contacts, r
   const key = contact.publicKey
   const details = contact.details
   const saved = details ? decodeContactPath(details.pathLength, details.pathHex) : null
-  const pathNodes = [...contacts.map((entry) => ({
+  const savedContactNodes = contacts.map((entry) => ({
     publicKey: entry.publicKey, name: entry.displayName, position: contactPosition(entry.details),
-  })), ...additionalPathNodes]
+  }))
+  const pathNodes = [...savedContactNodes, ...additionalPathNodes]
   const [width, setWidth] = useState<ContactPathWidth>(() => saved?.width ?? 1)
   const [text, setText] = useState(() => saved?.hops.join(' ') ?? '')
   const [repeaterKey, setRepeaterKey] = useState('')
@@ -148,7 +149,7 @@ export function ContactRadioActions({ session, messageSync, contact, contacts, r
   return <div className="contact-radio-actions">
     {details?.type === 2 && <RepeaterManagement key={`${radioKey}:${ready}:${details.pathLength}:${details.pathHex}`}
       session={session} messageSync={messageSync} contact={contact} radioKey={radioKey}
-      ready={ready} busy={busy} />}
+      ready={ready} busy={busy} neighborNodes={savedContactNodes} onMap={onMap} />}
     <details>
       <summary>Saved route and repeater hops</summary>
       {saved && <PathDetails title="Saved route" width={saved.width} hashes={saved.hops} nodes={pathNodes} onMap={onMap} />}

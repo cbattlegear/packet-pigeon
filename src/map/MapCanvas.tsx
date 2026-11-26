@@ -8,7 +8,7 @@ import { mapPosition, mercatorLatitude } from './nodes.ts'
 import type { Coordinates, MapNode } from './nodes.ts'
 import { coverageSamples } from './terrain.ts'
 import type { CoverageLayer, ProfileResult } from './terrain.ts'
-import { pathSegments } from '../paths/model.ts'
+import { mapSegments } from '../paths/model.ts'
 import type { MapPath } from '../paths/model.ts'
 import land from './world-land.json'
 import 'leaflet/dist/leaflet.css'
@@ -191,7 +191,7 @@ export function MapCanvas({
     if (!map || !displayPath) return
     const overlay = layerGroup().addTo(map)
     const valid = displayPath.points.map((entry) => ({ ...entry, position: mapPosition(entry.position) ? entry.position : null }))
-    for (const segment of pathSegments(valid)) {
+    for (const segment of mapSegments({ ...displayPath, points: valid })) {
       polyline(segment.map(point), { color: '#6047a6', weight: 4, interactive: false }).addTo(overlay)
     }
     for (const { position } of valid) {

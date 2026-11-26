@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mapPath, pathSegments, resolvePath } from '../src/paths/model.ts'
+import { mapPath, mapSegments, pathSegments, resolvePath } from '../src/paths/model.ts'
 import { parseTracePath } from '../src/radio/contact-ping.ts'
 
 test('trace hash encoding reserves the unreachable 64th hop and accepts four-byte hashes', () => {
@@ -26,4 +26,6 @@ test('resolves unique positions without choosing between collisions or drawing a
   const path = mapPath('Test path', route)
   assert.deepEqual(path.points.map(({ position }) => position), [null, west, null, east, north, west])
   assert.deepEqual(pathSegments(path.points), [[east, north]])
+  assert.deepEqual(mapSegments(path), [[east, north]])
+  assert.deepEqual(mapSegments({ title: 'Neighbors', connect: false, points: path.points }), [])
 })

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
-  repeaterNameCommand, repeaterPositionCommand,
+  repeaterNameCommand, repeaterPositionCommand, parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -18,6 +18,18 @@ test('CLI queries use the repeater text type and a tagged command', async () => 
     tag: 'A7', route: 'flood', timeoutMs: 10_000,
   })
   assert.deepEqual([...command], [2, 1, 0, 0, 0, 0, 0, ...new Uint8Array(6).fill(0xbc), ...encoder.encode('A7|get name')])
+})
+
+test('neighbor replies parse exact firmware records and reject malformed or unsafe values', () => {
+  assert.deepEqual(parseRepeaterNeighbors('1234ABCD:42:-20\r\n89abcdef:300:12'), [
+    { keyPrefix: '1234abcd', secondsAgo: 42, snrQuarterDb: -20 },
+    { keyPrefix: '89abcdef', secondsAgo: 300, snrQuarterDb: 12 },
+  ])
+  assert.deepEqual(parseRepeaterNeighbors('-none-'), [])
+  for (const reply of ['', '1234abcd:42', '1234abcd:-1:0', '1234abcd:4294967296:0',
+    '1234abcd:0:32768', '1234abcd:0:-32769', '1234abcd:0:0\n', '123456789:1:0', 'x'.repeat(4097)]) {
+    assert.throws(() => parseRepeaterNeighbors(reply), /neighbor/)
+  }
 })
 
 test('owner information is bounded, supports line breaks and rejects unsafe text', () => {

@@ -4,8 +4,10 @@ import type { CompanionSession } from '../radio/companion-session.ts'
 import type { RepeaterLogin, RepeaterStatus } from '../radio/repeater-management.ts'
 import { decodeContactPath, pathUnknown } from '../radio/contact-path.ts'
 import type { ContactEntry } from './model.ts'
+import { contactPosition } from './model.ts'
 import { RepeaterCli } from './RepeaterCli.tsx'
 import type { RepeaterMessageSync } from './RepeaterCli.tsx'
+import type { MapPath, PathNode } from '../paths/model.ts'
 
 type Props = {
   session: Pick<CompanionSession, 'manageRepeater' | 'sendRepeaterCommand'>
@@ -14,9 +16,11 @@ type Props = {
   radioKey: string
   ready: boolean
   busy: boolean
+  neighborNodes: readonly PathNode[]
+  onMap?: (path: MapPath) => void
 }
 
-export function RepeaterManagement({ session, messageSync, contact, radioKey, ready, busy }: Props) {
+export function RepeaterManagement({ session, messageSync, contact, radioKey, ready, busy, neighborNodes, onMap }: Props) {
   const [login, setLogin] = useState<RepeaterLogin | null>(null)
   const [status, setStatus] = useState<RepeaterStatus | null>(null)
   const [pending, setPending] = useState(false)
@@ -78,7 +82,8 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     {login?.role === 'admin' && <RepeaterCli session={session} messageSync={messageSync}
       radioKey={radioKey} contactKey={contact.publicKey} name={contact.displayName}
       route={{ pathLength: details.pathLength, pathHex: details.pathHex }}
-      ready={ready} busy={busy || pending} onPending={setCliPending}
+      ready={ready} busy={busy || pending} neighborNodes={neighborNodes} repeaterPosition={contactPosition(details)}
+      onMap={onMap} onPending={setCliPending}
       onReboot={(notice) => { setLogin(null); setStatus(null); setRebootNotice(notice) }} />}
     {rebootNotice && <p role="status">{rebootNotice}</p>}
     {pending && <p role="status">Waiting for the repeater…

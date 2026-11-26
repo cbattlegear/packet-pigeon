@@ -502,8 +502,11 @@ one. The reported role is not a guarantee of current authorization.
 
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
-confirm a flood or zero-hop advertisement, or change advertisement intervals,
-owner information, repeater name, stored position, and packet forwarding with confirmation.
+which can map unique matches with saved positions as separate points rather
+than a route. Unknown or ambiguous four-byte prefixes are not mapped.
+Administrators can also confirm a flood or zero-hop advertisement, or change
+advertisement intervals, owner information, repeater name, stored position,
+and packet forwarding with confirmation.
 The confirmed `reboot` command may interrupt mesh traffic and normally sends no
 reply; acceptance by the radio does not prove execution. The app clears the
 reported access and status after an accepted or unconfirmed reboot. Log in again
@@ -528,9 +531,10 @@ uses the connected radio's clock, not the browser clock. Check the radio's clock
 in Settings first: the repeater cannot move backwards, and setting it too far
 ahead can disrupt later commands. Companion firmware v1.11 and earlier may
 forward a zero timestamp for CLI commands, which the repeater may ignore.
-Neighbor replies contain short key prefixes, seconds since heard, and SNR
-multiplied by 4; the repeater limits the list. Prefixes are not unique and
-the list does not map nodes.
+Neighbor replies contain short key prefixes, seconds since heard when the
+repeater generated the reply, and SNR multiplied by 4; the repeater limits the
+list. The displayed sync time is browser time, not the reply's generation time;
+the reply may have been delayed over the mesh or queued before syncing.
 Local intervals are 0 (disabled) or even minutes from 60 to 240; flood intervals
 are 0 or 3 to 168 hours. Changes affect future transmissions. Password, identity,
 and arbitrary commands are not supported. The radio's acceptance is not proof that the repeater executed a
