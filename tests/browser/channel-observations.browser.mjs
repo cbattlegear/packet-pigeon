@@ -95,6 +95,7 @@ test('observes channel packets without merging ambiguous receipts or exposing ke
   await first.getByText(/Possible regions: #north/).waitFor()
   await first.getByText(/Direct with transport codes · 2 remaining hops/).waitFor()
   await first.getByText(/Flood · 1 traversed hop/).waitFor()
+  assert.equal(await first.getByRole('button', { name: 'Copy reverse path', exact: true }).count(), 2)
   assert.equal(await page.getByText('8b3387e9c5cdea6ac9e5edbaa115cd72').count(), 0)
   page.once('dialog', (dialog) => void dialog.accept())
   await page.locator('[data-receipt-id="two"]').getByRole('button', { name: /Delete channel message/ }).click()

@@ -8,6 +8,10 @@ import type { ContactPathWidth } from '../radio/contact-path.ts'
 import { contactPingWidth } from '../radio/contact-ping.ts'
 import type { PingHashWidth } from '../radio/contact-ping.ts'
 import type { ContactEntry } from './model.ts'
+import { contactPosition } from './model.ts'
+import { PathDetails } from '../paths/PathDetails.tsx'
+import { resolvePath } from '../paths/model.ts'
+import type { MapPath, PathNode } from '../paths/model.ts'
 
 export type ContactRadioSession = Pick<CompanionSession,
   'addContact' | 'removeContact' | 'saveContactPath' | 'resetContactPath' | 'saveContactPermissions' | 'pingContact'>
@@ -21,6 +25,8 @@ type Props = {
   usb: boolean
   firmware: number
   busy: boolean
+  onMap?: (path: MapPath) => void
+  additionalPathNodes?: readonly PathNode[]
 }
 
 const permissionLabels = {
@@ -30,20 +36,18 @@ const permissionLabels = {
   remoteCli: 'Remote CLI access',
 } as const
 
-function resolveHops(hops: readonly string[], contacts: readonly ContactEntry[]) {
-  return hops.map((hash) => ({
-    hash, matches: contacts.filter(({ publicKey }) => publicKey.toLowerCase().startsWith(hash)),
-  }))
-}
-
 function radioError(error: unknown) {
   return error instanceof Error ? error.message : 'The radio action failed.'
 }
 
-export function ContactRadioActions({ session, contact, contacts, radioKey, ready, usb, firmware, busy }: Props) {
+export function ContactRadioActions({ session, contact, contacts, radioKey, ready, usb, firmware, busy, onMap,
+  additionalPathNodes = [] }: Props) {
   const key = contact.publicKey
   const details = contact.details
   const saved = details ? decodeContactPath(details.pathLength, details.pathHex) : null
+  const pathNodes = [...contacts.map((entry) => ({
+    publicKey: entry.publicKey, name: entry.displayName, position: contactPosition(entry.details),
+  })), ...additionalPathNodes]
   const [width, setWidth] = useState<ContactPathWidth>(() => saved?.width ?? 1)
   const [text, setText] = useState(() => saved?.hops.join(' ') ?? '')
   const [repeaterKey, setRepeaterKey] = useState('')
@@ -85,7 +89,7 @@ export function ContactRadioActions({ session, contact, contacts, radioKey, read
     void perform('route', async () => {
       const path = parseContactPath(text, routeWidth)
       const parsed = decodeContactPath(path.encoded, path.hex)!
-      if (resolveHops(parsed.hops, contacts).some(({ matches }) => matches.length > 1) &&
+      if (resolvePath(parsed.hops, pathNodes).some(({ matches }) => matches.length > 1) &&
         !window.confirm('Some path hashes match several known radios. The route may reach a different repeater. Save this route?')) {
         return 'Route left unchanged.'
       }
@@ -140,14 +144,7 @@ export function ContactRadioActions({ session, contact, contacts, radioKey, read
   return <div className="contact-radio-actions">
     <details>
       <summary>Saved route and repeater hops</summary>
-      {saved && <p>{saved.width}-byte hashes · {saved.hops.length} {saved.hops.length === 1 ? 'hop' : 'hops'}</p>}
-      {!!saved?.hops.length && <ol aria-label="Saved route hops">
-        {resolveHops(saved.hops, contacts).map(({ hash, matches }, index) => (
-          <li key={index}><code>{hash}</code>{matches.length === 0 ? ' · Unknown repeater' :
-            ` · ${matches.map(({ displayName }) => displayName).join(', ')}${matches.length > 1 ? ' (ambiguous prefix)' : ''}`}
-          </li>
-        ))}
-      </ol>}
+      {saved && <PathDetails title="Saved route" width={saved.width} hashes={saved.hops} nodes={pathNodes} onMap={onMap} />}
       {!ready || !usb ? <p>Connect the selected radio over USB to edit its saved route.</p> :
         <form className="contact-actions" onSubmit={saveRoute}>
           <label>Contact path hash width

@@ -5,9 +5,12 @@ import type { CompanionSession } from '../radio/index.ts'
 import { advertCachePrefixLength } from '../radio/discovery-commands.ts'
 import type { AutoAddPolicy } from '../radio/discovery-commands.ts'
 import type { RadioKey, StoredContact } from '../storage/index.ts'
-import { discoveryPosition, exportDiscoveries, filterDiscoveries, importDiscoveries } from './model.ts'
+import { discoveryPathNodes, discoveryPosition, exportDiscoveries, filterDiscoveries, importDiscoveries } from './model.ts'
 import type { DiscoveryEntry } from './model.ts'
 import type { useRadioDiscoveries } from './use-radio-discoveries.ts'
+import { PathDetails } from '../paths/PathDetails.tsx'
+import type { MapPath, PathNode } from '../paths/model.ts'
+import { contactPosition } from '../contacts/model.ts'
 import '../contacts/contacts.css'
 
 type View = ReturnType<typeof useRadioDiscoveries>
@@ -21,6 +24,8 @@ type DiscoveryProps = {
   pending: number
   session: CompanionSession
   openMap: () => void
+  onPathMap?: (path: MapPath) => void
+  mapPathNodes?: readonly PathNode[]
 }
 
 function errorMessage(error: unknown) {
@@ -69,7 +74,7 @@ export function DiscoveryPanel(props: DiscoveryProps) {
 }
 
 function DiscoveryBrowser({
-  radioKey, view, entries, radioContacts, ready, usb, pending, session,
+  radioKey, view, entries, radioContacts, ready, usb, pending, session, onPathMap, mapPathNodes = [],
 }: DiscoveryProps & { radioKey: RadioKey }) {
   const [query, setQuery] = useState('')
   const [role, setRole] = useState(0)
@@ -242,12 +247,16 @@ function DiscoveryBrowser({
             <h2>{detail.displayName}</h2>
             <dl>
               <dt>Public key</dt><dd><code>{detail.publicKey}</code></dd>
-              <dt>Radio path</dt><dd>{detail.path ? `${detail.path.hops} hops · ${detail.path.width}-byte hashes` : 'Path unavailable'}</dd>
+              {!detail.path && <><dt>Radio path</dt><dd>Path unavailable</dd></>}
               {detail.path && <>
-                <dt>Path hashes</dt><dd><code>{detail.path.hex.match(new RegExp(`.{${detail.path.width * 2}}`, 'g'))?.join(' → ') ?? 'Direct advert'}</code></dd>
                 <dt>Path received</dt><dd>{new Date(detail.path.receivedAt).toLocaleString()}</dd>
               </>}
             </dl>
+            {detail.path && <PathDetails title="Advert path" width={detail.path.width}
+              hashes={detail.path.hex.match(new RegExp(`.{${detail.path.width * 2}}`, 'g')) ?? []}
+              nodes={[...discoveryPathNodes(entries), ...(ready ? radioContacts : view.data?.contacts ?? []).map((entry) => ({
+                publicKey: entry.publicKey, name: entry.name, position: contactPosition(entry.details),
+              })), ...mapPathNodes]} onMap={onPathMap} />}
             <div className="contact-actions">
               <button type="button" disabled={!ready || !usb || busy} onClick={() => void act(() => paths([detail]))}>Load advert path</button>
               <button type="button" disabled={!ready || busy || detail.alreadyAdded || !detail.role}

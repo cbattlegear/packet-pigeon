@@ -70,16 +70,45 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
     Object.defineProperty(navigator, 'serial', { value: { async requestPort() { return port } } })
   })
   await page.goto(server.resolvedUrls.local[0] + '#contacts')
+  await page.evaluate(async () => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const discovery = (publicKey, name) => ({
+      publicKey, name, type: 2, heardAt: 1, latitude: 40, longitude: -89,
+    })
+    try {
+      await storage.update(radioKeyFromPublicKey('ab'.repeat(32)), {
+        discovery: { upsert: [discovery('bc44'.padEnd(64, 'f'), 'Unlisted discovery')] },
+      })
+      await storage.update(radioKeyFromPublicKey('cd'.repeat(32)), {
+        discovery: { upsert: [discovery('bc44'.padEnd(64, 'e'), 'Other radio discovery')] },
+      })
+    } finally {
+      storage.close()
+    }
+  })
   await page.getByRole('button', { name: 'Connect USB' }).click()
+  await page.getByRole('link', { name: 'Browse discovered adverts' }).click()
+  const discovered = page.getByRole('list', { name: 'Discovered adverts' })
+  await discovered.getByText('Unlisted discovery', { exact: true }).waitFor()
+  const navigation = page.getByRole('navigation', { name: 'Main navigation' })
+  await navigation.getByRole('link', { name: 'Contacts', exact: true }).click()
   await page.getByRole('button', { name: /^Target relay/ }).click()
   await page.getByText('Saved route and repeater hops', { exact: true }).click()
   await page.getByRole('combobox', { name: 'Contact path hash width' }).selectOption('2')
   await page.getByRole('combobox', { name: 'Repeater to append' }).selectOption({ label: 'Repeater Two (bc44)' })
   await page.getByRole('button', { name: 'Append repeater' }).click()
   assert.equal(await page.getByRole('textbox', { name: 'Path hops in order' }).inputValue(), 'bc44')
-  await page.getByRole('button', { name: 'Save route' }).click()
+  const saveRoute = page.getByRole('button', { name: 'Save route' })
+  await saveRoute.click()
+  await page.getByText('Route left unchanged.').waitFor()
+  assert.equal(await page.evaluate(() => window.radioChanges.length), 0)
+  page.once('dialog', (dialog) => dialog.accept())
+  await saveRoute.click()
   await page.getByText('Saved the contact route.').waitFor()
-  await page.getByRole('list', { name: 'Saved route hops' }).getByText('Repeater Two', { exact: false }).waitFor()
+  const savedRoute = page.getByRole('list', { name: 'Saved route hops' })
+  await savedRoute.getByText(/Ambiguous: Repeater Two, Unlisted discovery$/).waitFor()
+  assert(await page.getByRole('button', { name: 'Show path on map' }).isDisabled())
   await page.getByText('Contact permissions', { exact: true }).click()
   await page.getByRole('checkbox', { name: 'Remote CLI access' }).check()
   const save = page.getByRole('button', { name: 'Save permissions' })

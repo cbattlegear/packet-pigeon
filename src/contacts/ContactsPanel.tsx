@@ -12,6 +12,8 @@ import type { ContactEntry, ContactSort } from './model.ts'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { ContactRadioActions } from './ContactRadioActions.tsx'
 import type { ContactRadioSession } from './ContactRadioActions.tsx'
+import type { MapPath, PathNode } from '../paths/model.ts'
+import { discoveryEntries, discoveryPathNodes } from '../discovery/model.ts'
 import './contacts.css'
 
 type ContactsProps = {
@@ -23,6 +25,10 @@ type ContactsProps = {
   onMap: (position: Coordinates, terrain: boolean) => void
   onImport?: () => void
   onShare?: (link: string) => void
+  onPathMap?: (path: MapPath) => void
+  mapPathNodes?: readonly PathNode[]
+  discoveredHops?: readonly PathNode[]
+  discoveredRadio?: RadioKey | null
 }
 
 type CacheView = { keys: RadioKey[]; key: RadioKey | null; data: RadioData | null; error: string | null }
@@ -60,7 +66,8 @@ function exportContacts(contacts: readonly ContactEntry[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
-export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare }: ContactsProps) {
+export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare,
+  onPathMap, mapPathNodes, discoveredHops, discoveredRadio }: ContactsProps) {
   const live = snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device : null
   const liveKey = live ? radioKeyFromPublicKey(live.publicKey) : null
   const [offlineChoice, setOfflineChoice] = useState<RadioKey | '' | null>(null)
@@ -76,6 +83,11 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
   const entries = useMemo(() => contactEntries(
     contacts, data?.contactPreferences ?? [], data?.messages ?? [],
   ), [contacts, data])
+  const additionalPathNodes = useMemo(() => [
+    ...(radioKey && discoveredRadio === radioKey && discoveredHops
+      ? discoveredHops : discoveryPathNodes(discoveryEntries(data))),
+    ...(mapPathNodes ?? []),
+  ], [data, discoveredHops, discoveredRadio, mapPathNodes, radioKey])
 
   useEffect(() => {
     let active = true
@@ -139,6 +151,8 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
           savePreference={savePreference}
           onMap={onMap}
           onShare={onShare}
+          onPathMap={onPathMap}
+          additionalPathNodes={additionalPathNodes}
         />
       ) : <p className="contact-note">{cache.keys.length
         ? 'Select a saved radio to browse its contacts.' : 'Connect a radio to sync its contacts.'}</p>}
@@ -157,9 +171,12 @@ type BrowserProps = {
   savePreference: (radioKey: RadioKey, change: ContactPreferenceEdit) => Promise<void>
   onMap: ContactsProps['onMap']
   onShare?: ContactsProps['onShare']
+  onPathMap?: ContactsProps['onPathMap']
+  additionalPathNodes: readonly PathNode[]
 }
 
-function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, radioBusy, savePreference, onMap, onShare }: BrowserProps) {
+function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, radioBusy, savePreference, onMap, onShare,
+  onPathMap, additionalPathNodes }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
   const [sort, setSort] = useState<ContactSort>('name')
@@ -316,7 +333,7 @@ function ContactBrowser({ radioKey, entries, session, canWrite, firmware, usb, r
             onMap={onMap} onShare={onShare} copyKey={copyKey} edit={edit} remove={() => void remove([detail])}
             radioControls={detail.details && <ContactRadioActions key={detail.publicKey} session={session}
               contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} usb={usb}
-              firmware={firmware} busy={busy || radioBusy} />} />
+              firmware={firmware} busy={busy || radioBusy} onMap={onPathMap} additionalPathNodes={additionalPathNodes} />} />
         ) : <p className="contact-note">{visited.length ? 'Select a contact to see details.' : 'No contacts match.'}</p>}
       </div>
       {canWrite ? (

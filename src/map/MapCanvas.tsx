@@ -8,6 +8,8 @@ import { mapPosition, mercatorLatitude } from './nodes.ts'
 import type { Coordinates, MapNode } from './nodes.ts'
 import { coverageSamples } from './terrain.ts'
 import type { CoverageLayer, ProfileResult } from './terrain.ts'
+import { pathSegments } from '../paths/model.ts'
+import type { MapPath } from '../paths/model.ts'
 import land from './world-land.json'
 import 'leaflet/dist/leaflet.css'
 
@@ -19,6 +21,7 @@ type MapCanvasProps = {
   picking: boolean
   profile: ProfileResult | null
   layers: readonly CoverageLayer[]
+  displayPath: MapPath | null
   onSelect: (node: MapNode) => void
   onPick: (point: Coordinates) => void
   onTileError: () => void
@@ -27,7 +30,7 @@ type MapCanvasProps = {
 const point = ({ lat, lon }: Coordinates): [number, number] => [lat, lon]
 
 export function MapCanvas({
-  nodes, self, focus, useTiles, picking, profile, layers, onSelect, onPick, onTileError,
+  nodes, self, focus, useTiles, picking, profile, layers, displayPath, onSelect, onPick, onTileError,
 }: MapCanvasProps) {
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<LeafletMap | null>(null)
@@ -182,6 +185,20 @@ export function MapCanvas({
     }
     return () => { overlay.remove() }
   }, [profile, layers])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !displayPath) return
+    const overlay = layerGroup().addTo(map)
+    const valid = displayPath.points.map((entry) => ({ ...entry, position: mapPosition(entry.position) ? entry.position : null }))
+    for (const segment of pathSegments(valid)) {
+      polyline(segment.map(point), { color: '#6047a6', weight: 4, interactive: false }).addTo(overlay)
+    }
+    for (const { position } of valid) {
+      if (position) circleMarker(point(position), { radius: 6, color: '#6047a6', interactive: false }).addTo(overlay)
+    }
+    return () => { overlay.remove() }
+  }, [displayPath])
 
   return (
     <div

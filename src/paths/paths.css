@@ -1,0 +1,47 @@
+.path-details,
+.trace-workspace {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.path-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.trace-workspace {
+  padding: 16px clamp(16px, 3vw, 28px);
+}
+
+.trace-workspace fieldset {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.trace-workspace label:not(.trace-audible) {
+  display: grid;
+  gap: 4px;
+}
+
+:is(.path-details, .trace-workspace) :is(button, select, textarea) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+:is(.path-details, .trace-workspace) [role='alert'] {
+  color: var(--error);
+}

@@ -5,6 +5,8 @@ import type { CompanionSession, CompanionSnapshot } from '../radio/companion-ses
 import { decodeRxPacket, packetHex, payloadFields, routeLabel, rxPacketHash, rxPacketPush, typeLabel } from '../radio/rx-packet.ts'
 import type { CapturedPacket } from './rx-log.ts'
 import { matchingChannelObservations, maxRxPackets, redactedDiagnostics } from './rx-log.ts'
+import { PathDetails } from '../paths/PathDetails.tsx'
+import type { MapPath, PathNode } from '../paths/model.ts'
 import './diagnostics.css'
 
 type Props = {
@@ -12,6 +14,9 @@ type Props = {
   session: Pick<CompanionSession, 'getSnapshot' | 'subscribeToPushes'>
   prefs: AppPreferences
   locale: string
+  pathNodes?: readonly PathNode[]
+  mapPathNodes?: readonly PathNode[]
+  onMap?: (path: MapPath) => void
 }
 
 const emptyPackets: readonly CapturedPacket[] = []
@@ -20,7 +25,7 @@ function connectedRadio(snapshot: CompanionSnapshot) {
   return snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device?.publicKey ?? null : null
 }
 
-export function RxInspector({ snapshot, session, prefs, locale }: Props) {
+export function RxInspector({ snapshot, session, prefs, locale, pathNodes, mapPathNodes = [], onMap }: Props) {
   const currentKey = connectedRadio(snapshot)
   const [captureKey, setCaptureKey] = useState<string | null>(null)
   const [buffer, setBuffer] = useState<{ key: string; entries: CapturedPacket[] } | null>(null)
@@ -160,6 +165,7 @@ export function RxInspector({ snapshot, session, prefs, locale }: Props) {
     </fieldset>
     <p>{filtered.length} of {entries.length} packets</p>
     {detail && <PacketDetails entry={detail} observations={matchingChannelObservations(detail, entries)} key={detail.id} format={format}
+      nodes={buffer?.key === snapshot.device?.publicKey ? pathNodes ?? mapPathNodes : mapPathNodes} onMap={onMap}
       close={() => setSelected(null)} copyRaw={(text) => void copy(text, true)} />}
     {filtered.length ? <div className="rx-table-wrap" role="region" aria-label="Received packet table" tabIndex={0}>
       <table>
@@ -181,8 +187,9 @@ export function RxInspector({ snapshot, session, prefs, locale }: Props) {
   </section>
 }
 
-function PacketDetails({ entry, observations, format, close, copyRaw }: {
+function PacketDetails({ entry, observations, format, nodes, onMap, close, copyRaw }: {
   entry: CapturedPacket; observations: CapturedPacket[]; format: (date: Date) => string; close: () => void; copyRaw: (text: string) => void
+  nodes: readonly PathNode[]; onMap?: (path: MapPath) => void
 }) {
   const [fingerprint, setFingerprint] = useState('')
   const { packet, time, transport } = entry
@@ -219,8 +226,7 @@ function PacketDetails({ entry, observations, format, close, copyRaw }: {
       <dt>MeshCore packet hash</dt><dd><code>{fingerprint || 'Calculating…'}</code></dd>
       {packet.path && <>
         <dt>Path</dt><dd>{packet.path.count} hops
-          {packet.path.hashWidth !== null && <> · {packet.path.hashWidth}-byte hashes</>}
-          {packet.path.hashes?.length ? <> · <code>{packet.path.hashes.join(', ')}</code></> : null}</dd>
+          {packet.path.hashWidth !== null && <> · {packet.path.hashWidth}-byte hashes</>}</dd>
         {!!packet.path.traceSnrDb?.length && <>
           <dt>Trace hop SNR</dt><dd>{packet.path.traceSnrDb.join(', ')} dB</dd>
         </>}
@@ -230,16 +236,23 @@ function PacketDetails({ entry, observations, format, close, copyRaw }: {
       </>}
       {payloadFields(packet).map(([name, value]) => <div key={name}><dt>{name}</dt><dd><code>{value}</code></dd></div>)}
     </dl>
+    {packet.path?.hashWidth && packet.path.hashes?.length ? <PathDetails title="Captured packet path"
+      width={packet.path.hashWidth} hashes={packet.path.hashes} nodes={nodes} onMap={onMap} /> : null}
     {observations.length > 0 && <div>
       <h4>Matching encrypted channel-packet observations: {observations.length}</h4>
       <p>These USB packets have identical encrypted payload bytes in this capture. They may be separate transmissions,
         not delivery confirmations. Missing packets are not evidence of no repeats; they cannot be reliably linked to a queued message.</p>
-      <ul>{observations.map(({ id, time: observedAt, packet: observed }) => <li key={id}>
+      <ul aria-label="Matching channel packet paths">{observations.map(({ id, time: observedAt, packet: observed }) => <li key={id}>
         <time dateTime={new Date(observedAt).toISOString()}>{format(new Date(observedAt))}</time>
         {observed.header && <> · {routeLabel(observed.header)} · {observed.path!.count}{' '}
           {observed.header.routeCode >= 2 ? 'remaining' : 'traversed'} hop{observed.path!.count === 1 ? '' : 's'}</>}
         {observed.path!.hashes?.length ? <> · <code>{observed.path!.hashes.join(', ')}</code></> : null}
         {observed.transportCodes && <> · transport codes <code>{observed.transportCodes.map((code) => code.toString(16).padStart(4, '0')).join(', ')}</code></>}
+        {observed.path!.hashWidth && observed.path!.hashes?.length ? <details>
+          <summary>Inspect observed path</summary>
+          <PathDetails title="Observed packet path" width={observed.path!.hashWidth} hashes={observed.path!.hashes}
+            nodes={nodes} onMap={onMap} />
+        </details> : null}
       </li>)}</ul>
     </div>}
     {wire && <details>
