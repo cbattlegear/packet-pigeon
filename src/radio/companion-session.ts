@@ -65,6 +65,7 @@ interface Attempt {
   locking?: Promise<void>
   recovering?: boolean
   scopePending?: boolean
+  maintenance?: boolean
 }
 
 type SelectedTransport =
@@ -160,7 +161,7 @@ export class CompanionSession {
     if (attempt.link) {
       this.cleanup = attempt.link.close()
     }
-    if (this.expectedKey && (error.code === 'disconnected' || error.code === 'serial-io')) {
+    if (!attempt.maintenance && this.expectedKey && (error.code === 'disconnected' || error.code === 'serial-io')) {
       const generation = this.generation
       this.update({ phase: 'reconnecting', error, progress: null })
       void this.reconnect(generation)
@@ -940,6 +941,116 @@ export class CompanionSession {
   readonly getDeviceDetails = async (radioKey: string) => {
     const { readDeviceDetails } = await import('./device-settings.ts')
     return this.runRadioCommand(radioKey, (link) => readDeviceDetails(link, this.snapshot.device!.capabilities.firmwareProtocolVersion))
+  }
+
+  readonly exportDeviceIdentity = async (radioKey: string) => {
+    const { readBackupIdentity } = await import('./identity-backup.ts')
+    return this.runRadioCommand(radioKey, (link) => readBackupIdentity(link, radioKey))
+  }
+
+  readonly exportBackupChannels = async (radioKey: string, signal: AbortSignal) => {
+    const { readBackupChannels } = await import('./backup-commands.ts')
+    return this.runRadioCommand(radioKey, (link) => readBackupChannels(link, this.snapshot.device!.capabilities.maxChannels, signal))
+  }
+
+  readonly exportBackupContacts = (radioKey: string) =>
+    this.runRadioCommand(radioKey, (link) => this.readContacts(link))
+
+  readonly exportBackupDefaultRegion = async (radioKey: string) => {
+    const { readBackupDefaultRegion } = await import('./device-settings.ts')
+    return this.runRadioCommand(radioKey, (link) => this.snapshot.device!.capabilities.firmwareProtocolVersion >= 12
+      ? readBackupDefaultRegion(link) : Promise.resolve(undefined))
+  }
+
+  readonly importBackupDefaultRegion = async (radioKey: string, region: { name: string; key: string } | null) => {
+    const { writeBackupDefaultRegion } = await import('./device-settings.ts')
+    return this.runRadioCommand(radioKey, async (link) => {
+      if (this.snapshot.device!.capabilities.firmwareProtocolVersion < 12) {
+        throw new Error('This firmware does not support setting the default region.')
+      }
+      await writeBackupDefaultRegion(link, region)
+    })
+  }
+
+  readonly importBackupChannels = async (radioKey: string, entries: readonly { name: string; secret: string }[], signal: AbortSignal) => {
+    const { restoreBackupChannels } = await import('./backup-commands.ts')
+    let result: Awaited<ReturnType<typeof restoreBackupChannels>> | undefined
+    try {
+      await this.runRadioCommand(radioKey, async (link) => {
+        const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
+        result = await restoreBackupChannels(link, this.snapshot.device!.capabilities.maxChannels, entries, signal, connected)
+        if (connected()) this.update({ channels: result.channels })
+      })
+    } catch (error) {
+      if (!result) throw error
+    }
+    return result!
+  }
+
+  readonly importBackupContacts = async (radioKey: string, entries: readonly Omit<CompanionContact, 'lastModifiedAt'>[], signal: AbortSignal) => {
+    const { restoreBackupContacts } = await import('./backup-commands.ts')
+    let results: Awaited<ReturnType<typeof restoreBackupContacts>> | undefined
+    try {
+      await this.runRadioCommand(radioKey, async (link) => {
+        const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
+        results = await restoreBackupContacts(link, entries, this.snapshot.device!.capabilities.firmwareProtocolVersion,
+          radioKey, signal, connected)
+        if (connected() && results.some(({ status }) => status === 'saved')) {
+          this.update({ contacts: await this.readContacts(link) })
+        }
+      })
+    } catch (error) {
+      if (!results) throw error
+      results.push({ publicKey: '', label: 'Refresh contacts', status: 'failed', reason: 'Reconnect to refresh the saved contacts.' })
+    }
+    return results!
+  }
+
+  private async runMaintenance(radioKey: string, write: (link: SerialLink) => Promise<void>) {
+    const generation = this.generation
+    let disconnect = false
+    try {
+      await this.runRadioCommand(radioKey, async (link) => {
+        const attempt = this.attempt!
+        attempt.maintenance = true
+        disconnect = true
+        try {
+          await write(link)
+        } catch (error) {
+          if (error instanceof CompanionError && error.code === 'device-error') {
+            attempt.maintenance = false
+            disconnect = false
+          }
+          throw error
+        }
+      })
+    } finally {
+      if (disconnect && generation === this.generation) await this.disconnect()
+    }
+  }
+
+  readonly restoreDeviceIdentity = async (radioKey: string, key: Uint8Array, expectedPublicKey: string) => {
+    const { backupPublicKey, writeBackupIdentity } = await import('./identity-backup.ts')
+    if (backupPublicKey(key) !== expectedPublicKey) throw new Error('The backup private key does not match the public identity.')
+    if (radioKey === expectedPublicKey) return
+    await this.runMaintenance(radioKey, (link) => writeBackupIdentity(link, key, expectedPublicKey))
+  }
+
+  readonly sendMaintenance = async (radioKey: string, action: 'reboot' | 'reset') => {
+    const { maintenanceCommand } = await import('./identity-backup.ts')
+    if (action === 'reset' && (this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0) < 7) {
+      throw new Error('This firmware does not expose the factory reset command.')
+    }
+    let submitted = false
+    try {
+      await this.runMaintenance(radioKey, async (link) => {
+        await link.sendWithoutReply(maintenanceCommand(action))
+        submitted = true
+      })
+    } catch (error) {
+      // A reboot or reset can close the connection before the session observes the write result.
+      if (!submitted) throw error
+    }
   }
 
   readonly saveDevicePreferences = async (radioKey: string, edits: DeviceEdits, advanced: AdvancedDeviceEdits = {}) => {

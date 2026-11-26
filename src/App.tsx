@@ -37,6 +37,7 @@ const messageSync = new MessageSync(session, undefined, () => {
 const directMessages = new DirectMessages(session)
 const MapWorkspace = lazy(() => import('./map/MapWorkspace.tsx'))
 const DeviceSettingsPanel = lazy(() => import('./preferences/DeviceSettingsPanel.tsx'))
+const BackupPanel = lazy(() => import('./backup/BackupPanel.tsx'))
 let startupRetention: Promise<number> | undefined
 
 function applyStartupRetention() {
@@ -439,6 +440,14 @@ function App() {
             <Suspense fallback={null}>
               <DeviceSettingsPanel snapshot={snapshot} session={session}
                 radioBusy={messageStatus.syncing || directStatus.activeId !== null} />
+              <BackupPanel snapshot={snapshot} session={session}
+                radioBusy={messageStatus.syncing || directStatus.activeId !== null}
+                canPurge={!cacheStatus.saving && cacheStatus.pending === 0 && directStatus.pending === 0 && !messageStatus.pending}
+                onCacheChanged={(key, purged) => {
+                  if (purged) directMessages.forgetSessionDrafts(key)
+                  if (directMessages.getSnapshot().key === key) void directMessages.load(key)
+                  discovery.refresh()
+                }} />
             </Suspense>
             <section className="preferences" aria-label="Companion setup links">
               <h2>Companion setup links</h2>

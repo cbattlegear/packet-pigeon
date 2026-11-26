@@ -3,6 +3,7 @@ import { CompanionError, Response } from './protocol.ts'
 import type { CompanionDevice, RadioParameters } from './protocol.ts'
 import { expectResponse } from './serial-link.ts'
 import type { SerialLink } from './serial-link.ts'
+import { parseChannelSecret, secretHex } from './channel-commands.ts'
 import { setupPathWidthCommand, setupRadioCommand, writeSettingsCommand } from './setup-commands.ts'
 
 export type TelemetryPolicies = { base?: number; location?: number; environment?: number }
@@ -15,6 +16,7 @@ export type DeviceEdits = {
   pathWidth?: number
   advertLocation?: boolean
   telemetry?: TelemetryPolicies
+  contactMode?: number
   extraAcknowledgements?: boolean
 }
 
@@ -104,17 +106,35 @@ async function readRepeatRanges(link: SerialLink) {
   }))
 }
 
-async function readRegion(link: SerialLink) {
+async function readDefaultRegionFrame(link: SerialLink) {
   const frame = await readReply(link, 64, 28)
   if (!frame) return null
-  if (frame.length === 1) return { name: null }
-  if (frame.length !== 48) throw badReply('default region data')
-  const end = frame.subarray(1, 32).indexOf(0)
-  if (end <= 0) throw badReply('default region name')
+  if (frame.length === 1) return { name: null, frame }
   try {
-    return { name: decoder.decode(frame.subarray(1, end + 1)) }
-  } finally {
+    if (frame.length !== 48) throw badReply('default region data')
+    const end = frame.subarray(1, 32).indexOf(0)
+    if (end <= 0) throw badReply('default region name')
+    return { name: decoder.decode(frame.subarray(1, end + 1)), frame }
+  } catch (error) {
     frame.fill(0, 32)
+    throw error
+  }
+}
+
+async function readRegion(link: SerialLink) {
+  const region = await readDefaultRegionFrame(link)
+  if (!region) return null
+  region.frame.fill(0, 32)
+  return { name: region.name }
+}
+
+export async function readBackupDefaultRegion(link: SerialLink) {
+  const region = await readDefaultRegionFrame(link)
+  if (!region) return undefined
+  try {
+    return region.name === null ? null : { name: region.name, key: secretHex(region.frame.subarray(32)) }
+  } finally {
+    region.frame.fill(0, 32)
   }
 }
 
@@ -225,7 +245,18 @@ export function deviceOperations(device: CompanionDevice, edits: DeviceEdits) {
       update: (current) => ({ ...current, capabilities: { ...current.capabilities, pathHashMode: width - 1 } }),
     })
   }
-  if (edits.telemetry || edits.advertLocation !== undefined || edits.extraAcknowledgements !== undefined) {
+  if (edits.telemetry || edits.advertLocation !== undefined || edits.extraAcknowledgements !== undefined
+    || edits.contactMode !== undefined) {
+    const contactMode = edits.contactMode ?? device.contactMode
+    assertInteger(contactMode, 0, 255, 'Invalid auto-add contact mode.')
+    const changesPolicies = edits.telemetry || edits.advertLocation !== undefined || edits.extraAcknowledgements !== undefined
+    if (!changesPolicies) {
+      operations.push({
+        ...binary('Auto-add contact mode', Uint8Array.of(38, contactMode)),
+        update: (current) => ({ ...current, contactMode }),
+      })
+      return operations
+    }
     if (preferences.telemetryPolicy === null) throw new Error('This firmware does not expose the additional policy settings.')
     let policy = preferences.telemetryPolicy
     for (const [field, shift] of [['base', 0], ['location', 2], ['environment', 4]] as const) {
@@ -239,12 +270,12 @@ export function deviceOperations(device: CompanionDevice, edits: DeviceEdits) {
     if (edits.extraAcknowledgements !== undefined && (preferences.extraAcknowledgements === null || location === null)) {
       throw new Error('This firmware does not report the acknowledgement or advert location setting.')
     }
-    const command = [38, device.contactMode, policy]
+    const command = [38, contactMode, policy]
     if (edits.advertLocation !== undefined || edits.extraAcknowledgements !== undefined) command.push(Number(location))
     if (edits.extraAcknowledgements !== undefined) command.push(Number(acknowledgements))
     operations.push({
       ...binary('Advert and message policies', Uint8Array.from(command)),
-      update: (current) => ({ ...current, preferences: { ...current.preferences,
+      update: (current) => ({ ...current, contactMode, preferences: { ...current.preferences,
         advertLocation: location, telemetryPolicy: policy, extraAcknowledgements: acknowledgements,
       } }),
     })
@@ -252,17 +283,34 @@ export function deviceOperations(device: CompanionDevice, edits: DeviceEdits) {
   return operations
 }
 
+function encodeDefaultRegion(name: string, key: Uint8Array) {
+  const bytes = textBytes(name, 30, 'Default region')
+  const command = new Uint8Array(48)
+  command[0] = 63
+  command.set(bytes, 1)
+  command.set(key, 32)
+  return command
+}
+
 async function regionCommand(region: string | null) {
   if (region === null) return Uint8Array.of(63)
   const scope = validateChannelScope({ mode: 'region', name: region })
   if (scope.mode !== 'region') throw new Error('Enter a region name.')
-  const name = textBytes(scope.name, 30, 'Default region')
   const keyCommand = await channelScopeCommand(scope)
-  const command = new Uint8Array(48)
-  command[0] = 63
-  command.set(name, 1)
-  command.set(keyCommand.subarray(2), 32)
-  return command
+  try { return encodeDefaultRegion(scope.name, keyCommand.subarray(2)) }
+  finally { keyCommand.fill(0, 2) }
+}
+
+export async function writeBackupDefaultRegion(link: SerialLink, region: { name: string; key: string } | null) {
+  const key = region ? parseChannelSecret(region.key) : null
+  let command: Uint8Array | undefined
+  try {
+    command = region && key ? encodeDefaultRegion(region.name, key) : Uint8Array.of(63)
+    await writeSettingsCommand(link, command)
+  } finally {
+    key?.fill(0)
+    command?.fill(0)
+  }
 }
 
 export async function advancedDeviceOperations(version: number, edits: AdvancedDeviceEdits) {

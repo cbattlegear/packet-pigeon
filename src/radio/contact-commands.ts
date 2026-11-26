@@ -2,7 +2,7 @@ import { CompanionError, decodeContact, Response } from './protocol.ts'
 import type { CompanionContact } from './protocol.ts'
 import { expectResponse } from './serial-link.ts'
 import type { SerialLink } from './serial-link.ts'
-import { parseContactPath, pathUnknown } from './contact-path.ts'
+import { decodeContactPath, parseContactPath, pathUnknown } from './contact-path.ts'
 import type { ContactPathWidth } from './contact-path.ts'
 
 export type NewContact = {
@@ -68,6 +68,27 @@ export function addContactCommand(input: NewContact) {
 
 export function removeContactCommand(publicKey: string) {
   return Uint8Array.of(removeContact, ...keyBytes(contactPublicKey(publicKey)))
+}
+
+export function backupContactCommand(contact: Omit<CompanionContact, 'lastModifiedAt'>, firmware: number) {
+  const { flags, lastAdvertisedAt, pathLength, pathHex, publicKey, name, type, latitude, longitude } = contact
+  if (type !== 1 && type !== 2 && type !== 3 && type !== 4) throw new Error('Unsupported contact role.')
+  if (!Number.isInteger(flags) || flags < 0 || flags > 255 ||
+    !Number.isInteger(lastAdvertisedAt) || lastAdvertisedAt < 0 || lastAdvertisedAt > 0xffffffff) {
+    throw new Error('Invalid contact flags or advert time.')
+  }
+  if ((flags & contactPermissions.remoteCli) && firmware < 14) {
+    throw new Error('This firmware does not support restoring the contact’s remote CLI permission.')
+  }
+  const path = pathLength === pathUnknown ? null : decodeContactPath(pathLength, pathHex)
+  if (pathLength !== pathUnknown && !path) throw new Error('Invalid saved contact route.')
+  if (path && path.width > 1 && firmware < 10) throw new Error('This firmware does not support the saved contact path width.')
+  const { command } = addContactCommand({ publicKey, name, type, position: { latitude, longitude } })
+  command[34] = flags
+  command[35] = pathLength
+  if (path) command.set(keyBytes(path.hops.join('')), 36)
+  new DataView(command.buffer).setUint32(132, lastAdvertisedAt, true)
+  return command
 }
 
 export async function findContactFrame(link: SerialLink, publicKey: string) {
