@@ -9,7 +9,7 @@ import {
   repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
-  repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning,
+  repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning, repeaterTempRadioWarning,
   repeaterClockCommand, repeaterClockWarning,
   UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
@@ -107,6 +107,7 @@ const managementForms = {
   receiveDelay: { title: 'Change receive-delay base', terms: 'set rxdelay get rxdelay' },
   transmitPower: { title: 'Change repeater transmit power', terms: 'set tx get tx' },
   radioSettings: { title: 'Change repeater radio parameters', terms: 'set radio get radio frequency bandwidth spreading factor coding rate' },
+  tempRadio: { title: 'Set temporary radio override', terms: 'tempradio temporary frequency bandwidth spreading factor coding rate' },
   batteryCalibration: { title: 'Calibrate battery voltage', terms: 'get adc.multiplier set adc.multiplier battery voltage' },
   receiverGain: { title: 'Change receiver boosted-gain preference', terms: 'set radio.rxgain get radio.rxgain' },
   agc: { title: 'Change AGC reset interval', terms: 'set agc.reset.interval get agc.reset.interval' },
@@ -145,6 +146,11 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [radioBandwidth, setRadioBandwidth] = useState('')
   const [radioSpreadingFactor, setRadioSpreadingFactor] = useState('')
   const [radioCodingRate, setRadioCodingRate] = useState('')
+  const [tempFrequency, setTempFrequency] = useState('')
+  const [tempBandwidth, setTempBandwidth] = useState('')
+  const [tempSpreadingFactor, setTempSpreadingFactor] = useState('')
+  const [tempCodingRate, setTempCodingRate] = useState('')
+  const [tempDuration, setTempDuration] = useState('')
   const [adcMultiplier, setAdcMultiplier] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
   const [pathHashMode, setPathHashMode] = useState('')
@@ -347,6 +353,19 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         true, repeaterRadioSettingsWarning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid repeater radio preferences.')
+    }
+  }
+
+  function submitTempRadio(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`tempradio ${tempFrequency},${tempBandwidth},${tempSpreadingFactor},${tempCodingRate},${tempDuration}`)
+      void send(command.command,
+        `Set temporary radio override to ${tempFrequency} MHz, ${tempBandwidth} kHz, SF ${tempSpreadingFactor}, CR 4/${tempCodingRate} for ${tempDuration} minutes`,
+        true, repeaterTempRadioWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid temporary radio override.')
     }
   }
 
@@ -969,6 +988,35 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       <p>Frequency and bandwidth accept up to three decimals. These ranges avoid values clamped when v1.14.1 loads
         preferences; they do not establish device support. {repeaterRadioSettingsCaveats}</p>
     </details>
+    <details data-cli-section="tempRadio">
+      <summary>{managementForms.tempRadio.title}</summary>
+      <p>{repeaterTempRadioWarning}</p>
+      <form className="contact-actions" onSubmit={submitTempRadio}>
+        <label>Temporary frequency (400–2500 MHz)
+          <input type="text" inputMode="decimal" required value={tempFrequency} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setTempFrequency(event.currentTarget.value)} />
+        </label>
+        <label>Temporary bandwidth (7.8–500 kHz)
+          <input type="text" inputMode="decimal" required value={tempBandwidth} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setTempBandwidth(event.currentTarget.value)} />
+        </label>
+        <label>Temporary spreading factor (5–12)
+          <input type="text" inputMode="numeric" required value={tempSpreadingFactor} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setTempSpreadingFactor(event.currentTarget.value)} />
+        </label>
+        <label>Temporary coding rate denominator (5–8)
+          <input type="text" inputMode="numeric" required value={tempCodingRate} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setTempCodingRate(event.currentTarget.value)} />
+        </label>
+        <label>Override duration in minutes (1–35791)
+          <input type="text" inputMode="numeric" required value={tempDuration} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setTempDuration(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set temporary override</button>
+      </form>
+      <p>Frequency and bandwidth accept up to three decimals. The duration limit avoids signed timer overflow in v1.14.1;
+        even within it restoration is not guaranteed. Read and record radio preferences separately before changing anything.</p>
+    </details>
     <details data-cli-section="transmitPower">
       <summary>{managementForms.transmitPower.title}</summary>
       <p>Read the stored preference first. Firmware documents a range of 1–22 dBm, but supported values vary by board.
@@ -1290,6 +1338,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.command.startsWith('set radio ') && item.reply !== null &&
             <p className="contact-status">A reply does not prove persistence or successful application. Read preferences separately;
               they can apply on reboot or when a temporary radio override expires, and a delayed change may arrive after a later change.</p>}
+          {item.command.startsWith('tempradio ') && item.reply !== null &&
+            <p className="contact-status">A reply does not prove the override applied or that settings will be restored.
+              Expiry uses then-current preferences, not necessarily the previous active settings.</p>}
           {powerDiagnosticHelp(item.command) && item.reply !== null &&
             <p className="contact-status">{powerDiagnosticHelp(item.command)} Firmware and hardware support vary; replies may be delayed.</p>}
           {bridgeDiagnosticHelp(item.command) && item.reply !== null &&
