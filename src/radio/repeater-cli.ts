@@ -23,6 +23,8 @@ export const repeaterClockWarning = 'Verify this UTC time against a trusted cloc
 
 export const repeaterClockRebootWarning = 'Recovery action: repeater v1.14.1 attempts to set its clock to 2024-05-15 10:52:31 UTC, then reboot without a reply. This can move the clock backwards and disrupt time-sensitive messages, advertisements and remote access. The reboot can interrupt mesh traffic, lose unsaved access-list or region changes, and cancel temporary radio overrides. Check a local recovery method first. Firmware and clock hardware may behave differently; radio acceptance does not prove execution or that the clock stayed reset. A delayed command may still arrive later. Log in again, then read and set the clock separately using a trusted time; GPS or another administrator may change it again.'
 
+export const repeaterBridgeDelayWarning = 'Changing the delay can affect latency, packet loss, routes and remote access. In repeater v1.14.1 it schedules packets entering from the bridge for later mesh processing, not packets sent to the bridge. Already queued packets retain their scheduled time. Zero removes this added delay but does not guarantee immediate processing; packets can be dropped if the queue is full. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove actual timing or persistence. A delayed command may arrive later; firmware and build support vary.'
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -443,6 +445,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter an AGC reset interval from 0 to 1020 seconds in multiples of 4.')
     }
     return { command, description: 'Set AGC reset interval', confirm: true as const }
+  }
+  const bridgeDelayPrefix = 'set bridge.delay '
+  if (command.startsWith(bridgeDelayPrefix)) {
+    const value = command.slice(bridgeDelayPrefix.length)
+    const match = /^(0|[1-9][0-9]*)$/.exec(value)
+    if (!match || match[0] !== value || Number(value) > 10000) {
+      throw new Error('Enter a whole bridge delay from 0 to 10000 milliseconds.')
+    }
+    return { command, description: 'Set bridge inbound delay', confirm: true as const, warning: repeaterBridgeDelayWarning }
   }
   const interferencePrefix = 'set int.thresh '
   if (command.startsWith(interferencePrefix)) {

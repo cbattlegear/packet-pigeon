@@ -618,7 +618,15 @@ or `logTx`; the change applies to subsequent observations and attempts to
 save the preference. The same advert-save side effect applies. An OK reply or
 matching read-back does not prove packets were bridged or the setting was
 saved, and delayed commands may arrive later. Other firmware may differ.
-Other bridge changes and secret queries are not offered.
+The separately confirmed bridge inbound delay accepts whole milliseconds from
+0 to 10000. In v1.14.1, it schedules packets entering from the bridge for mesh
+processing; it does not delay packets sent to the bridge. Already queued
+packets retain their scheduled time, and zero does not guarantee immediate
+processing. A full queue can drop packets. Changing delay can affect latency,
+routes and remote access. The advert-save side effect also applies. A reply
+or matching preference does not prove actual timing or persistence; commands
+and replies may arrive late. Firmware and build support vary. Other bridge
+changes and secret queries are not offered.
 Administrators can explicitly read and confirm changes to repeater radio
 preferences (frequency, bandwidth, spreading factor and coding rate). Check
 the board, local regulations, channel plan and recovery method first: changing

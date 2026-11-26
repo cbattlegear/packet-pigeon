@@ -10,7 +10,7 @@ import {
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
   repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning, repeaterTempRadioWarning,
-  repeaterClockCommand, repeaterClockWarning, isRepeaterRebootCommand,
+  repeaterClockCommand, repeaterClockWarning, repeaterBridgeDelayWarning, isRepeaterRebootCommand,
   UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -115,7 +115,7 @@ const managementForms = {
   multiAck: { title: 'Change extra direct ACK preference', terms: 'set multi.acks get multi.acks' },
   powerSaving: { title: 'Change repeater power-saving preference', terms: 'powersaving' },
   packetLog: { title: 'Manage repeater packet log', terms: 'log start stop erase logging packet diagnostics' },
-  bridge: { title: 'Manage repeater bridge', terms: 'get bridge.type get bridge.enabled set bridge.enabled on off get bridge.source set bridge.source rx tx logRx logTx' },
+  bridge: { title: 'Manage repeater bridge', terms: 'get bridge.type get bridge.enabled set bridge.enabled on off get bridge.source set bridge.source rx tx logRx logTx get bridge.delay set bridge.delay' },
   advertInterval: { title: 'Change advertisement interval', terms: 'set advert.interval set flood.advert.interval' },
   removeAccess: { title: 'Remove repeater access-list entry', terms: 'setperm acl permissions' },
   limitedAccess: { title: 'Set non-admin repeater client role', terms: 'setperm acl permissions read-only read-write' },
@@ -142,6 +142,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [receiveDelay, setReceiveDelay] = useState('')
   const [agcResetInterval, setAgcResetInterval] = useState('')
   const [interferenceThreshold, setInterferenceThreshold] = useState('')
+  const [bridgeDelay, setBridgeDelay] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [radioFrequency, setRadioFrequency] = useState('')
@@ -234,7 +235,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     const rebootFollowup = command === 'clkreboot'
       ? 'No reply is expected on repeater v1.14.1. Log in again when the repeater is available; a delayed clock reset and reboot may still arrive. Read and set the clock separately using a trusted time.'
       : 'No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.'
-    const target = reboots || command.startsWith('log ') || command.startsWith('set bridge.enabled ') || command.startsWith('set bridge.source ')
+    const target = reboots || command.startsWith('log ') || command.startsWith('set bridge.enabled ') ||
+      command.startsWith('set bridge.source ') || command.startsWith('set bridge.delay ')
       ? `${name} (${contactKey.slice(0, 12)})` : name
     if (confirmed) {
       if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
@@ -437,6 +439,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       void send(command.command, `${command.description} to ${interferenceThreshold}`, true, interferenceWarning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid interference threshold.')
+    }
+  }
+
+  function submitBridgeDelay(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set bridge.delay ${bridgeDelay}`)
+      void send(command.command, `${command.description} to ${bridgeDelay} milliseconds`, true, repeaterBridgeDelayWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid bridge delay.')
     }
   }
 
@@ -1181,6 +1194,22 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             onClick={() => sendChoice(item)}>{item.description}</button>
         ))}
       </div>
+      <p>In v1.14.1, the bridge delay schedules packets entering from the bridge for later mesh processing,
+        not packets sent to the bridge. Already queued packets retain their scheduled time. Zero removes this added
+        delay but does not guarantee immediate processing; packets can be dropped if the queue is full. Changing it
+        can affect latency, routes and remote access. Read the preference separately; it does not prove actual timing
+        or persistence. The advert-save side effect above also applies. Commands and replies may arrive late;
+        firmware and build support vary.</p>
+      <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+        onClick={() => void send('get bridge.delay', 'Read bridge delay preference', false)}>Read bridge delay preference</button>
+      <form className="contact-actions" onSubmit={submitBridgeDelay}>
+        <label>Bridge inbound delay (0–10000 ms)
+          <input type="text" inputMode="numeric" required value={bridgeDelay}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setBridgeDelay(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set bridge inbound delay</button>
+      </form>
     </details>
     <details data-cli-section="advertInterval">
       <summary>{managementForms.advertInterval.title}</summary>
@@ -1417,6 +1446,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
               a delayed command may still change it later.</p>}
           {item.command.startsWith('set bridge.source ') && item.reply !== null &&
             <p className="contact-status">A reply does not prove packets were bridged or the setting was saved. Read the preference separately;
+              a delayed command may still change it later.</p>}
+          {item.command.startsWith('set bridge.delay ') && item.reply !== null &&
+            <p className="contact-status">A reply does not prove actual timing or persistence. Read the preference separately;
               a delayed command may still change it later.</p>}
           {item.command === 'sensor get gps' && item.reply !== null &&
             <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.
