@@ -19,7 +19,8 @@ test('uses announced ACL roles for posting and never promotes legacy or incomple
     assert.equal(access.firmware, 1)
     assert.equal(parseRemoteLogin({ code: 0x85, payload }, 'cd'.repeat(32), 'direct'), undefined)
   }
-  assert.throws(() => parseRemoteLogin({ code: 0x86, payload: legacy }, publicKey, 'direct'), /rejected/)
+  assert.throws(() => parseRemoteLogin({ code: 0x86, payload: Uint8Array.of(0, ...keyPrefix) }, publicKey, 'direct'), /rejected/)
+  assert.throws(() => parseRemoteLogin({ code: 0x86, payload: legacy }, publicKey, 'direct'), /invalid login rejection/)
 })
 
 test('matches a binary reply by request tag and ignores unsolicited telemetry', async () => {
@@ -98,4 +99,20 @@ test('distinguishes a cancelled sent login from a definite rejection', async () 
   } }
   await assert.rejects(loginRemoteNode(rejected, publicKey, '', subscribe, new AbortController().signal),
     (error) => /rejected/.test(error.message) && !(error instanceof RemoteLoginUnconfirmed))
+})
+
+test('treats ambiguous confirmations as unconfirmed and allows retry after a definite local rejection', async () => {
+  const signal = new AbortController().signal
+  const subscribe = () => () => {}
+  for (const ack of [[0], [1], [6, 0]]) {
+    const link = { async request(_command, receive) { return receive(Uint8Array.from(ack)).value } }
+    await assert.rejects(loginRemoteNode(link, publicKey, '', subscribe, signal), RemoteLoginUnconfirmed)
+  }
+  for (const ack of [[1, 2], [15]]) {
+    const link = { async request(_command, receive) { return receive(Uint8Array.from(ack)).value } }
+    await assert.rejects(loginRemoteNode(link, publicKey, '', subscribe, signal),
+      (error) => /companion rejected/.test(error.message) && !(error instanceof RemoteLoginUnconfirmed))
+  }
+  await assert.rejects(loginRemoteNode({ request() { assert.fail('Unexpected radio command') } },
+    publicKey, '', subscribe, AbortSignal.abort()), { name: 'AbortError' })
 })

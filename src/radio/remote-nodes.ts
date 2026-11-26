@@ -31,7 +31,8 @@ export function nodeRole(permissions: number): RemoteNodeRole {
 }
 
 async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscribe: PushSubscription,
-  signal: AbortSignal, match: (push: CompanionPush, sent: DirectSendReceipt) => T | undefined, onSent?: () => void) {
+  signal: AbortSignal, match: (push: CompanionPush, sent: DirectSendReceipt) => T | undefined,
+  unconfirmed?: (cause: unknown) => Error) {
   signal.throwIfAborted()
   let sent: DirectSendReceipt | undefined
   let settle!: (reply: Reply<T>) => void
@@ -46,15 +47,18 @@ async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscri
   })
   signal.addEventListener('abort', stop, { once: true })
   let timer: ReturnType<typeof setTimeout> | undefined
+  let dispatchStarted = false
+  let rejected = false
   try {
+    signal.throwIfAborted()
+    dispatchStarted = true
     const accepted = await link.request(command, (frame) => {
       // A confirmation and the remote push can arrive in the same read.
-      if (frame[0] === Response.sent) {
-        sent = decodeDirectSent(frame)
-        onSent?.()
-      }
+      if (frame[0] === Response.sent) sent = decodeDirectSent(frame)
       return { value: frame }
     })
+    rejected = (accepted[0] === Response.error && accepted.length === 2) ||
+      (accepted[0] === Response.disabled && accepted.length === 1)
     expectResponse(accepted, Response.sent)
     if (!sent) throw new Error('The radio did not confirm the request.')
     signal.throwIfAborted()
@@ -64,6 +68,9 @@ async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscri
     if (!result) throw new Error('No reply arrived before the deadline. Check the node’s range, route, and access settings.')
     if ('error' in result) throw result.error
     return result.value
+  } catch (error) {
+    if (unconfirmed && dispatchStarted && !rejected && !(error instanceof RemoteLoginRejected)) throw unconfirmed(error)
+    throw error
   } finally {
     clearTimeout(timer)
     signal.removeEventListener('abort', stop)
@@ -74,7 +81,10 @@ async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscri
 export function parseRemoteLogin(push: CompanionPush, publicKey: string, route: DirectSendReceipt['route']): RemoteNodeAccess | undefined {
   const { code, payload } = push
   if ((code !== 0x85 && code !== 0x86) || payload.length < 7 || hex(payload.subarray(1, 7)) !== publicKey.slice(0, 12)) return
-  if (code === 0x86) throw new RemoteLoginRejected('The node rejected the login.')
+  if (code === 0x86) {
+    if (payload.length !== 7 || payload[0] !== 0) throw new Error('The node returned an invalid login rejection.')
+    throw new RemoteLoginRejected('The node rejected the login.')
+  }
   const permissions = payload.length >= 13 ? payload[11] : null
   return { role: permissions === null ? null : nodeRole(permissions), permissions, firmware: payload[12] ?? null, route }
 }
@@ -87,16 +97,11 @@ export async function loginRemoteNode(link: SerialLink, publicKey: string, passw
       throw new Error('The node password must be at most 15 UTF-8 bytes without NUL characters.')
     }
     const command = Uint8Array.of(26, ...keyBytes(publicKey), ...bytes)
-    let queued = false
     try {
       return await requestWithPush(link, command, subscribe, signal,
-        (push, { route }) => parseRemoteLogin(push, publicKey, route), () => { queued = true })
-    } catch (error) {
-      if (queued && !(error instanceof RemoteLoginRejected)) {
-        throw new RemoteLoginUnconfirmed('The login reply is unconfirmed. Reconnect before trying this node again. A late reply is still possible after reconnecting.',
-          { cause: error })
-      }
-      throw error
+        (push, { route }) => parseRemoteLogin(push, publicKey, route),
+        (cause) => new RemoteLoginUnconfirmed('The login reply is unconfirmed. Reconnect before trying this node again. A late reply is still possible after reconnecting.',
+          { cause }))
     } finally { command.fill(0) }
   } finally { bytes.fill(0) }
 }
