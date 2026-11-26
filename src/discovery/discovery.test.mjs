@@ -75,9 +75,15 @@ test('stores passive adverts by verified radio and preserves newer metadata arou
   const cache = new SessionCache({
     subscribe() {}, getSnapshot: () => current, subscribeToPushes(fn) { listener = fn },
   }, async () => store)
+  const found = []
+  cache.subscribeToDiscoveries((key, entry) => found.push([key, entry.publicKey]))
   try {
     listener({ code: 0x8a, payload: newAdvert() })
     for (let index = 0; cache.getSnapshot().pending && index < 100; index++) await setTimeout(2)
+    assert.deepEqual(found, [[radioA, contact]])
+    listener({ code: 0x8a, payload: newAdvert() })
+    for (let index = 0; cache.getSnapshot().pending && index < 100; index++) await setTimeout(2)
+    assert.deepEqual(found, [[radioA, contact]])
     const saved = (await store.read(radioA)).discoveries[0]
     assert.equal(saved.name, 'Ridge relay')
     assert.equal(await store.read(radioB), null)

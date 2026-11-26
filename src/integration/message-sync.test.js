@@ -55,6 +55,7 @@ test('stops after a failed save and retries the same receipt before fetching ano
   const factory = new IDBFactory()
   const source = sourceFor([direct, direct])
   const attempts = []
+  const alerts = []
   let fail = true
   const sync = new MessageSync(source, async () => {
     const storage = await openRadioStorage(factory)
@@ -67,15 +68,22 @@ test('stops after a failed save and retries the same receipt before fetching ano
       },
     }
   })
+  sync.subscribeToSavedReceipts((radio, message, data) => {
+    assert.equal(radio, key)
+    assert.ok(data.messages.some((entry) => entry.id === message.id))
+    alerts.push(message.id)
+  })
   await sync.sync()
   assert.equal(source.calls, 1)
   assert.equal(sync.getSnapshot().pending, true)
+  assert.deepEqual(alerts, [])
   assert.match(sync.getSnapshot().error, /Disk unavailable/)
   source.snapshot.phase = 'idle'
   await sync.sync()
   assert.equal(source.calls, 1)
   assert.equal(sync.getSnapshot().pending, false)
   assert.equal(attempts[0].id, attempts[1].id)
+  assert.deepEqual(alerts, [attempts[0].id])
   const storage = await openRadioStorage(factory)
   assert.equal((await storage.read(key)).messages.length, 1)
   storage.close()

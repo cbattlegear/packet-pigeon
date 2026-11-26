@@ -36,6 +36,8 @@ type Props = {
   readChannelKey?: (radioKey: RadioKey, channel: StoredChannel) => Promise<string>
   observationSource?: ChannelObservationSource
   mapPosition?: Coordinates | null
+  navigationRequest?: { key: RadioKey; id: string; sequence: number } | null
+  onActiveConversation?: (key: RadioKey | null, id: string | null) => void
 }
 
 type ChatDisplay = {
@@ -58,7 +60,7 @@ function errorText(error: unknown) {
 }
 
 export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving,
-  active, preferences, locale, readChannelKey, observationSource, mapPosition }: Props) {
+  active, preferences, locale, readChannelKey, observationSource, mapPosition, navigationRequest, onActiveConversation }: Props) {
   const live = (snapshot.phase === 'ready' || snapshot.phase === 'syncing') && snapshot.device
     ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
   const last = snapshot.device ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
@@ -80,6 +82,17 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
       : null
   const ownContact = snapshot.device && last === radioKey
     ? contactShareLink(snapshot.device.name, snapshot.device.publicKey, snapshot.device.type) : null
+
+  useEffect(() => {
+    if (!navigationRequest) return
+    setOfflineChoice(navigationRequest.key)
+    setSelection({ key: navigationRequest.key, id: navigationRequest.id })
+  }, [navigationRequest])
+
+  useLayoutEffect(() => {
+    onActiveConversation?.(active ? radioKey : null, active ? selected?.id ?? null : null)
+    return () => onActiveConversation?.(null, null)
+  }, [active, radioKey, selected?.id, onActiveConversation])
 
   useEffect(() => {
     let active = true
@@ -222,12 +235,13 @@ function ConversationPane({ radioKey, data, selected, direct, status, senderName
   }
   return <ConversationView key={`${radioKey}:${selected.id}`} conversation={selected}
     radioKey={radioKey} options={data.directSendOptions ?? defaultOptions} direct={direct} status={status}
-    senderName={senderName} display={display} />
+    senderName={senderName} display={display} muted={data.mutedDirectConversations?.includes(selected.id.slice(0, 19)) ?? false} />
 }
 
 type ConversationProps = {
   conversation: Conversation
   radioKey: RadioKey
+  muted: boolean
   options: DirectSendOptions
   direct: DirectMessages
   status: DirectStatus
@@ -254,11 +268,12 @@ const idleObservation = { phase: 'idle' as const, error: null, dropped: 0, evict
 const noSubscription = () => () => {}
 const noObservation = () => idleObservation
 
-function ConversationView({ conversation, radioKey, options, direct, status, senderName, display }: ConversationProps) {
+function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted }: ConversationProps) {
   const { active, preferences, read, formatTime, ownContact, contacts, channels, readChannelKey, mapPosition,
     observationSource, canObserve, regionNames } = display
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
+  const [savingNotification, setSavingNotification] = useState(false)
   const [readError, setReadError] = useState('')
   const [hideRepeats, setHideRepeats] = useState(false)
   const [mentionName, setMentionName] = useState('')
@@ -462,6 +477,27 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
         <p>{conversation.title}</p>
         <span>{conversation.description}</span>
         {isChannel && <span>Radio acceptance does not confirm delivery. Live packet matches are best effort.</span>}
+        {conversation.id.startsWith('direct:') && <label>Browser alerts
+          <select aria-label={`Browser alerts for ${conversation.title}`} value={muted ? 'muted' : 'all'}
+            disabled={savingNotification} onChange={(event) => {
+              const muted = event.currentTarget.value === 'muted'
+              setSavingNotification(true)
+              void (async () => {
+                try {
+                  const storage = await openRadioStorage()
+                  try { await storage.update(radioKey, { directNotification: { conversationId: conversation.id, muted } }) }
+                  finally { storage.close() }
+                  await direct.load(radioKey)
+                  setActionError('')
+                } catch (error) {
+                  setActionError(errorText(error))
+                } finally { setSavingNotification(false) }
+              })()
+            }}>
+            <option value="all">All messages</option><option value="muted">Muted</option>
+          </select>
+        </label>}
+        {conversation.id.startsWith('direct:') && <span>Mute applies to senders sharing this 12-character key prefix.</span>}
       </div>
       {isChannel && observer && <div className="chat-observation">
         <div className="chat-observation-actions">

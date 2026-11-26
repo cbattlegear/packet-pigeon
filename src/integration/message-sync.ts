@@ -45,6 +45,7 @@ function makeReceipt(frame: Uint8Array, id: string): StoredMessage {
 
 export class MessageSync {
   private readonly events = new EventTarget()
+  private readonly receiptListeners = new Set<(key: RadioKey, message: StoredMessage, data: RadioData) => void>()
   private readonly source: MessageSource
   private readonly openStorage: typeof openRadioStorage
   private readonly cacheReady: () => boolean
@@ -64,6 +65,11 @@ export class MessageSync {
   }
 
   readonly getSnapshot = () => this.status
+
+  readonly subscribeToSavedReceipts = (listener: (key: RadioKey, message: StoredMessage, data: RadioData) => void) => {
+    this.receiptListeners.add(listener)
+    return () => { this.receiptListeners.delete(listener) }
+  }
 
   private update(update: Partial<Status>) {
     this.status = { ...this.status, ...update }
@@ -96,6 +102,8 @@ export class MessageSync {
     this.pendingReceipt = undefined
     pending.release()
     this.update({ pending: false })
+    const data = await storage.read(pending.key)
+    if (data) for (const listener of this.receiptListeners) listener(pending.key, pending.message, data)
     return pending.message.receipt !== undefined
   }
 

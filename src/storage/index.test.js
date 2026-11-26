@@ -13,6 +13,31 @@ const message = {
   text: 'Hello',
 }
 
+test('channel notification modes survive sync and pause on slot reuse', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Public' }] })
+  await storage.update(firstRadio, { channelNotification: { index: 0, channelName: 'Public', mode: 'mentions' } })
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Public' }] })
+  assert.equal((await storage.read(firstRadio)).channelNotifications[0].mode, 'mentions')
+  await storage.update(firstRadio, { channels: [{ index: 0, name: 'Other' }] })
+  assert.equal((await storage.read(firstRadio)).channelNotifications[0].paused, true)
+  await assert.rejects(storage.update(firstRadio, { channelNotification: { index: 0, channelName: 'Public', mode: 'all' } }))
+  await storage.update(firstRadio, { channelNotification: { index: 0, channelName: 'Other', mode: 'muted' } })
+  assert.deepEqual((await storage.read(firstRadio)).channelNotifications, [{ index: 0, channelName: 'Other', mode: 'muted' }])
+  storage.close()
+})
+
+test('direct mute is scoped to the radio and sender prefix', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  const conversationId = `direct:${secondRadio}`
+  await storage.update(firstRadio, { directNotification: { conversationId, muted: true } })
+  assert.deepEqual((await storage.read(firstRadio)).mutedDirectConversations, [`direct:${secondRadio.slice(0, 12)}`])
+  await storage.update(firstRadio, { directNotification: { conversationId: `direct:${secondRadio.slice(0, 12)}`, muted: false } })
+  assert.deepEqual((await storage.read(firstRadio)).mutedDirectConversations, [])
+  assert.equal(await storage.read(secondRadio), null)
+  storage.close()
+})
+
 test('concurrent read markers preserve received entries for the selected radio', async () => {
   const factory = new IDBFactory()
   const storage = await openRadioStorage(factory)
