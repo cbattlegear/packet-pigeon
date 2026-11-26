@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { DirectMessages, DirectStatus } from '../integration/direct-messages.ts'
 import type { MessageSync } from '../integration/message-sync.ts'
 import { ChannelObservations } from '../integration/channel-observations.ts'
@@ -28,6 +29,8 @@ import './chats.css'
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
 
 type SearchTarget = { id: string }
+
+type MessageContext = { id: string; x: number; y: number; row: HTMLLIElement }
 
 type Props = {
   snapshot: CompanionSnapshot
@@ -69,6 +72,53 @@ type ChatDisplay = {
 
 function errorText(error: unknown) {
   return error instanceof Error ? error.message : 'The message action failed.'
+}
+
+function MessageContextActions({ context, onClose, children }: {
+  context: MessageContext
+  onClose: () => void
+  children: ReactNode
+}) {
+  const menu = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const element = menu.current
+    if (!element) return
+    const bounds = element.getBoundingClientRect()
+    element.style.left = `${Math.max(0, Math.min(context.x, window.innerWidth - bounds.width))}px`
+    element.style.top = `${Math.max(0, Math.min(context.y, window.innerHeight - bounds.height))}px`
+    element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
+  }, [context])
+  useEffect(() => {
+    function dismiss(event: PointerEvent) {
+      if (!menu.current?.contains(event.target as Node)) onClose()
+    }
+    function keydown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        context.row.focus({ preventScroll: true })
+        onClose()
+      }
+    }
+    function scroll(event: Event) {
+      if (!menu.current?.contains(event.target as Node)) onClose()
+    }
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', keydown)
+    window.addEventListener('resize', onClose)
+    window.addEventListener('scroll', scroll, true)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', keydown)
+      window.removeEventListener('resize', onClose)
+      window.removeEventListener('scroll', scroll, true)
+    }
+  }, [context, onClose])
+  return createPortal(<div ref={menu} className="chat-context-actions" role="group" aria-label="Channel message context actions"
+    onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) onClose()
+    }}>
+    {children}
+  </div>, document.body)
 }
 
 export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving,
@@ -328,6 +378,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   const [search, setSearch] = useState('')
   const [previousSearchTarget, setPreviousSearchTarget] = useState(searchTarget)
   const [awayFromBottom, setAwayFromBottom] = useState(false)
+  const [messageContext, setMessageContext] = useState<MessageContext | null>(null)
   const composer = useRef<HTMLTextAreaElement>(null)
   const mentionPicker = useRef<HTMLDetailsElement>(null)
   const messageList = useRef<HTMLOListElement>(null)
@@ -357,6 +408,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     }
   }
   const shown = useMemo(() => searchMessages(visible, search), [visible, search])
+  const contextMessage = messageContext && shown.find((message) => message.id === messageContext.id)
   const bytes = new TextEncoder().encode(draft).length
   const isChannel = conversation.id.startsWith('channel:')
   const mentionNames = useMemo(() => conversation.channel
@@ -538,6 +590,28 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     await direct.sendChannel(radioKey, conversation.channel.index, conversation.channel.name, message.text, preferences.saveDrafts, true)
   }
 
+  function channelActions(message: StoredMessage, inContext = false) {
+    const sender = channelSender(message)
+    const body = channelMessageBody(message)
+    const run = (action: () => void) => {
+      if (inContext) {
+        messageContext?.row.focus({ preventScroll: true })
+        setMessageContext(null)
+      }
+      action()
+    }
+    return <>
+      {message.text && <button type="button" onClick={() => run(() => void copy(message))}
+        aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
+      {conversation.channel && sender && (mentionableName(sender)
+        ? <button type="button" onClick={() => run(() => reply(sender, body))} aria-label={`Reply to ${sender}`}>Reply</button>
+        : <span className="chat-meta">Reply unavailable: the sender name contains a closing bracket (]).</span>)}
+      {sender && <button type="button" onClick={() => run(() => void block(sender))} aria-label={`Block sender name ${sender}`}>Block</button>}
+      <button type="button" disabled={message.channelOutgoing?.status === 'sending'}
+        aria-label={`Delete channel message: ${message.text.slice(0, 40)}`} onClick={() => run(() => void remove(message))}>Delete</button>
+    </>
+  }
+
   function updateDraft(text: string) {
     setDraft(text)
     void direct.saveDraft(radioKey, conversation.id, text, preferences.saveDrafts).catch(() => {})
@@ -636,6 +710,12 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             {day !== previousDay && <li className="chat-divider">{day === null ? 'Unknown date' : formatDate(new Date(message.timestamp!))}</li>}
             {message.id === unreadBoundary.current && <li className="chat-divider chat-divider--unread">New messages</li>}
             <li data-receipt-id={message.id} tabIndex={-1}
+              onContextMenu={(event) => {
+                if (!isChannel || (event.target as Element).closest('button, a, input, select, textarea, summary')
+                  || window.getSelection()?.isCollapsed === false) return
+                event.preventDefault()
+                setMessageContext({ id: message.id, x: event.clientX, y: event.clientY, row: event.currentTarget })
+              }}
               className={message.outgoing || message.channelOutgoing ? 'chat-message--outgoing' : undefined}>
               <div className="chat-message-header">
                 <strong>{message.outgoing || message.channelOutgoing ? 'You' : isChannel ? sender ?? 'Unknown sender' : conversation.title}</strong>
@@ -702,14 +782,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
               )}
               {isChannel && (
                 <div className="chat-message-actions" role="group" aria-label="Channel message actions">
-                  {message.text && <button type="button" onClick={() => void copy(message)}
-                    aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
-                  {conversation.channel && sender && (mentionableName(sender)
-                    ? <button type="button" onClick={() => reply(sender, body)} aria-label={`Reply to ${sender}`}>Reply</button>
-                    : <span className="chat-meta">Reply unavailable: the sender name contains a closing bracket (]).</span>)}
-                  {sender && <button type="button" onClick={() => void block(sender)} aria-label={`Block sender name ${sender}`}>Block</button>}
-                  <button type="button" disabled={message.channelOutgoing?.status === 'sending'}
-                    aria-label={`Delete channel message: ${message.text.slice(0, 40)}`} onClick={() => void remove(message)}>Delete</button>
+                  {channelActions(message)}
                 </div>
               )}
               {message.rawHex && <details><summary>Raw receipt</summary><code>{message.rawHex}</code></details>}
@@ -719,6 +792,9 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
           {!shown.length && <li className="chat-divider">No matching messages.</li>}
         </ol>
       ) : <div className="state-message"><h2>No messages yet</h2><p>Messages in this conversation will appear here.</p></div>}
+      {messageContext && contextMessage && <MessageContextActions context={messageContext} onClose={() => setMessageContext(null)}>
+        {channelActions(contextMessage, true)}
+      </MessageContextActions>}
       {conversation.messages.length > 0 && awayFromBottom && <button className="chat-jump" type="button" onClick={() => {
         const list = messageList.current
         if (!list) return

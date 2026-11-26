@@ -280,3 +280,80 @@ test('searches across the selected radio and focuses the exact cached message', 
   await page.getByText('1 matching message', { exact: true }).waitFor()
   assert.equal(await results.getByRole('button', { name: /Orchard on another radio/ }).count(), 1)
 })
+
+test('channel message context actions work offline alongside visible keyboard controls', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  page.setDefaultTimeout(8000)
+  const radio = 'ab'.repeat(32)
+  await page.goto(`${url}#chats`)
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        channels: [{ index: 0, name: 'Public' }],
+        messages: ['one', 'two'].map((id) => ({
+          id, conversationId: 'channel:0', sender: '', timestamp: 1703123456000, text: `Alice: ${id}`,
+          receipt: { kind: 'channel-text', receiptId: id, channelIndex: 0, textType: 0,
+            senderTimestamp: 1703123456, text: `Alice: ${id}`, pathLength: 255, snrDb: null },
+        })),
+      })
+    } finally { storage.close() }
+  }, radio)
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  const first = page.locator('[data-receipt-id="one"]')
+  const second = page.locator('[data-receipt-id="two"]')
+  await first.waitFor()
+  const nativeMenus = await first.evaluate((row) => {
+    const text = row.querySelector('p')
+    const button = row.querySelector('button')
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(text)
+    selection.removeAllRanges()
+    selection.addRange(range)
+    const selected = text.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    selection.removeAllRanges()
+    const control = button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    return { selected, control }
+  })
+  assert.deepEqual(nativeMenus, { selected: true, control: true })
+  const visibleReply = first.getByRole('button', { name: 'Reply to Alice' })
+  await visibleReply.focus()
+  await page.keyboard.press('Enter')
+  const draft = page.getByLabel('Message', { exact: true })
+  assert.match(await draft.inputValue(), /@\[Alice\]/)
+  await draft.clear()
+
+  await first.getByText('one', { exact: false }).click({ button: 'right' })
+  const menu = page.getByRole('group', { name: 'Channel message context actions' })
+  await menu.waitFor()
+  assert.equal(await menu.getByRole('button', { name: /Copy message: Alice: one/ }).count(), 1)
+  assert.equal(await menu.getByRole('button', { name: 'Reply to Alice' }).count(), 1)
+  assert.equal(await menu.getByRole('button', { name: /Block sender name/ }).count(), 1)
+  assert.equal(await menu.getByRole('button', { name: /Delete channel message/ }).count(), 1)
+  const bounds = await menu.boundingBox()
+  assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= 390 && bounds.y + bounds.height <= 844)
+  await page.keyboard.press('Escape')
+  assert.equal(await menu.count(), 0)
+  assert.equal(await first.evaluate((element) => element === document.activeElement), true)
+
+  await second.getByText('two', { exact: false }).click({ button: 'right' })
+  await menu.getByRole('button', { name: 'Reply to Alice' }).click()
+  assert.match(await draft.inputValue(), /two/)
+  assert.equal(await draft.evaluate((element) => element === document.activeElement), true)
+  assert.equal(await menu.count(), 0)
+
+  await second.getByText('two', { exact: false }).click({ button: 'right' })
+  page.once('dialog', (dialog) => void dialog.accept())
+  await menu.getByRole('button', { name: /Delete channel message/ }).click()
+  await second.waitFor({ state: 'detached' })
+  assert.equal(await first.count(), 1)
+  await first.getByText('one', { exact: false }).click({ button: 'right' })
+  await menu.waitFor()
+  await page.getByLabel('Search messages').click()
+  assert.equal(await menu.count(), 0)
+})
