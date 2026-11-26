@@ -556,6 +556,8 @@ Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 which can map unique matches with saved positions as separate points rather
 than a route. Unknown or ambiguous four-byte prefixes are not mapped.
+Search also finds supported management forms by name or command and can open
+them without sending anything; the forms retain their separate confirmations.
 The confirmed `discover.neighbors` action asks the repeater to broadcast a
 zero-hop discovery request; nearby repeaters may also transmit replies. It
 replaces any discovery already in progress. Supported by repeater firmware
