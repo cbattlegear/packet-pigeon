@@ -343,6 +343,25 @@ test('receiver gain query is read-only and changes require confirmation', () => 
   }
 })
 
+test('radio preference changes require confirmation and strict bounded parameters', () => {
+  const query = repeaterCliCommand('get radio')
+  assert.equal('confirm' in query, false)
+  for (const value of ['400,7.8,5,5', '2500,500,12,8', '910.525,62.5,7,5', '869.618,7.812,8,8']) {
+    const action = repeaterCliCommand(`set radio ${value}`)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /disconnect this repeater from the mesh/)
+    assert.match(action.warning, /temporary radio override expires/)
+    assert.match(action.warning, /preferences, not active radio settings/)
+    assert.match(action.warning, /not sent automatically/)
+  }
+  for (const value of ['399.999,7.8,5,5', '2500.001,7.8,5,5', '400,7.799,5,5',
+    '400,500.001,5,5', '400,7.8,4,5', '400,7.8,13,5', '400,7.8,5,4', '400,7.8,5,9',
+    '400.0001,7.8,5,5', '400,7.8001,5,5', '400,7.8,05,5', '400,7.8,5.0,5',
+    '400,7.8,5,5,6', '400,7.8,5', '400, 7.8,5,5', '4e2,7.8,5,5', '400,7.8,5,5\nreboot']) {
+    assert.throws(() => repeaterCliCommand(`set radio ${value}`), /Enter frequency 400/)
+  }
+})
+
 test('AGC reset intervals are bounded to exact four-second steps and require confirmation', () => {
   assert.equal(repeaterCliCommand('get agc.reset.interval').command, 'get agc.reset.interval')
   for (const value of ['0', '4', '16', '1020']) {

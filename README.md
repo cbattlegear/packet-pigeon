@@ -567,6 +567,20 @@ other queries depend on which bridge support was compiled in; unsupported or
 delayed replies are possible. Preferences do not prove a bridge or peer is
 working, or that packets are forwarded. Bridge changes and secret queries are
 not offered.
+Administrators can explicitly read and confirm changes to repeater radio
+preferences (frequency, bandwidth, spreading factor and coding rate). Check
+the board, local regulations, channel plan and recovery method first: changing
+these settings can disconnect the repeater and prevent remote access. The
+accepted range (400–2500 MHz, 7.8–500 kHz, SF 5–12 and coding-rate denominator
+5–8) avoids values clamped on v1.14.1 load but does not guarantee hardware
+support or legality. Frequency and bandwidth accept up to three decimals.
+In v1.14.1 preferences normally apply at reboot, but can apply sooner when an
+existing temporary radio override expires. Another operator can reboot or
+schedule an override; the app does neither automatically. Read-back reports
+preferences, not active settings or proof of persistence; frequency uses
+floating-point precision and bandwidth is rounded to three decimals. A read-back
+can require more precision than this control accepts. A delayed change may
+arrive after a later read or change.
 Search also finds supported management forms by name or command and can open
 them without sending anything; the forms retain their separate confirmations.
 The confirmed `discover.neighbors` action asks the repeater to broadcast a

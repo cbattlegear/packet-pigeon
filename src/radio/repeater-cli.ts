@@ -12,6 +12,10 @@ export const repeaterAdcMultiplierSafety = 'An incorrect multiplier can misrepor
 export const repeaterAdcMultiplierCaveats = 'In v1.14.1, a supported query returns the board-reported multiplier to three decimals, not whether it is the default or an override. An unsupported change resets the in-memory preference to zero, which a later save may persist. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove accurate voltage or persistence. Sync replies and read the multiplier and battery status separately; a delayed change may still arrive later.'
 export const repeaterAdcMultiplierWarning = `${repeaterAdcMultiplierSafety} ${repeaterAdcMultiplierCaveats}`
 
+export const repeaterRadioSettingsSafety = 'Changing radio parameters can disconnect this repeater from the mesh and prevent remote access. Check the board, local regulations, channel plan and recovery method before proceeding. Accepted input ranges do not guarantee hardware support or legal operation.'
+export const repeaterRadioSettingsCaveats = 'In repeater v1.14.1 these preferences normally apply at reboot, but can apply sooner when an existing temporary radio override expires. A reboot or override may be initiated elsewhere. The reply does not prove persistence or successful application. Read-back reports preferences, not active radio settings; frequency uses floating-point precision and bandwidth is rounded to three decimals. Read-back can require more precision than this control accepts. A delayed change may arrive after a later read or change. Reboot is a separate action and is not sent automatically.'
+export const repeaterRadioSettingsWarning = `${repeaterRadioSettingsSafety} ${repeaterRadioSettingsCaveats}`
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -42,7 +46,7 @@ export const repeaterCliCommands = [
     warning: 'Depending on the board and firmware, the repeater may sleep when idle and be less responsive. An on reply reports the preference, not actual sleep. Verify the reply and preference.' },
   { command: 'powersaving off', description: 'Disable repeater power-saving preference', confirm: true,
     warning: 'This may increase repeater power consumption on boards that support sleep. Firmware support varies; verify the reply and preference.' },
-  { command: 'get radio', description: 'Read radio parameters' },
+  { command: 'get radio', description: 'Read radio parameter preferences' },
   { command: 'get radio.rxgain', description: 'Read receiver boosted-gain preference' },
   { command: 'get agc.reset.interval', description: 'Read AGC reset interval' },
   { command: 'get int.thresh', description: 'Read interference threshold' },
@@ -357,6 +361,16 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole repeater transmit power from 1 to 22 dBm.')
     }
     return { command, description: 'Set repeater transmit power', confirm: true as const }
+  }
+  const radioPrefix = 'set radio '
+  if (command.startsWith(radioPrefix)) {
+    const value = command.slice(radioPrefix.length)
+    const match = /^((?:0|[1-9][0-9]*)(?:\.[0-9]{1,3})?),((?:0|[1-9][0-9]*)(?:\.[0-9]{1,3})?),([5-9]|1[0-2]),([5-8])$/.exec(value)
+    if (!match || match[0] !== value || Number(match[1]) < 400 || Number(match[1]) > 2500 ||
+      Number(match[2]) < 7.8 || Number(match[2]) > 500) {
+      throw new Error('Enter frequency 400–2500 MHz and bandwidth 7.8–500 kHz with up to 3 decimals, spreading factor 5–12, and coding rate 5–8.')
+    }
+    return { command, description: 'Set repeater radio preferences', confirm: true as const, warning: repeaterRadioSettingsWarning }
   }
   const adcMultiplierPrefix = 'set adc.multiplier '
   if (command.startsWith(adcMultiplierPrefix)) {

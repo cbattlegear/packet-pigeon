@@ -9,6 +9,7 @@ import {
   repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
+  repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning,
   UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -104,6 +105,7 @@ const managementForms = {
   retransmission: { title: 'Change retransmission delays', terms: 'set txdelay set direct.txdelay get txdelay get direct.txdelay' },
   receiveDelay: { title: 'Change receive-delay base', terms: 'set rxdelay get rxdelay' },
   transmitPower: { title: 'Change repeater transmit power', terms: 'set tx get tx' },
+  radioSettings: { title: 'Change repeater radio parameters', terms: 'set radio get radio frequency bandwidth spreading factor coding rate' },
   batteryCalibration: { title: 'Calibrate battery voltage', terms: 'get adc.multiplier set adc.multiplier battery voltage' },
   receiverGain: { title: 'Change receiver boosted-gain preference', terms: 'set radio.rxgain get radio.rxgain' },
   agc: { title: 'Change AGC reset interval', terms: 'set agc.reset.interval get agc.reset.interval' },
@@ -137,6 +139,10 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [interferenceThreshold, setInterferenceThreshold] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
+  const [radioFrequency, setRadioFrequency] = useState('')
+  const [radioBandwidth, setRadioBandwidth] = useState('')
+  const [radioSpreadingFactor, setRadioSpreadingFactor] = useState('')
+  const [radioCodingRate, setRadioCodingRate] = useState('')
   const [adcMultiplier, setAdcMultiplier] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
   const [pathHashMode, setPathHashMode] = useState('')
@@ -313,6 +319,19 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         'Firmware documents 1–22 dBm, but supported values vary by board. Check the device manual and local regulations; a power amplifier can increase output and excessive power may be illegal. Firmware saves the preference and attempts to apply it, but may report OK even if applying it fails. A matching get tx reply shows only the stored preference, not the applied or radiated RF power.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid repeater transmit power.')
+    }
+  }
+
+  function submitRadioSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set radio ${radioFrequency},${radioBandwidth},${radioSpreadingFactor},${radioCodingRate}`)
+      void send(command.command,
+        `Set repeater radio preferences to ${radioFrequency} MHz, ${radioBandwidth} kHz, SF ${radioSpreadingFactor}, CR 4/${radioCodingRate}`,
+        true, repeaterRadioSettingsWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid repeater radio preferences.')
     }
   }
 
@@ -614,6 +633,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'get public.key' && <p>Compare the reported key with the saved contact; a match alone does not prove identity.
       Replies may be delayed or misattributed and firmware support varies.</p>}
     {selected === 'get role' && <p>This reads the node's firmware role, not the current user's access level. Firmware support varies.</p>}
+    {selected === 'get radio' && <p>In v1.14.1 this reports preferences, not active radio settings or proof of persistence.
+      Frequency uses floating-point precision; bandwidth is rounded to three decimals. Replies can be delayed.</p>}
     {powerDiagnosticHelp(selected) && <p>{powerDiagnosticHelp(selected)} Firmware and hardware support vary; replies may be delayed.</p>}
     {bridgeDiagnosticHelp(selected) && <p>{bridgeDiagnosticHelp(selected)} Firmware and build support vary; replies may be delayed or unsupported.</p>}
     {selected === 'sensor get gps' && <p>This reads the reported GPS activity setting, not a fix or hardware power state.
@@ -885,6 +906,37 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set battery ADC multiplier</button>
       </form>
       <p>{repeaterAdcMultiplierCaveats}</p>
+    </details>
+    <details data-cli-section="radioSettings">
+      <summary>{managementForms.radioSettings.title}</summary>
+      <p>{repeaterRadioSettingsSafety} Read and record the current preferences first; enter all four new values explicitly.</p>
+      <form className="contact-actions" onSubmit={submitRadioSettings}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get radio', 'Read radio parameter preferences', false)}>Read radio preferences</button>
+        <label>New frequency (400–2500 MHz)
+          <input type="text" inputMode="decimal" required value={radioFrequency}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setRadioFrequency(event.currentTarget.value)} />
+        </label>
+        <label>New bandwidth (7.8–500 kHz)
+          <input type="text" inputMode="decimal" required value={radioBandwidth}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setRadioBandwidth(event.currentTarget.value)} />
+        </label>
+        <label>New spreading factor (5–12)
+          <input type="text" inputMode="numeric" required value={radioSpreadingFactor}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setRadioSpreadingFactor(event.currentTarget.value)} />
+        </label>
+        <label>New coding rate denominator (5–8)
+          <input type="text" inputMode="numeric" required value={radioCodingRate}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setRadioCodingRate(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set radio preferences</button>
+      </form>
+      <p>Frequency and bandwidth accept up to three decimals. These ranges avoid values clamped when v1.14.1 loads
+        preferences; they do not establish device support. {repeaterRadioSettingsCaveats}</p>
     </details>
     <details data-cli-section="transmitPower">
       <summary>{managementForms.transmitPower.title}</summary>
@@ -1201,6 +1253,12 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             </p>}
           {item.command === 'get role' && item.reply !== null &&
             <p className="contact-status">This is the reported firmware role, not your access level. Firmware support varies.</p>}
+          {item.command === 'get radio' && item.reply !== null &&
+            <p className="contact-status">This reports preferences, not active radio settings or proof of persistence.
+              In v1.14.1 frequency uses floating-point precision and bandwidth is rounded to three decimals.</p>}
+          {item.command.startsWith('set radio ') && item.reply !== null &&
+            <p className="contact-status">A reply does not prove persistence or successful application. Read preferences separately;
+              they can apply on reboot or when a temporary radio override expires, and a delayed change may arrive after a later change.</p>}
           {powerDiagnosticHelp(item.command) && item.reply !== null &&
             <p className="contact-status">{powerDiagnosticHelp(item.command)} Firmware and hardware support vary; replies may be delayed.</p>}
           {bridgeDiagnosticHelp(item.command) && item.reply !== null &&
