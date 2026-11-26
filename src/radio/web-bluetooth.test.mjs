@@ -30,7 +30,7 @@ function ownership() {
 
 function fixture({
   writeWithoutResponse = false, queuedMessages = [], directMessaging = false,
-  notificationLimit = Infinity, queueWrite,
+  notificationLimit = Infinity, queueWrite, activeDiscovery = false,
 } = {}) {
   const device = new EventTarget()
   const notifications = new EventTarget()
@@ -63,11 +63,19 @@ function fixture({
       notify(Uint8Array.of(5, 1, 0, 0, ...new Uint8Array(32).fill(state.identity),
         ...new Uint8Array(22), ...encode('Bluetooth fixture')))
     } else if (command[0] === 4) {
-      const contact = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), directMessaging ? 1 : 2, 0, 0xff, ...new Uint8Array(112))
+      const contact = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), directMessaging ? 1 : 2, 0, activeDiscovery ? 0 : 0xff, ...new Uint8Array(112))
       contact.set(encode('Fixture repeater'), 100)
       notify(Uint8Array.of(2, 1, 0, 0, 0))
       notify(contact)
       notify(Uint8Array.of(4, 0, 0, 0, 0))
+    } else if (command[0] === 55 && activeDiscovery) {
+      notify(Uint8Array.of(0x8e, 0xf8, 0x9c, 0, 0x92, 0xec, ...command.slice(3, 7), ...new Uint8Array(8).fill(0xbc)))
+      notify(Uint8Array.of(0x8e, 0xf8, 0x9c, 0, 0x92, 0xec, ...command.slice(3, 7), ...new Uint8Array(32).fill(0xbc)))
+      notify(Uint8Array.of(0))
+    } else if (command[0] === 57 && activeDiscovery) {
+      const body = command[33] === 1 ? '*,local' : 'Relay\nOperator'
+      notify(Uint8Array.of(0x8c, 0, 1, 2, 3, 4, 9, 0, 0, 0, ...encode(body)))
+      notify(Uint8Array.of(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0))
     } else if (command[0] === 2 && directMessaging) {
       notify(Uint8Array.of(0x82, 1, 2, 3, 4, 42, 0, 0, 0))
       notify(Uint8Array.of(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0))
@@ -187,6 +195,29 @@ test('uses raw notification frames, prefers writes with response, and shares syn
   assert.equal(locks.held, false)
   assert.equal(radio.state.closes, 1)
   unsubscribe()
+})
+
+test('active discovery uses Bluetooth only on request and ignores short discovery replies', async () => {
+  const radio = fixture({ activeDiscovery: true })
+  const session = new CompanionSession({ bluetoothEnvironment: radio.environment, locks: ownership() })
+  await session.connectBluetooth()
+  const key = session.getSnapshot().device.publicKey
+  assert.deepEqual(radio.writes.map(({ bytes }) => bytes[0]), [22, 1, 4])
+  const controller = new AbortController()
+  const found = []
+  let listening = false
+  const scan = session.discoverNearby(key, controller.signal, (node) => found.push(node), () => { listening = true })
+  await until(session, () => listening && found.length === 1)
+  assert.equal(found[0].publicKey, 'bc'.repeat(32))
+  controller.abort(new Error('Stopped'))
+  await assert.rejects(scan, /Stopped/)
+  const signal = new AbortController().signal
+  assert.deepEqual(await session.discoverRepeaterDetails(key, 'bc'.repeat(32), 'regions', signal, () => {}),
+    { kind: 'regions', regions: ['*', 'local'] })
+  assert.deepEqual(await session.discoverRepeaterDetails(key, 'bc'.repeat(32), 'owner', signal, () => {}),
+    { kind: 'owner', name: 'Relay', owner: 'Operator' })
+  assert.deepEqual(radio.writes.map(({ bytes }) => bytes[0]), [22, 1, 4, 55, 4, 57, 4, 57])
+  await session.disconnect()
 })
 
 test('uses write without response when required and reconnects to the authorized device with bounded retries', async () => {

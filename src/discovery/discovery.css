@@ -1,0 +1,21 @@
+.nearby-list {
+  display: grid;
+  gap: 4px;
+  max-height: 480px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.nearby-list button {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.nearby-owner {
+  white-space: pre-wrap;
+}

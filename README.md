@@ -459,14 +459,33 @@ Use **Show discovered nodes on map** to view entries with positions.
 
 Read or save the connected radio's auto-add policy from Discovery. Selected-role
 mode applies the role checkboxes. The hop limit and overwrite setting are
-available when supported by firmware. Discovery browsing and path lookup use
-passive adverts and a local cache lookup, with no active mesh discovery request.
+available when supported by firmware. Browsing adverts and path lookup use
+passive adverts and local cache lookups, not active mesh requests.
 
 The live noise-floor monitor starts only when requested and polls local radio
 statistics every two seconds over USB on companion protocol v8 or newer. It
 does not transmit a mesh request. Stop polling or leave Discovery to prevent
-further reads; a read already in flight must finish or time out. Active
-nearby-node and region discovery requests are not implemented.
+further reads; a read already in flight must finish or time out.
+
+**Send nearby discovery** explicitly transmits one zero-hop discovery broadcast
+and listens for 20 seconds. It requires companion protocol v8 or newer.
+Some nodes do not respond, and discovery replies are unsigned; names are local
+contact or advert matches, not verified identities. Results are temporary and
+do not add contacts. Stop waiting or leave Discovery to stop listening; a
+transmission already sent cannot be recalled.
+Bluetooth may split or drop replies, and truncated region or owner information
+can appear complete; use USB for more reliable results.
+
+Select a discovered repeater to explicitly request its regions or owner details.
+Each button sends a separate direct mesh request. To avoid changing radio state
+or flooding a request, the repeater must already be saved on the radio with a
+zero-hop path. Requests are checked against the current radio contact list;
+Packet Pigeon does not request contact or path changes. On newer companion
+firmware, a contact removed between the check and the send may be re-added by
+the radio. Other radio actions, including noise-floor polling, are unavailable
+while waiting for a repeater reply. Some companion protocol v8 firmware and
+older repeater firmware do not support these requests, and replies may time
+out or omit regions that did not fit in a packet.
 
 ## Static hosting and offline browsing
 
