@@ -26,6 +26,7 @@ type Props = {
 export function RepeaterManagement({ session, messageSync, contact, radioKey, ready, busy, neighborNodes, onMap }: Props) {
   const [login, setLogin] = useState<RepeaterLogin | null>(null)
   const [status, setStatus] = useState<RepeaterStatus | null>(null)
+  const [statsResetSent, setStatsResetSent] = useState(false)
   const [clients, setClients] = useState<{
     entries: Awaited<ReturnType<CompanionSession['readRepeaterAccessList']>>
     receivedAt: number
@@ -163,6 +164,8 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     {login && <p role="status">Login reported {login.role === 'guest-or-legacy' ? 'guest or legacy (admin not confirmed)' : login.role} access;
       the request used {login.route} routing.</p>}
     {login && <button type="button" disabled={!ready || busy || pending || cliPending} onClick={() => void run('status')}>Request status</button>}
+    {statsResetSent && <p role="status">A statistics reset was sent or may have been sent. Earlier status was cleared;
+      the reset may still arrive after a new status request.</p>}
     {login && <details>
       <summary>Inspect nearby repeater keys</summary>
       <p>Each page is an explicit request over the mesh, up to three entries ordered by most recently heard.
@@ -237,6 +240,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
       onMap={onMap} onPending={setCliPending}
       onAccessChange={() => setClients(null)}
       onNeighborChange={() => setNeighbors(null)}
+      onStatsReset={() => { setStatus(null); setStatsResetSent(true) }}
       onReboot={(notice) => { setLogin(null); setStatus(null); setClients(null); setNeighbors(null); setRebootNotice(notice) }} />}
     {rebootNotice && <p role="status">{rebootNotice}</p>}
     {pending && <p role="status">Waiting for the repeater…

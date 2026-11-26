@@ -744,6 +744,13 @@ battery voltage, and zero can mean no reading was recorded. Reasons may be
 incomplete; `unknown` does not necessarily indicate a failure. Hardware and
 firmware support vary, unsupported commands can return errors, and replies may
 be delayed.
+Administrators can confirm a statistics reset. In repeater v1.14.1 this clears
+packet and duplicate counters and error flags, but not uptime, cumulative
+airtime, transmit budget, signal readings, or duplicate caches. Counters may
+increase immediately, including when the reply is sent. The previous status
+snapshot is cleared after an accepted or unconfirmed send; request status
+separately. A delayed reset may still arrive after a new status read. Firmware
+support varies, and an `OK` reply does not verify every effect.
 Administrators can also read and change the repeater power-saving preference.
 Depending on the board and firmware, enabling it may allow sleep when idle and
 affect responsiveness; disabling it may increase power consumption. An `on`
