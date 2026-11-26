@@ -788,6 +788,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('region save', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('sensor get gps'), /administrator/)
+  await assert.rejects(send('sensor set gps_interval 60', true), /administrator/)
   await assert.rejects(send('gps on', true), /administrator/)
   await assert.rejects(send('gps sync', true), /administrator/)
   await assert.rejects(send('gps setloc', true), /administrator/)
@@ -867,6 +868,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('region allowf *', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('sensor get gps'), /administrator/)
+  await assert.rejects(send('sensor set gps_interval 60', true), /administrator/)
   await assert.rejects(send('gps off', true), /administrator/)
   await assert.rejects(send('gps sync', true), /administrator/)
   await assert.rejects(send('gps setloc', true), /administrator/)
@@ -893,6 +895,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(session.readRepeaterAccessList(key, target, changedRoute, signal()), /route changed/)
   await assert.rejects(session.readRepeaterNeighbors(key, target, changedRoute, 0, signal()), /route changed/)
   await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, 'get bootloader.ver', false, signal()), /route changed/)
+  await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, 'sensor set gps_interval 60', true, signal()), /route changed/)
   for (const command of ['log start', 'log stop', 'log erase']) {
     await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, command, true, signal()), /route changed/)
   }
@@ -978,6 +981,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     await assert.rejects(send(`gps advert ${policy}`), /Confirm/)
   }
   await assert.rejects(send('gps on'), /Confirm/)
+  await assert.rejects(send('sensor set gps_interval 60'), /Confirm/)
+  await assert.rejects(send('sensor set gps_interval 3601', true), /whole GPS coordinate-copy interval/)
   await assert.rejects(send('gps off'), /Confirm/)
   await assert.rejects(send('gps sync'), /Confirm/)
   await assert.rejects(send('gps setloc'), /Confirm/)
@@ -1119,6 +1124,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const bootloader = await send('get bootloader.ver')
   const bootloaderFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(bootloaderFrame.slice(13))), `${bootloader.tag}|get bootloader.ver`)
+  for (const command of ['sensor set gps_interval 1', 'sensor set gps_interval 3600']) {
+    const receipt = await send(command, true)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
   for (const [command, confirmed] of [['get bridge.delay', false], ['set bridge.delay 0', true], ['set bridge.delay 10000', true]]) {
     const receipt = await send(command, confirmed)
     const frame = port.commands.filter(([code]) => code === 2).at(-1)

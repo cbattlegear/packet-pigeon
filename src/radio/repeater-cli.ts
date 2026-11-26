@@ -29,6 +29,8 @@ export const repeaterBridgeChannelWarning = 'Changing the ESP-NOW channel can di
 
 export const repeaterBridgeBaudWarning = 'Changing the RS-232 baud rate can interrupt bridge traffic, routes and remote access. Check the peer baud rate, device support and a local recovery method first; the accepted range does not guarantee that the hardware or peer supports the rate. In repeater v1.14.1, a running bridge immediately attempts to restart its serial interface; a stopped bridge is not started. In-flight data may be lost, and partial received frames may remain across the restart. Saving can fail and also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove the interface or peer is working or the setting was saved. A delayed command may arrive later; firmware and build support vary.'
 
+export const repeaterGpsIntervalWarning = 'Longer intervals can leave sensor coordinates stale in location telemetry and later advertisements. In repeater v1.14.1 this controls how often valid GPS coordinates are copied into sensor state, not the receiver fix rate; it does not enable GPS or guarantee a fix. An already scheduled update keeps its old time, and timing can be irregular around timer wrap. This temporary setting is not saved and resets to one second on reboot; the firmware does not expose it for read-back. An ok reply does not prove a receiver, fix or actual update timing. A delayed command may arrive later; hardware and firmware support vary.'
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -477,6 +479,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole RS-232 bridge baud rate from 9600 to 115200.')
     }
     return { command, description: 'Set RS-232 bridge baud rate', confirm: true as const, warning: repeaterBridgeBaudWarning }
+  }
+  const gpsIntervalPrefix = 'sensor set gps_interval '
+  if (command.startsWith(gpsIntervalPrefix)) {
+    const value = command.slice(gpsIntervalPrefix.length)
+    const match = /^[1-9][0-9]*$/.exec(value)
+    if (!match || match[0] !== value || Number(value) > 3600) {
+      throw new Error('Enter a whole GPS coordinate-copy interval from 1 to 3600 seconds.')
+    }
+    return { command, description: 'Set GPS coordinate-copy interval', confirm: true as const, warning: repeaterGpsIntervalWarning }
   }
   const interferencePrefix = 'set int.thresh '
   if (command.startsWith(interferencePrefix)) {

@@ -424,6 +424,26 @@ test('GPS activity is explicit and receiver changes require confirmation', () =>
   }
 })
 
+test('GPS coordinate-copy interval is bounded, temporary and confirmation-gated', () => {
+  for (const value of ['1', '60', '3600']) {
+    const command = `sensor set gps_interval ${value}`
+    const action = repeaterCliCommand(command)
+    assert.equal(action.command, command)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /not the receiver fix rate/)
+    assert.match(action.warning, /not saved/)
+    assert.match(action.warning, /not expose it for read-back/)
+    assert.match(action.warning, /delayed command/i)
+  }
+  for (const value of ['', '0', '3601', '-1', '+1', '01', '1.0', '1e2', '999999999999999',
+    ' 5', '5 ', '5 extra', '5\n', '5\nreboot']) {
+    assert.throws(() => repeaterCliCommand(`sensor set gps_interval ${value}`), /whole GPS coordinate-copy interval/)
+  }
+  for (const command of ['sensor get gps_interval', 'sensor set gps_interval', 'sensor set other 1']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('GPS clock synchronization is confirmation-gated and accepts only the exact command', () => {
   const action = repeaterCliCommand('gps sync')
   assert.equal(action.confirm, true)

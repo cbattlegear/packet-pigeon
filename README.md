@@ -853,6 +853,15 @@ prove a fix, hardware state, or persistence. In v1.14.1, `1` means active and
 `0` inactive; `null` means the setting was not found.
 The `gps` status command is not offered: repeater v1.14.1 may crash when a GPS
 receiver is not detected.
+Administrators can confirm a temporary GPS coordinate-copy interval of 1–3600
+whole seconds (an app limit). On v1.14.1, this controls copying valid GPS
+coordinates into sensor state, not the receiver's fix rate; it does not enable
+GPS or guarantee a fix. Longer intervals can leave coordinates stale in
+location telemetry and later advertisements. An already scheduled update keeps
+its old time, and timing can be irregular around timer wrap. The setting is not
+saved, resets to one second on reboot, and cannot be read back through the
+v1.14.1 sensor getter. An `ok` reply does not prove a receiver, fix or timing.
+Commands and replies may arrive late, and hardware and firmware support vary.
 Administrators can confirm a GPS clock synchronization request and read the
 repeater clock separately. It does not enable GPS. On v1.14.1, an `ok` reply
 only acknowledges the request: some providers do not apply it, while others may

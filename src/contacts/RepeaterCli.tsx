@@ -10,7 +10,7 @@ import {
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
   repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning, repeaterTempRadioWarning,
-  repeaterClockCommand, repeaterClockWarning, repeaterBridgeDelayWarning, repeaterBridgeChannelWarning, repeaterBridgeBaudWarning, isRepeaterRebootCommand,
+  repeaterClockCommand, repeaterClockWarning, repeaterBridgeDelayWarning, repeaterBridgeChannelWarning, repeaterBridgeBaudWarning, repeaterGpsIntervalWarning, isRepeaterRebootCommand,
   UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -130,6 +130,7 @@ const managementForms = {
   owner: { title: 'Change owner information', terms: 'set owner.info' },
   clock: { title: 'Set repeater clock in UTC', terms: 'time clock utc' },
   gps: { title: 'Manage GPS receiver', terms: 'gps on gps off gps sync clock sensor get gps activity' },
+  gpsInterval: { title: 'Change GPS coordinate-copy interval', terms: 'sensor set gps_interval GPS position timing seconds' },
   position: { title: 'Change stored position', terms: 'set lat set lon gps setloc gps advert location' },
 } as const
 
@@ -150,6 +151,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [bridgeDelay, setBridgeDelay] = useState('')
   const [bridgeChannel, setBridgeChannel] = useState('')
   const [bridgeBaud, setBridgeBaud] = useState('')
+  const [gpsInterval, setGpsInterval] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [radioFrequency, setRadioFrequency] = useState('')
@@ -244,7 +246,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       : 'No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.'
     const target = reboots || command.startsWith('log ') || command.startsWith('set bridge.enabled ') ||
       command.startsWith('set bridge.source ') || command.startsWith('set bridge.delay ') ||
-      command.startsWith('set bridge.channel ') || command.startsWith('set bridge.baud ')
+      command.startsWith('set bridge.channel ') || command.startsWith('set bridge.baud ') || command.startsWith('sensor set gps_interval ')
       ? `${name} (${contactKey.slice(0, 12)})` : name
     if (confirmed) {
       if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
@@ -480,6 +482,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       void send(command.command, `${command.description} to ${bridgeBaud}`, true, repeaterBridgeBaudWarning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid RS-232 bridge baud rate.')
+    }
+  }
+
+  function submitGpsInterval(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`sensor set gps_interval ${gpsInterval}`)
+      void send(command.command, `${command.description} to ${gpsInterval} seconds`, true, repeaterGpsIntervalWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid GPS coordinate-copy interval.')
     }
   }
 
@@ -1435,6 +1448,24 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           onClick={() => sendChoice(gpsClockSync)}>{gpsClockSync.description}</button>}
       </div>
     </details>
+    <details data-cli-section="gpsInterval">
+      <summary>{managementForms.gpsInterval.title}</summary>
+      <p>Longer intervals can leave sensor coordinates stale in location telemetry and later advertisements.
+        In repeater v1.14.1, this controls how often valid GPS coordinates are copied into sensor state, not the receiver
+        fix rate; it does not enable GPS or guarantee a fix. An already scheduled update keeps its old time, and timing
+        can be irregular around timer wrap.</p>
+      <p>This setting is temporary and resets to one second on reboot. The v1.14.1 firmware does not expose it for read-back;
+        an ok reply does not prove a receiver, fix or actual update timing. Commands and replies may arrive late.
+        Hardware and firmware support vary. This app limits the value to whole seconds from 1 to 3600.</p>
+      <form className="contact-actions" onSubmit={submitGpsInterval}>
+        <label>GPS coordinate-copy interval (1–3600 seconds)
+          <input type="text" inputMode="numeric" required value={gpsInterval}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setGpsInterval(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set GPS coordinate-copy interval</button>
+      </form>
+    </details>
     <details data-cli-section="position">
       <summary>{managementForms.position.title}</summary>
       <p>Advertisements use these stored coordinates only when the GPS advert policy is <code>prefs</code>.
@@ -1532,6 +1563,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.command.startsWith('set bridge.baud ') && item.reply !== null &&
             <p className="contact-status">A reply does not prove the interface or peer is working or the setting was saved.
               Read the preference separately; a delayed command may still change it later.</p>}
+          {item.command.startsWith('sensor set gps_interval ') && item.reply !== null &&
+            <p className="contact-status">A reply does not prove a receiver, fix or actual update timing. This temporary
+              setting cannot be read back on v1.14.1; a delayed command may still change it later.</p>}
           {item.command === 'sensor get gps' && item.reply !== null &&
             <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.
               In v1.14.1, 1 means active and 0 inactive. A null or unsupported reply does not establish hardware support. Firmware and hardware support vary.</p>}
