@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { FormEvent } from 'react'
 import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
-import { repeaterCliCommands, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
+import { repeaterCliCommand, repeaterCliCommands, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 
 export type RepeaterMessageSync = Pick<MessageSync, 'subscribe' | 'getSnapshot' | 'subscribeToSavedReceipts' | 'sync'>
@@ -20,6 +21,7 @@ type Props = {
 
 type HistoryEntry = {
   command: string
+  description: string
   tag: string
   route: RepeaterCliReceipt['route'] | null
   deadline: number
@@ -30,6 +32,8 @@ type HistoryEntry = {
 export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending }: Props) {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState('')
+  const [intervalKind, setIntervalKind] = useState<'advert.interval' | 'flood.advert.interval'>('advert.interval')
+  const [interval, setInterval] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [now, setNow] = useState(() => Date.now())
   const [pending, setPending] = useState(false)
@@ -39,10 +43,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const syncStatus = useSyncExternalStore(messageSync.subscribe, messageSync.getSnapshot)
   const term = query.trim().toLowerCase()
   const choices = repeaterCliCommands.filter((item) => `${item.command} ${item.description}`.toLowerCase().includes(term))
-  const matchingHistory = history.filter((item) => {
-    const description = repeaterCliCommands.find((choice) => choice.command === item.command)?.description ?? ''
-    return `${item.command} ${description} ${item.reply ?? ''}`.toLowerCase().includes(term)
-  })
+  const matchingHistory = history.filter((item) =>
+    `${item.command} ${item.description} ${item.reply ?? ''}`.toLowerCase().includes(term))
   const action = repeaterCliCommands.find((item) => item.command === selected)
 
   useEffect(() => messageSync.subscribeToSavedReceipts((key, message) => {
@@ -64,21 +66,21 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
 
   useEffect(() => () => request.current?.abort(new Error('Stopped waiting for the radio.')), [])
 
-  async function send() {
-    if (!action || !ready || busy || pending || syncStatus.syncing) return
-    const confirmed = 'confirm' in action && action.confirm
-    if (confirmed && !window.confirm(`${action.description} from ${name}? This will transmit over the mesh.`)) return
+  async function send(command: string, description: string, confirmed: boolean) {
+    if (!ready || busy || pending || syncStatus.syncing) return
+    if (confirmed && !window.confirm(`${description} on ${name}? This will transmit over the mesh.`)) return
+    if (term && !`${command} ${description}`.toLowerCase().includes(term)) setQuery('')
     const controller = new AbortController()
     request.current = controller
     setPending(true)
     onPending(true)
     setError('')
     try {
-      const result = await session.sendRepeaterCommand(radioKey, contactKey, route, action.command, confirmed, controller.signal)
+      const result = await session.sendRepeaterCommand(radioKey, contactKey, route, command, confirmed, controller.signal)
       const sentAt = Date.now()
       setNow(sentAt)
       setHistory((current) => [...current.slice(-99), {
-        command: action.command, tag: result.tag, route: result.route, deadline: sentAt + result.timeoutMs,
+        command, description, tag: result.tag, route: result.route, deadline: sentAt + result.timeoutMs,
         reply: null, unconfirmed: false,
       }])
     } catch (reason) {
@@ -86,7 +88,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         const sentAt = Date.now()
         setNow(sentAt)
         setHistory((current) => [...current.slice(-99), {
-          command: action.command, tag: reason.tag, route: null, deadline: sentAt + 120_000,
+          command, description, tag: reason.tag, route: null, deadline: sentAt + 120_000,
           reply: null, unconfirmed: true,
         }])
       }
@@ -98,9 +100,23 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitInterval(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set ${intervalKind} ${interval}`)
+      const unit = intervalKind === 'advert.interval' ? 'minutes' : 'hours'
+      const description = interval === '0' ? `Disable ${intervalKind === 'advert.interval' ? 'local' : 'flood'} advertisements`
+        : `${command.description} to ${interval} ${unit}`
+      void send(command.command, description, true)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid advertisement interval.')
+    }
+  }
+
   return <details>
     <summary>Administrator CLI</summary>
-    <p>Choose a supported query or advertisement. Commands are never retried automatically.
+    <p>Choose a supported query, advertisement, or interval change. Commands are never retried automatically.
       Replies are saved with other messages when you sync; history here lasts while this repeater stays selected.</p>
     <p>Reply tags help match responses, but a delayed reply from an earlier browser session can still be mistaken for a new one.</p>
     <label>Search CLI commands and history
@@ -114,7 +130,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     </ul>
     {!choices.length && <p>No commands match.</p>}
     <div className="contact-actions">
-      <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => void send()}>
+      <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
+        if (action) void send(action.command, action.description, 'confirm' in action && action.confirm)
+      }}>
         {action ? `Send ${action.command}` : 'Select a command'}
       </button>
       <button type="button" disabled={!ready || busy || pending || syncStatus.syncing} onClick={() => {
@@ -123,6 +141,29 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }}>Sync messages for replies</button>
       <button type="button" disabled={!history.length || pending} onClick={() => setHistory([])}>Clear CLI history</button>
     </div>
+    <details>
+      <summary>Change advertisement interval</summary>
+      <p>Changing an interval affects future transmissions. Use 0 to disable. Local intervals are even minutes
+        from 60 to 240; flood intervals are hours from 3 to 168.</p>
+      <form className="contact-actions" onSubmit={submitInterval}>
+        <label>Advertisement interval type
+          <select value={intervalKind} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => {
+              const value = event.currentTarget.value
+              if (value === 'advert.interval' || value === 'flood.advert.interval') setIntervalKind(value)
+            }}>
+            <option value="advert.interval">Local (minutes)</option>
+            <option value="flood.advert.interval">Flood (hours)</option>
+          </select>
+        </label>
+        <label>Interval value
+          <input type="number" min="0" step="1" required value={interval}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setInterval(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set interval</button>
+      </form>
+    </details>
     {pending && <p role="status">Sending to the radio…</p>}
     {syncRequested && syncStatus.error && <p role="alert">{syncStatus.error}</p>}
     {error && <p role="alert">{error}</p>}
