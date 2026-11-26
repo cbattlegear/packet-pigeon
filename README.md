@@ -526,6 +526,13 @@ reply cannot remove that block. Reconnect and log in again to retry. The
 firmware does not tag these replies, so even after
 reconnecting a delayed reply cannot be conclusively distinguished from a new
 one. The reported role is not a guarantee of current authorization.
+The status snapshot includes optional **Detailed packet statistics**: flood and
+direct counts, duplicates, the raw error/event field, receive airtime and
+receive errors. These values can be delayed, reset or wrap; their meaning and
+availability vary by firmware. Repeater v1.14.1 uses an error bitmask, while
+older firmware may report a different value. Receive errors depend on the radio
+driver, and zero does not establish that no errors occurred. Receive airtime
+and errors are shown only when their complete fields are present.
 
 Administrators can explicitly request the repeater access list. Entries carry
 six-byte public-key prefixes and permission bits, not full identities; prefixes

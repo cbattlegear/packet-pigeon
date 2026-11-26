@@ -8,6 +8,9 @@ export type RepeaterLogin = { role: 'admin' | 'guest' | 'guest-or-legacy'; route
 export type RepeaterStatus = {
   batteryMv: number; queue: number; noiseFloor: number; rssi: number; snr: number
   received: number; sent: number; uptime: number; txAir: number
+  floodSent: number; directSent: number; floodReceived: number; directReceived: number
+  errorEvents: number; directDuplicates: number; floodDuplicates: number
+  rxAir: number | null; receiveErrors: number | null
 }
 
 export type RepeaterNeighborPage = {
@@ -109,7 +112,13 @@ export async function repeaterRequest(
       noiseFloor: data.getInt16(4, true), rssi: data.getInt16(6, true),
       received: data.getUint32(8, true), sent: data.getUint32(12, true),
       txAir: data.getUint32(16, true), uptime: data.getUint32(20, true),
+      floodSent: data.getUint32(24, true), directSent: data.getUint32(28, true),
+      floodReceived: data.getUint32(32, true), directReceived: data.getUint32(36, true),
+      errorEvents: data.getUint16(40, true),
       snr: data.getInt16(42, true) / 4,
+      directDuplicates: data.getUint16(44, true), floodDuplicates: data.getUint16(46, true),
+      rxAir: data.byteLength >= 52 ? data.getUint32(48, true) : null,
+      receiveErrors: data.byteLength >= 56 ? data.getUint32(52, true) : null,
     }
   } catch (cause) {
     if (dispatched && !rejected) {
