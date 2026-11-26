@@ -1,4 +1,4 @@
-import type { RadioData, StoredContact, StoredMessage } from '../storage/index.ts'
+import type { RadioData, StoredContact, StoredMessage, StoredOutgoing } from '../storage/index.ts'
 import { isBlockedChannelMessage } from '../channels/senders.ts'
 import type { CapturedChannelObservation } from '../integration/channel-observations.ts'
 
@@ -9,6 +9,43 @@ export type Conversation = {
   recipient: string | null
   channel: { index: number; name: string } | null
   messages: StoredMessage[]
+}
+
+function validMessageTime(timestamp: number | null) {
+  return timestamp !== null && Number.isFinite(timestamp) && Math.abs(timestamp) <= 8.64e15
+    ? timestamp : null
+}
+
+export function messageDate(timestamp: number | null) {
+  const time = validMessageTime(timestamp)
+  return time === null ? null : new Date(time)
+}
+
+function messageTime(message: StoredMessage) {
+  return validMessageTime(message.timestamp) ?? -Infinity
+}
+
+export function latestMessage(messages: readonly StoredMessage[]) {
+  return messages.reduce<StoredMessage | undefined>((latest, message) =>
+    !latest || messageTime(message) >= messageTime(latest) ? message : latest, undefined)
+}
+
+export function searchMessages(items: readonly Conversation[], query: string) {
+  const term = query.trim().toLocaleLowerCase()
+  if (!term) return []
+  return items.flatMap((conversation) => conversation.messages
+    .filter((message) => message.text.toLocaleLowerCase().includes(term))
+    .map((message) => ({ conversation, message })))
+    .sort((first, second) => messageTime(second.message) - messageTime(first.message))
+}
+
+export function deliveryLabel(outgoing: StoredOutgoing) {
+  const total = outgoing.options.directAttempts + outgoing.options.floodAttempts
+  const progress = outgoing.attempt ? ` ${outgoing.attempt}/${total}` : ''
+  if (outgoing.status === 'delivered') return 'Delivered'
+  if (outgoing.status === 'failed') return `Failed${progress}`
+  if (outgoing.status === 'sent') return `Sent${progress}`
+  return `Sending${progress}`
 }
 
 export function conversations(data: RadioData): Conversation[] {
@@ -74,12 +111,13 @@ export function conversations(data: RadioData): Conversation[] {
       conversation.messages.push(message)
     }
   }
-  return [...byId.values()].sort((first, second) => {
-    const latest = (conversation: Conversation) => conversation.messages.reduce(
-      (latest, message) => Number.isFinite(message.timestamp) ? Math.max(latest, message.timestamp ?? 0) : latest, 0,
-    )
-    return latest(second) - latest(first) || first.title.localeCompare(second.title) || first.id.localeCompare(second.id)
+  const ranked = Array.from(byId.values(), (conversation) => {
+    const latest = latestMessage(conversation.messages)
+    return { conversation, latest: latest ? messageTime(latest) : -Infinity }
   })
+  ranked.sort((a, b) => b.latest - a.latest
+    || a.conversation.title.localeCompare(b.conversation.title) || a.conversation.id.localeCompare(b.conversation.id))
+  return ranked.map(({ conversation }) => conversation)
 }
 
 function receiptIdentity(receipt: NonNullable<StoredMessage['receipt']>) {

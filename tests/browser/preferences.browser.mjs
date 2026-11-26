@@ -224,6 +224,13 @@ test('matching channel receipts remain inspectable when possible repeats are hid
   await conversation.getByText('2 matching queued receipts (possible repeats)').click()
   await conversation.getByText('Direct receipt', { exact: true }).waitFor()
   await conversation.getByText(/may not queue every heard copy/).waitFor()
+  await page.getByRole('button', { name: 'Search messages' }).click()
+  await page.getByRole('searchbox', { name: 'Search cached messages' }).fill('hello')
+  const matches = page.getByRole('list', { name: 'Matching messages' })
+  await matches.getByRole('button', { name: /Alice: hello/ }).nth(1).click()
+  const repeated = conversation.locator('[data-receipt-id="receipt-1"]')
+  assert.equal(await repeated.evaluate((row) => document.activeElement === row), true)
+  assert.equal(await conversation.getByLabel(/Hide 1 possible repeat/).isChecked(), false)
   const saved = await page.evaluate(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()
@@ -231,6 +238,115 @@ test('matching channel receipts remain inspectable when possible repeats are hid
     finally { storage.close() }
   }, radio)
   assert.deepEqual(saved, ['receipt-0', 'receipt-1'])
+})
+
+test('filters unread chats, searches the selected radio, and opens a new chat with drafts intact', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 1260, height: 900 }, timezoneId: 'UTC' })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  page.setDefaultTimeout(8000)
+  const radio = 'ab'.repeat(32)
+  const egret = '88'.repeat(32)
+  await page.goto(`${url}#chats`)
+  await page.evaluate(async ({ radio, egret }) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const pigeon = '23'.repeat(32)
+    const formerContact = '66'.repeat(32)
+    const contact = (publicKey, name, type = 1) => ({
+      publicKey, name, details: {
+        type, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
+        latitude: 0, longitude: 0, lastModifiedAt: 0,
+      },
+    })
+    const direct = (id, recipient, timestamp, text) => ({ id, conversationId: `direct:${recipient}`, sender: recipient, timestamp, text })
+    const channel = (id, channelIndex, text) => ({
+      id, conversationId: `channel:${channelIndex}`, sender: '', timestamp: Date.UTC(2025, 0, 2), text,
+      receipt: { kind: 'channel-text', receiptId: id, channelIndex, textType: 0,
+        senderTimestamp: Date.UTC(2025, 0, 2) / 1000, text, pathLength: 255, snrDb: null },
+    })
+    const history = Array.from({ length: 36 }, (_, index) => direct(
+      `pigeon-${index}`, pigeon, Date.UTC(2025, 0, index < 18 ? 2 : 3, 12, index),
+      index === 3 ? 'Orchard marker' : `Pigeon message ${index}`,
+    ))
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        contacts: [contact(pigeon, 'Pigeon'), contact(egret, 'Egret'), contact('11'.repeat(32), 'Relay', 2)],
+        channels: [{ index: 0, name: 'Public' }],
+        messages: [...history, direct('former', formerContact, Date.UTC(2025, 0, 2), 'A former contact'),
+          channel('removed-channel', 3, 'Alice: Orchard archive'), channel('hidden-sender', 0, 'Blocked: Orchard hidden')],
+        markRead: history.map(({ id }) => id),
+        blockedChannelSender: { name: 'Blocked', blocked: true },
+      })
+      await storage.update(radioKeyFromPublicKey('cd'.repeat(32)), {
+        messages: [channel('different-radio', 3, 'Orchard on a different radio')],
+      })
+    } finally {
+      storage.close()
+    }
+  }, { radio, egret })
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  const navigation = page.getByRole('navigation', { name: 'Conversations' })
+  const pigeon = page.getByRole('region', { name: 'Conversation with Pigeon' })
+  const drawer = page.getByRole('button', { name: 'Unread chats' })
+  await drawer.click()
+  assert.equal(await drawer.getAttribute('aria-pressed'), 'true')
+  assert.equal(await navigation.getByRole('button').count(), 2)
+  assert.equal(await navigation.getByText('1 unread', { exact: true }).count(), 2)
+  await navigation.getByRole('button', { name: /Unknown contact/ }).click()
+  const former = page.getByRole('region', { name: /^Conversation with Unknown contact/ })
+  await former.getByText('New Messages', { exact: true }).waitFor()
+  assert.equal(await former.getByRole('textbox', { name: 'Message', exact: true }).count(), 0)
+  await navigation.getByRole('button', { name: /Unknown contact/ }).waitFor({ state: 'hidden' })
+  assert.equal(await former.locator('[data-receipt-id="former"]').evaluate((row) => document.activeElement === row), true)
+
+  await page.getByRole('button', { name: 'Search messages' }).click()
+  const search = page.getByRole('searchbox', { name: 'Search cached messages' })
+  await search.fill(' ORCHARD ')
+  await page.getByText('2 matching messages', { exact: true }).waitFor()
+  const matches = page.getByRole('list', { name: 'Matching messages' })
+  await matches.getByRole('button', { name: /Orchard archive/ }).click()
+  const formerChannel = page.getByRole('region', { name: 'Conversation with Channel 3' })
+  await formerChannel.getByText('Orchard archive', { exact: true }).waitFor()
+  assert.equal(await formerChannel.getByRole('textbox', { name: 'Message', exact: true }).count(), 0)
+  await navigation.getByText('No unread conversations.', { exact: true }).waitFor()
+
+  await matches.getByRole('button', { name: /Orchard marker/ }).click()
+  const found = pigeon.locator('[data-receipt-id="pigeon-3"]')
+  assert.equal(await found.evaluate((row) => document.activeElement === row), true)
+  await pigeon.getByText('January 2, 2025', { exact: true }).waitFor()
+  await pigeon.getByText('January 3, 2025', { exact: true }).waitFor()
+  const list = pigeon.getByRole('list', { name: 'Message history' })
+  const remaining = () => list.evaluate((element) => element.scrollHeight - element.clientHeight - element.scrollTop)
+  assert.ok(await remaining() > 100)
+  await pigeon.getByRole('button', { name: 'Jump to bottom' }).click()
+  assert.ok(await remaining() < 3)
+
+  const pigeonDraft = pigeon.getByRole('textbox', { name: 'Message', exact: true })
+  await pigeonDraft.fill('Pigeon draft')
+  await page.getByRole('button', { name: 'New chat' }).click()
+  const targets = page.getByRole('combobox', { name: 'Start a chat with' })
+  assert.equal(await targets.getByRole('option', { name: /Relay|Channel 3|Unknown contact/ }).count(), 0)
+  await targets.selectOption(`direct:${egret}`)
+  await page.getByRole('button', { name: 'Open chat' }).click()
+  const egretDraft = page.getByRole('region', { name: 'Conversation with Egret' })
+    .getByRole('textbox', { name: 'Message', exact: true })
+  assert.equal(await egretDraft.evaluate((element) => element === document.activeElement), true)
+  await egretDraft.fill('Egret draft')
+  await page.getByRole('button', { name: 'All chats' }).click()
+  await navigation.getByRole('button', { name: /Pigeon message 35/ }).click()
+  assert.equal(await pigeonDraft.inputValue(), 'Pigeon draft')
+  await navigation.getByRole('button', { name: /Egret/ }).click()
+  assert.equal(await egretDraft.inputValue(), 'Egret draft')
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: 'Search messages' }).click()
+  await matches.getByRole('button', { name: /Orchard marker/ }).click()
+  assert.equal(await found.evaluate((row) => document.activeElement === row), true)
+  assert.ok(await remaining() > 100)
+  await pigeon.getByRole('button', { name: 'Jump to bottom' }).click()
+  assert.ok(await remaining() < 3)
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
 })
 
 test('enabling oldest unread repositions the open conversation and preserves its draft', async (t) => {
@@ -728,6 +844,8 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   assert.equal(await input.evaluate((element) => element.selectionStart), 12)
   await input.fill('a'.repeat(153))
   assert.equal(await conversation.getByRole('button', { name: 'Send message' }).isDisabled(), true)
+  await input.press('Enter')
+  assert.equal(await input.inputValue(), 'a'.repeat(153))
   await input.fill('a'.repeat(145))
   await conversation.getByRole('button', { name: 'Share or use quick message' }).click()
   const sharing = page.getByRole('dialog', { name: 'Add to message' })
@@ -744,7 +862,13 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   await conversation.getByText('152/152 UTF-8 bytes').waitFor()
   await input.fill('@[Bob] Hello')
   await conversation.getByText('12/152 UTF-8 bytes').waitFor()
-  await conversation.getByRole('button', { name: 'Send message' }).click()
+  await input.press('End')
+  await input.press('Shift+Enter')
+  assert.equal(await input.inputValue(), '@[Bob] Hello\n')
+  await input.dispatchEvent('keydown', { key: 'Enter', isComposing: true })
+  assert.equal(await page.evaluate(() => window.channelSends.length), 0)
+  await input.press('Backspace')
+  await input.press('Enter')
   await conversation.getByText('Accepted by radio').waitFor()
   assert.equal(await page.evaluate(() => window.channelSends[0][5]), '@[Bob] Hello')
   assert.deepEqual(await page.evaluate(() => window.channelSends[0][6]), { mode: 'region', name: '#North' })
