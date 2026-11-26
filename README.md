@@ -178,10 +178,14 @@ After a disconnect or interrupted send, the status may be uncertain. Resending
 is explicit and can create duplicates. If the result cannot be saved, keep the
 page open and retry saving the message changes; this does not retransmit.
 
-Incoming sender names are unverified and can be impersonated. Reply inserts a
-name mention; copy, local deletion and blocking a sender name do not affect
-other devices. A possible-repeat filter retains the individual receipts, which
-may represent distinct messages. Matching channel receipts also show a count
+Incoming sender names are unverified and can be impersonated. A reply adds a
+name mention and a short quoted preview while keeping the existing draft. Use
+**Mention a name** to insert a saved contact or observed sender name, or type
+`@[name]` directly. Names containing `]` cannot be used by the reply or
+mention picker. Mentions are plain text, not verified identities, and this app
+does not notify on them. Copy, local deletion and blocking a sender name do not
+affect other devices. A possible-repeat filter retains the individual receipts,
+which may represent distinct messages. Matching channel receipts also show a count
 and, when enabled, their reported path lengths and signal readings, including
 receipts hidden by the filter. This is not a heard-repeat count: the radio may
 not queue every copy.
@@ -223,7 +227,7 @@ Messaging options control conversation previews, path and region details,
 composer focus and where a conversation opens. When oldest-unread navigation
 is enabled, a newly opened conversation starts at its earliest unread receipt.
 Receipts are marked read in the per-radio cache as they come into view. Region
-details appear only when the stored message carries a region.
+details come from stored message metadata or best-effort live observations.
 
 Turn off **Save draft edits between visits** to keep new edits in the current
 tab's memory. Previously saved drafts remain in the radio cache. **Keep screen

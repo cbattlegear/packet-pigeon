@@ -172,6 +172,16 @@
   overflow-wrap: anywhere;
 }
 
+.chat-mention {
+  color: var(--accent-text);
+  font-weight: 700;
+}
+
+.chat-mention--self {
+  background: var(--selection);
+  text-decoration: underline;
+}
+
 .chat-composer,
 .chat-retry-settings {
   display: grid;
@@ -187,6 +197,26 @@
 .chat-composer textarea {
   width: 100%;
   resize: vertical;
+}
+
+.chat-mention-picker summary {
+  cursor: pointer;
+}
+
+.chat-mention-picker p {
+  margin: 8px 0;
+}
+
+.chat-mention-choice {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chat-mention-choice label {
+  display: grid;
+  gap: 4px;
 }
 
 .chat-compose-actions button {

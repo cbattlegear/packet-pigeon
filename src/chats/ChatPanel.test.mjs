@@ -59,7 +59,10 @@ test('renders matching receipt details without claiming delivery', async () => {
   try {
     const { ChatPanel } = await vite.ssrLoadModule(fileURLToPath(new URL('ChatPanel.tsx', import.meta.url)))
     const key = 'ab'.repeat(32)
-    const messages = [channelReceipt('first'), channelReceipt('second', { pathLength: 0xff, snrDb: null })]
+    const messages = [
+      channelReceipt('first'), channelReceipt('second', { pathLength: 0xff, snrDb: null }),
+      channelReceipt('brackets', { text: 'Bad]name: hello' }),
+    ]
     const render = (pathMetadata) => renderToStaticMarkup(createElement(ChatPanel, {
       snapshot: { phase: 'ready', transport: 'usb', device: { publicKey: key, name: 'Me', type: 1 }, channels: [] },
       messageSync: {}, messageStatus: {}, direct: { draft: () => '' },
@@ -71,6 +74,8 @@ test('renders matching receipt details without claiming delivery', async () => {
     assert.match(html, /may not queue every heard copy/)
     assert.match(html, /1 path hop · 1-byte path hashes/)
     assert.match(html, /Direct receipt/)
+    assert.match(html, /Reply unavailable: the sender name contains a closing bracket/)
+    assert.doesNotMatch(html, /aria-label="Reply to Bad\]name"/)
     assert.doesNotMatch(html, />Delivered</)
     assert.doesNotMatch(render(false), /1 path hop · 1-byte path hashes/)
   } finally {

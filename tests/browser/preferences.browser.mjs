@@ -144,7 +144,7 @@ test('sender blocks preserve chat preferences and unread receipts until restored
   await page.getByRole('link', { name: 'Chats' }).click()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
   const conversation = page.getByRole('region', { name: 'Conversation with Public' })
-  await conversation.getByText('Bob', { exact: true }).waitFor()
+  await conversation.locator('[data-receipt-id="Bob"]').getByText('Bob', { exact: true }).waitFor()
   assert.equal(await conversation.getByText('Alice', { exact: true }).count(), 0)
   assert.equal(await page.getByRole('navigation', { name: 'Conversations' }).getByText('Bob: hello').count(), 0)
   const readWhileBlocked = await page.evaluate(async (radio) => {
@@ -160,7 +160,7 @@ test('sender blocks preserve chat preferences and unread receipts until restored
   await page.getByRole('button', { name: 'Unblock sender name Alice' }).click()
   await page.getByText('Sender name unblocked on this radio.').waitFor()
   await page.getByRole('link', { name: 'Chats' }).click()
-  await conversation.getByText('Alice', { exact: true }).waitFor()
+  await conversation.locator('[data-receipt-id="Alice"]').getByText('Alice', { exact: true }).waitFor()
   await page.waitForFunction(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()
@@ -421,6 +421,37 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 1)
 })
 
+test('channel mentions remain usable in a narrow offline conversation', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  const radio = '78'.repeat(32)
+  await page.goto(`${url}#chats`)
+  await page.evaluate(async (radio) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const text = 'Alice: hello'
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        channels: [{ index: 0, name: 'Public' }],
+        messages: [{ id: 'alice', conversationId: 'channel:0', sender: '', timestamp: 1000, text,
+          receipt: { kind: 'channel-text', receiptId: 'alice', channelIndex: 0, textType: 0,
+            senderTimestamp: 1, text, pathLength: 0, snrDb: null } }],
+      })
+    } finally { storage.close() }
+  }, radio)
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  const conversation = page.getByRole('region', { name: 'Conversation with Public' })
+  const input = conversation.getByRole('textbox', { name: 'Message', exact: true })
+  await input.fill('Hello @Al')
+  await conversation.getByText('Mention a name', { exact: true }).click()
+  await conversation.getByLabel('Name to mention').selectOption('Alice')
+  await conversation.getByRole('button', { name: 'Insert mention' }).click()
+  assert.equal(await input.inputValue(), 'Hello @[Alice] ')
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
+})
+
 test('channel chat sends, replies by name, and keeps local message actions scoped to the radio', async (t) => {
   const context = await browser.newContext({ viewport: { width: 1260, height: 900 } })
   t.after(() => context.close())
@@ -436,8 +467,8 @@ test('channel chat sends, replies by name, and keeps local message actions scope
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const key = radioKeyFromPublicKey(radio)
     const storage = await openRadioStorage()
-    const messages = ['Bob', 'Alice'].map((name, index) => {
-      const text = `${name}: hello from ${name}`
+    const messages = ['Bob', 'Alice', 'Eve'].map((name, index) => {
+      const text = name === 'Eve' ? 'Eve: No\nYes' : `${name}: ${name === 'Alice' ? '@[Pigeon] ' : ''}hello from ${name}`
       return {
         id: name, conversationId: 'channel:0', sender: '', timestamp: Date.now() - 1000, text,
         receipt: {
@@ -448,6 +479,10 @@ test('channel chat sends, replies by name, and keeps local message actions scope
     })
     try {
       await storage.update(key, {
+        contacts: [{ publicKey: '56'.repeat(32), name: 'Charlie', details: {
+          type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
+          latitude: 0, longitude: 0, lastModifiedAt: 0,
+        } }],
         channels: [{ index: 0, name: 'Public' }, { index: 1, name: 'Quiet' }],
         messages, markRead: ['Bob'], channelRetention: { index: 0, channelName: 'Public', days: 30 },
         channelScope: { index: 0, channelName: 'Public', scope: { mode: 'region', name: '#North' } },
@@ -487,13 +522,34 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   await nav.getByRole('button', { name: /Quiet/ }).waitFor()
   await nav.getByRole('button', { name: /Public/ }).click()
   const conversation = fixture.getByRole('region', { name: 'Conversation with Public' })
-  await conversation.getByText('Bob', { exact: true }).waitFor()
+  await conversation.locator('[data-receipt-id="Bob"]').getByText('Bob', { exact: true }).waitFor()
   await conversation.getByText('2 path hops · 2-byte path hashes · SNR -3.5 dB').first().waitFor()
   await conversation.getByRole('button', { name: 'Copy message: Bob: hello from Bob' }).click()
   assert.equal(await page.evaluate(() => window.copiedChannelText), 'Bob: hello from Bob')
-  await conversation.getByRole('button', { name: 'Reply to Bob' }).click()
   const input = conversation.getByRole('textbox', { name: 'Message', exact: true })
-  assert.equal(await input.inputValue(), '@[Bob] ')
+  await input.fill('Existing draft')
+  await conversation.getByRole('button', { name: 'Reply to Bob' }).click()
+  assert.equal(await input.inputValue(), '@[Bob]\n>hello from..\nExisting draft')
+  await input.fill('x'.repeat(140))
+  await conversation.getByRole('button', { name: 'Reply to Eve' }).click()
+  assert.equal(await input.inputValue(), `@[Eve]\n>No Yes\n${'x'.repeat(140)}`)
+  assert.equal(await conversation.getByRole('button', { name: 'Send message' }).isDisabled(), true)
+  const selfMention = conversation.locator('[data-receipt-id="Alice"] .chat-mention--self')
+  assert.equal(await selfMention.count(), 1)
+  assert.equal(await selfMention.textContent(), '@[Pigeon]')
+  await input.fill('Meet @Bo later')
+  await input.evaluate((element) => element.setSelectionRange(8, 8))
+  const picker = conversation.getByText('Mention a name', { exact: true })
+  await picker.focus()
+  await page.keyboard.press('Enter')
+  const mentionNames = conversation.getByLabel('Name to mention')
+  assert.equal(await mentionNames.getByRole('option', { name: 'Charlie' }).count(), 1)
+  await mentionNames.selectOption('Bob')
+  await conversation.getByRole('button', { name: 'Insert mention' }).focus()
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => document.activeElement?.id === 'chat-draft')
+  assert.equal(await input.inputValue(), 'Meet @[Bob] later')
+  assert.equal(await input.evaluate((element) => element.selectionStart), 12)
   await input.fill('a'.repeat(153))
   assert.equal(await conversation.getByRole('button', { name: 'Send message' }).isDisabled(), true)
   await input.fill('a'.repeat(145))
@@ -516,11 +572,14 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   await conversation.getByText('Accepted by radio').waitFor()
   assert.equal(await page.evaluate(() => window.channelSends[0][5]), '@[Bob] Hello')
   assert.deepEqual(await page.evaluate(() => window.channelSends[0][6]), { mode: 'region', name: '#North' })
+  await conversation.getByRole('button', { name: 'Copy message: @[Bob] Hello' }).click()
+  assert.equal(await page.evaluate(() => window.copiedChannelText), '@[Bob] Hello')
   await input.fill('Keep this draft')
   let prompt = page.waitForEvent('dialog')
   const resending = conversation.getByRole('button', { name: 'Resend channel message: @[Bob] Hello' }).click()
   let dialog = await prompt
   assert.match(dialog.message(), /may already have reached others/)
+  assert.match(dialog.message(), /best effort and do not confirm delivery/)
   await dialog.accept()
   await resending
   await page.waitForFunction(() => window.channelSends.length === 2)
@@ -530,7 +589,7 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   dialog = await prompt
   await dialog.accept()
   await blocking
-  await conversation.getByText('Alice', { exact: true }).waitFor({ state: 'hidden' })
+  await conversation.locator('[data-receipt-id="Alice"]').waitFor({ state: 'hidden' })
   prompt = page.waitForEvent('dialog')
   const deleting = conversation.getByRole('button', { name: 'Delete channel message: Bob: hello from Bob' }).click()
   dialog = await prompt
