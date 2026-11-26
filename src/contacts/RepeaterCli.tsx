@@ -21,6 +21,7 @@ type Props = {
 
 type HistoryEntry = {
   command: string
+  description: string
   tag: string
   route: RepeaterCliReceipt['route'] | null
   deadline: number
@@ -42,10 +43,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const syncStatus = useSyncExternalStore(messageSync.subscribe, messageSync.getSnapshot)
   const term = query.trim().toLowerCase()
   const choices = repeaterCliCommands.filter((item) => `${item.command} ${item.description}`.toLowerCase().includes(term))
-  const matchingHistory = history.filter((item) => {
-    const description = repeaterCliCommands.find((choice) => choice.command === item.command)?.description ?? ''
-    return `${item.command} ${description} ${item.reply ?? ''}`.toLowerCase().includes(term)
-  })
+  const matchingHistory = history.filter((item) =>
+    `${item.command} ${item.description} ${item.reply ?? ''}`.toLowerCase().includes(term))
   const action = repeaterCliCommands.find((item) => item.command === selected)
 
   useEffect(() => messageSync.subscribeToSavedReceipts((key, message) => {
@@ -81,7 +80,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       const sentAt = Date.now()
       setNow(sentAt)
       setHistory((current) => [...current.slice(-99), {
-        command, tag: result.tag, route: result.route, deadline: sentAt + result.timeoutMs,
+        command, description, tag: result.tag, route: result.route, deadline: sentAt + result.timeoutMs,
         reply: null, unconfirmed: false,
       }])
     } catch (reason) {
@@ -89,7 +88,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         const sentAt = Date.now()
         setNow(sentAt)
         setHistory((current) => [...current.slice(-99), {
-          command, tag: reason.tag, route: null, deadline: sentAt + 120_000,
+          command, description, tag: reason.tag, route: null, deadline: sentAt + 120_000,
           reply: null, unconfirmed: true,
         }])
       }
