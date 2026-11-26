@@ -531,6 +531,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const signal = () => new AbortController().signal
   const send = (command, confirmed = false) => session.sendRepeaterCommand(key, target, route, command, confirmed, signal())
   await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
   await assert.rejects(send('ver'), /administrator/)
@@ -540,6 +541,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     await assert.rejects(send(command, true), /supported repeater CLI command/)
   }
   await assert.rejects(send('advert'), /Confirm/)
+  await assert.rejects(send('clock sync'), /Confirm/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
@@ -578,6 +580,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const changed = await send('set flood.advert.interval 3', true)
   const frame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${changed.tag}|set flood.advert.interval 3`)
+  const clock = await send('clock sync', true)
+  const clockFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(clockFrame.slice(13))), `${clock.tag}|clock sync`)
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {

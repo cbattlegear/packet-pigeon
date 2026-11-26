@@ -7,6 +7,8 @@ export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
   { command: 'clock', description: 'Read the repeater clock' },
+  { command: 'clock sync', description: 'Sync repeater clock from the connected radio', confirm: true,
+    warning: 'Check the radio clock in Settings first. The repeater cannot move its clock backwards; a clock set too far ahead may disrupt later commands. Older companion firmware can cause the repeater to ignore this request.' },
   { command: 'get name', description: 'Read the advertised name' },
   { command: 'get radio', description: 'Read radio parameters' },
   { command: 'get tx', description: 'Read transmit power' },
