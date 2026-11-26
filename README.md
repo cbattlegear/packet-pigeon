@@ -415,8 +415,9 @@ browser storage to recover before using another app, or reboot the radio to
 clear its temporary state. Clearing/evicting browser storage loses the marker.
 Region names and scopes are routing filters, not privacy or reachability
 guarantees. Queued receipts alone do not include region names or route hashes;
-live observation is best effort as described above. Notification modes remain
-unavailable.
+live observation is best effort as described above. Per-channel browser alerts
+offer all, mentions-only and muted modes; see App preferences for permission
+and delivery limitations.
 Channel changes and scope recovery have been exercised with simulated
 transports and storage, not physical hardware; the BLE framing limitation above
 remains unchanged.
