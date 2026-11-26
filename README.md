@@ -708,6 +708,18 @@ timer can carry over after a change.
 Saving also sets a local advert interval below 60 minutes to zero; an already
 scheduled advert may still be sent. `OK` or matching read-back does not prove a
 reset occurred or the preference was saved.
+Administrators can read and confirm changes to the interference threshold. The
+control accepts whole values from 0 to 255, the v1.14.1 storage range rather than
+a recommendation. On v1.14.1 RadioLib, zero disables the extra noise-floor-based
+interference check, not the packet-reception busy check. A nonzero value is a dB
+offset above the sampled noise floor, compared with current signal strength; the floor
+can be inaccurate. Low values can delay sends and remote access; high values can
+miss interference. Changes reach the radio check periodically, not necessarily
+immediately, and after about four seconds of busy detection the firmware may
+transmit anyway. Radio and firmware support varies. `OK` or matching read-back
+does not prove detection worked or the preference was saved. Saving also sets a
+local advert interval below 60 minutes to zero; an already scheduled advert may
+still be sent.
 Administrators can read and confirm changes to the extra direct ACK preference.
 When enabled, repeater v1.14.1 attempts to queue one extra multipart ACK when
 forwarding an eligible direct ACK, and can delay the normal ACK. This can use more
