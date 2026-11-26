@@ -23,6 +23,7 @@ export const repeaterCliCommands = [
     warning: 'This may increase repeater power consumption on boards that support sleep. Firmware support varies; verify the reply and preference.' },
   { command: 'get radio', description: 'Read radio parameters' },
   { command: 'get radio.rxgain', description: 'Read receiver boosted-gain preference' },
+  { command: 'get agc.reset.interval', description: 'Read AGC reset interval' },
   { command: 'set radio.rxgain on', description: 'Enable receiver boosted-gain preference', confirm: true,
     warning: receiverGainWarning },
   { command: 'set radio.rxgain off', description: 'Disable receiver boosted-gain preference', confirm: true,
@@ -278,6 +279,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole repeater transmit power from 1 to 22 dBm.')
     }
     return { command, description: 'Set repeater transmit power', confirm: true as const }
+  }
+  const agcResetPrefix = 'set agc.reset.interval '
+  if (command.startsWith(agcResetPrefix)) {
+    const value = command.slice(agcResetPrefix.length)
+    const match = /^(0|[1-9][0-9]*)$/.exec(value)
+    if (!match || match[0] !== value || Number(value) > 1020 || Number(value) % 4 !== 0) {
+      throw new Error('Enter an AGC reset interval from 0 to 1020 seconds in multiples of 4.')
+    }
+    return { command, description: 'Set AGC reset interval', confirm: true as const }
   }
   const guestPasswordPrefix = 'set guest.password '
   if (command.startsWith(guestPasswordPrefix)) {
