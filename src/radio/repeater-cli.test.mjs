@@ -125,8 +125,25 @@ test('bridge diagnostics are exact read-only queries and exclude secrets and uns
     }
   }
   for (const command of ['get bridge.secret', 'set bridge.secret secret',
-    'set bridge.baud 9600', 'set bridge.channel 1']) {
+    'set bridge.baud 9600']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('ESP-NOW bridge channel accepts only whole channels 1 to 14 and requires confirmation', () => {
+  for (const value of ['1', '6', '14']) {
+    const action = repeaterCliCommand(`set bridge.channel ${value}`)
+    assert.equal(action.command, `set bridge.channel ${value}`)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /local regulations/)
+    assert.match(action.warning, /local recovery/)
+    assert.match(action.warning, /turns Wi-Fi off/)
+    assert.match(action.warning, /local advert interval below 60 minutes/)
+    assert.match(action.warning, /delayed command/i)
+  }
+  for (const value of ['', '0', '15', '-1', '+1', '01', '1.0', '1e1', '999999999999999',
+    ' 5', '5 ', '5 extra', '5\n', '5\nreboot']) {
+    assert.throws(() => repeaterCliCommand(`set bridge.channel ${value}`), /whole ESP-NOW bridge channel/)
   }
 })
 

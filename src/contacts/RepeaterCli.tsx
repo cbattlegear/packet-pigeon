@@ -10,7 +10,7 @@ import {
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
   repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
   repeaterRadioSettingsSafety, repeaterRadioSettingsCaveats, repeaterRadioSettingsWarning, repeaterTempRadioWarning,
-  repeaterClockCommand, repeaterClockWarning, repeaterBridgeDelayWarning, isRepeaterRebootCommand,
+  repeaterClockCommand, repeaterClockWarning, repeaterBridgeDelayWarning, repeaterBridgeChannelWarning, isRepeaterRebootCommand,
   UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -116,6 +116,7 @@ const managementForms = {
   powerSaving: { title: 'Change repeater power-saving preference', terms: 'powersaving' },
   packetLog: { title: 'Manage repeater packet log', terms: 'log start stop erase logging packet diagnostics' },
   bridge: { title: 'Manage repeater bridge', terms: 'get bridge.type get bridge.enabled set bridge.enabled on off get bridge.source set bridge.source rx tx logRx logTx get bridge.delay set bridge.delay' },
+  bridgeChannel: { title: 'Change ESP-NOW bridge channel', terms: 'get bridge.channel set bridge.channel wifi wireless peer' },
   advertInterval: { title: 'Change advertisement interval', terms: 'set advert.interval set flood.advert.interval' },
   removeAccess: { title: 'Remove repeater access-list entry', terms: 'setperm acl permissions' },
   limitedAccess: { title: 'Set non-admin repeater client role', terms: 'setperm acl permissions read-only read-write' },
@@ -143,6 +144,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [agcResetInterval, setAgcResetInterval] = useState('')
   const [interferenceThreshold, setInterferenceThreshold] = useState('')
   const [bridgeDelay, setBridgeDelay] = useState('')
+  const [bridgeChannel, setBridgeChannel] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [radioFrequency, setRadioFrequency] = useState('')
@@ -236,7 +238,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       ? 'No reply is expected on repeater v1.14.1. Log in again when the repeater is available; a delayed clock reset and reboot may still arrive. Read and set the clock separately using a trusted time.'
       : 'No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.'
     const target = reboots || command.startsWith('log ') || command.startsWith('set bridge.enabled ') ||
-      command.startsWith('set bridge.source ') || command.startsWith('set bridge.delay ')
+      command.startsWith('set bridge.source ') || command.startsWith('set bridge.delay ') || command.startsWith('set bridge.channel ')
       ? `${name} (${contactKey.slice(0, 12)})` : name
     if (confirmed) {
       if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
@@ -450,6 +452,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       void send(command.command, `${command.description} to ${bridgeDelay} milliseconds`, true, repeaterBridgeDelayWarning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid bridge delay.')
+    }
+  }
+
+  function submitBridgeChannel(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set bridge.channel ${bridgeChannel}`)
+      void send(command.command, `${command.description} to ${bridgeChannel}`, true, repeaterBridgeChannelWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid ESP-NOW bridge channel.')
     }
   }
 
@@ -1211,6 +1224,27 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set bridge inbound delay</button>
       </form>
     </details>
+    <details data-cli-section="bridgeChannel">
+      <summary>{managementForms.bridgeChannel.title}</summary>
+      <p>Changing this channel can disconnect ESP-NOW bridge peers, interrupt routes and prevent remote access.
+        Verify peer settings, local regulations, device support and a local recovery method first; accepting a value
+        does not guarantee that the channel is supported or legal. This control is for ESP-NOW bridges; firmware and
+        build support vary.</p>
+      <p>In repeater v1.14.1, a running bridge turns Wi-Fi off before attempting an immediate restart; a stopped bridge
+        is not started. Restart or saving can fail, and saving also sets a local advert interval below 60 minutes to zero;
+        an already scheduled advert may still be sent. An OK reply or matching preference does not prove the channel
+        was applied, a peer is connected, or the setting was saved. Commands and replies may arrive late.</p>
+      <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+        onClick={() => void send('get bridge.channel', 'Read ESP-NOW bridge channel preference', false)}>Read ESP-NOW bridge channel</button>
+      <form className="contact-actions" onSubmit={submitBridgeChannel}>
+        <label>ESP-NOW bridge channel (1–14)
+          <input type="text" inputMode="numeric" required value={bridgeChannel}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setBridgeChannel(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set ESP-NOW bridge channel</button>
+      </form>
+    </details>
     <details data-cli-section="advertInterval">
       <summary>{managementForms.advertInterval.title}</summary>
       <p>Changing an interval affects future transmissions. Use 0 to disable. Local intervals are even minutes
@@ -1450,6 +1484,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.command.startsWith('set bridge.delay ') && item.reply !== null &&
             <p className="contact-status">A reply does not prove actual timing or persistence. Read the preference separately;
               a delayed command may still change it later.</p>}
+          {item.command.startsWith('set bridge.channel ') && item.reply !== null &&
+            <p className="contact-status">A reply does not prove the channel was applied, a peer is connected, or the setting was saved.
+              Read the preference separately; a delayed command may still change it later.</p>}
           {item.command === 'sensor get gps' && item.reply !== null &&
             <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.
               In v1.14.1, 1 means active and 0 inactive. A null or unsupported reply does not establish hardware support. Firmware and hardware support vary.</p>}
