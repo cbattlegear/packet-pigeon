@@ -535,6 +535,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
+  await assert.rejects(send('set repeat off', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
@@ -542,6 +543,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
+  await assert.rejects(send('set repeat on', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
@@ -552,6 +554,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('clock sync'), /Confirm/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
   await assert.rejects(send('set lat 45'), /Confirm/)
+  await assert.rejects(send('set repeat on'), /Confirm/)
+  await assert.rejects(send('set repeat off'), /Confirm/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
@@ -609,6 +613,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const policy = await send('gps advert')
   const policyFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(policyFrame.slice(13))), `${policy.tag}|gps advert`)
+  for (const command of ['set repeat on', 'set repeat off']) {
+    const receipt = await send(command, true)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {
