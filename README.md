@@ -466,8 +466,12 @@ one. The reported role is not a guarantee of current authorization.
 
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
-confirm a flood or zero-hop advertisement, or change its
-advertisement intervals with confirmation. The confirmed **clock sync** action
+confirm a flood or zero-hop advertisement, or change advertisement intervals
+and owner information with confirmation. Owner information can be requested
+over the mesh; do not put passwords or private data in it. Editing it requires
+repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line
+breaks. The edit field starts empty; use `get owner.info` to read the current
+value before replacing it. The confirmed **clock sync** action
 uses the connected radio's clock, not the browser clock. Check the radio's clock
 in Settings first: the repeater cannot move backwards, and setting it too far
 ahead can disrupt later commands. Companion firmware v1.11 and earlier may

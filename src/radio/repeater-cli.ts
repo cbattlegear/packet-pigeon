@@ -39,9 +39,24 @@ export class UncertainRepeaterCliError extends Error {
   }
 }
 
+export function repeaterOwnerInfoCommand(value: string) {
+  if (value.includes('|')) throw new Error('Owner information cannot contain |; use a line break instead.')
+  return repeaterCliCommand(`set owner.info ${value.replace(/\r\n/g, '\n').replace(/\n/g, '|')}`)
+}
+
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
+  const ownerPrefix = 'set owner.info '
+  if (command.startsWith(ownerPrefix)) {
+    const value = command.slice(ownerPrefix.length)
+    const bytes = new TextEncoder().encode(value)
+    if (bytes.length > 119 || bytes.some((byte) => byte < 32 || byte === 127) ||
+      new TextDecoder().decode(bytes) !== value) {
+      throw new Error('Owner information must be at most 119 UTF-8 bytes without control characters.')
+    }
+    return { command, description: 'Set owner information', confirm: true as const }
+  }
   const interval = /^set (advert\.interval|flood\.advert\.interval) (.*)$/.exec(command)
   if (interval && interval[0] === command) {
     const local = interval[1] === 'advert.interval'

@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import type { FormEvent } from 'react'
 import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
-import { repeaterCliCommand, repeaterCliCommands, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
+import { repeaterCliCommand, repeaterCliCommands, repeaterOwnerInfoCommand, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 
 export type RepeaterMessageSync = Pick<MessageSync, 'subscribe' | 'getSnapshot' | 'subscribeToSavedReceipts' | 'sync'>
@@ -30,10 +30,12 @@ type HistoryEntry = {
 }
 
 export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending }: Props) {
+  const ownerInfoId = useId()
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState('')
   const [intervalKind, setIntervalKind] = useState<'advert.interval' | 'flood.advert.interval'>('advert.interval')
   const [interval, setInterval] = useState('')
+  const [ownerInfo, setOwnerInfo] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [now, setNow] = useState(() => Date.now())
   const [pending, setPending] = useState(false)
@@ -114,6 +116,20 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitOwnerInfo(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterOwnerInfoCommand(ownerInfo)
+      const description = ownerInfo ? 'Replace owner information' : 'Clear owner information'
+      const preview = ownerInfo ? `\n\n${ownerInfo}` : ''
+      void send(command.command, description, true,
+        `This information can be requested over the mesh. Do not include passwords or private data.${preview}`)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid owner information.')
+    }
+  }
+
   return <details>
     <summary>Administrator CLI</summary>
     <p>Choose a supported query or confirmed management action. Commands are never retried automatically.
@@ -166,6 +182,19 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             onChange={(event) => setInterval(event.currentTarget.value)} />
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set interval</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change owner information</summary>
+      <p>Replaces the current owner information. It can be requested over the mesh; do not include passwords or private data.
+        Repeater firmware v1.12 or later is required. The field starts empty; use get owner.info to read the current value.
+        Use line breaks instead of |, and leave blank to clear.</p>
+      <form className="repeater-owner-form" onSubmit={submitOwnerInfo}>
+        <label htmlFor={ownerInfoId}>Owner information</label>
+        <textarea id={ownerInfoId} rows={4} value={ownerInfo} disabled={!ready || busy || pending || syncStatus.syncing}
+          onChange={(event) => setOwnerInfo(event.currentTarget.value)} />
+        <p>Maximum 119 UTF-8 bytes, including line breaks.</p>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set owner information</button>
       </form>
     </details>
     {pending && <p role="status">Sending to the radio…</p>}

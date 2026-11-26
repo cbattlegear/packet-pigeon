@@ -30,7 +30,7 @@
   width: min(100%, 28rem);
 }
 
-.contact-workspace :is(button, input:not([type='checkbox']), select) {
+.contact-workspace :is(button, input:not([type='checkbox']), select, textarea) {
   min-width: 0;
   max-width: 100%;
   min-height: 38px;
@@ -180,6 +180,15 @@
 .repeater-cli-history pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.repeater-owner-form {
+  display: grid;
+  gap: 8px;
+}
+
+.repeater-owner-form button {
+  justify-self: start;
 }
 
 @media (max-width: 780px) {

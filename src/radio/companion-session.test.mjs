@@ -533,10 +533,12 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
+  await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
+  await assert.rejects(send('set owner.info Public info', true), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
   for (const command of ['get guest.password', 'set guest.password test', 'reboot']) {
@@ -544,6 +546,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   }
   await assert.rejects(send('advert'), /Confirm/)
   await assert.rejects(send('clock sync'), /Confirm/)
+  await assert.rejects(send('set owner.info Public info'), /Confirm/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
@@ -588,6 +591,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const neighbors = await send('neighbors')
   const neighborsFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(neighborsFrame.slice(13))), `${neighbors.tag}|neighbors`)
+  const owner = await send('set owner.info Public|info', true)
+  const ownerFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(ownerFrame.slice(13))), `${owner.tag}|set owner.info Public|info`)
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {
