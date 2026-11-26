@@ -492,8 +492,18 @@ Open **Saved route and repeater hops** to inspect each known hash match.
 For a saved repeater, **Repeater login and status** sends a login using its
 current saved route (or flood if no route is known). The reported guest or
 admin role comes from the repeater. Status is requested separately and never
-automatically. Passwords are not remembered; closing the view does not revoke
-the repeater's access list. An interrupted, timed-out, or unconfirmed request
+automatically. A blank password can use existing access-list authorization; a
+blank guest password can also grant guest access to a new radio.
+Optionally remember a nonempty password after a reported successful login:
+it is kept only in the current tab's memory, scoped to the connected radio and
+repeater, not saved by the app to browser storage, and forgotten on reload or
+tab close. Use **Log in with remembered password** to send a new, route-verified
+login request; nothing is transmitted automatically. Forgetting removes the
+remembered value, not the repeater's access-list entry, and does not cancel an
+already started request. Scripts or extensions with access to the page may read
+the password, and browser copies may remain after forgetting.
+Unchecking the option does not forget an existing remembered value.
+An interrupted, timed-out, or unconfirmed request
 blocks further login and status requests to that repeater for the current connection; a late
 reply cannot remove that block. Reconnect and log in again to retry. The
 firmware does not tag these replies, so even after
