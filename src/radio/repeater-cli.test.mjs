@@ -198,6 +198,17 @@ test('receiver gain query is read-only and changes require confirmation', () => 
   }
 })
 
+test('AGC reset intervals are bounded to exact four-second steps and require confirmation', () => {
+  assert.equal(repeaterCliCommand('get agc.reset.interval').command, 'get agc.reset.interval')
+  for (const value of ['0', '4', '16', '1020']) {
+    assert.equal(repeaterCliCommand(`set agc.reset.interval ${value}`).confirm, true)
+  }
+  for (const value of ['', '-4', '1', '3', '5', '1021', '1024', '00', '04', '4.0', '1e2',
+    ' 4', '4 ', '4\n', '4\nreboot', '999999999999999999999']) {
+    assert.throws(() => repeaterCliCommand(`set agc.reset.interval ${value}`), /AGC reset interval/)
+  }
+})
+
 test('advertisement interval changes accept only supported exact values', () => {
   for (const command of ['set advert.interval 0', 'set advert.interval 60', 'set advert.interval 240',
     'set flood.advert.interval 0', 'set flood.advert.interval 3', 'set flood.advert.interval 168']) {

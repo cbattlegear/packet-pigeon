@@ -697,6 +697,17 @@ the reply and read the preference again. `OK` or matching read-back does not
 prove the radio applied the preference or saved it successfully. In v1.14.1,
 saving also sets a local advert interval below 60 minutes to zero; an already
 scheduled advert may still be sent.
+Administrators can read and confirm changes to the AGC reset interval: zero
+disables scheduled resets, and the control accepts seconds from 0 to 1020 in
+multiples of four to avoid firmware rounding or wrapping. Hardware and firmware
+support varies, so a scheduled reset may do nothing. In repeater v1.14.1 the
+timer restarts after a send completes or times out; RadioLib skips a reset during
+reception or when a packet is pending and schedules the next attempt. An applied
+reset briefly interrupts reception and restarts noise-floor sampling. An existing
+timer can carry over after a change.
+Saving also sets a local advert interval below 60 minutes to zero; an already
+scheduled advert may still be sent. `OK` or matching read-back does not prove a
+reset occurred or the preference was saved.
 Owner information can be requested
 over the mesh; do not put passwords or private data in it. Editing it requires
 repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line

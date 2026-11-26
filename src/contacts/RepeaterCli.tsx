@@ -50,6 +50,10 @@ const receiveDelayWarning = 'This experimental setting can affect flood processi
   'Already queued floods retain their scheduled time. ' +
   'Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. ' +
   'An OK reply or matching read-back does not prove persistence or actual timing. Other firmware may behave differently.'
+const agcResetWarning = 'Zero disables scheduled resets. Radio and firmware support varies; a scheduled reset may do nothing. ' +
+  'In repeater firmware v1.14.1, the timer restarts after a send completes or times out. RadioLib skips a reset during packet reception or when a packet is pending, then schedules the next attempt. An applied reset briefly interrupts reception and restarts noise-floor sampling. An existing timer can carry over after a change. ' +
+  'Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. ' +
+  'An OK reply or matching read-back does not prove a reset occurred or the preference was saved.'
 
 export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
@@ -63,6 +67,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [retransmitKind, setRetransmitKind] = useState<'txdelay' | 'direct.txdelay'>('txdelay')
   const [retransmitDelay, setRetransmitDelay] = useState('')
   const [receiveDelay, setReceiveDelay] = useState('')
+  const [agcResetInterval, setAgcResetInterval] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
@@ -248,6 +253,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       void send(command.command, `${command.description} to ${receiveDelay}`, true, receiveDelayWarning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid receive-delay base.')
+    }
+  }
+
+  function submitAgcResetInterval(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set agc.reset.interval ${agcResetInterval}`)
+      void send(command.command, `${command.description} to ${agcResetInterval} seconds`, true, agcResetWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid AGC reset interval.')
     }
   }
 
@@ -720,6 +736,22 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </div>
     </details>
     <details>
+      <summary>Change AGC reset interval</summary>
+      <p>Set a periodic automatic gain control (AGC) reset interval in seconds.
+        This control accepts 0–1020 in multiples of four, avoiding the rounding or wrapping possible in v1.14.1.
+        {` ${agcResetWarning}`} Read the preference first, then sync the reply and read it again.</p>
+      <form className="contact-actions" onSubmit={submitAgcResetInterval}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get agc.reset.interval', 'Read AGC reset interval', false)}>Read AGC reset interval</button>
+        <label>New AGC reset interval (seconds)
+          <input type="text" inputMode="numeric" required value={agcResetInterval}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setAgcResetInterval(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set AGC reset interval</button>
+      </form>
+    </details>
+    <details>
       <summary>Change repeater power-saving preference</summary>
       <p>Depending on the board and firmware, enabling this preference may let the repeater sleep when idle and be less responsive.
         An <code>on</code> reply reports the preference, not actual sleep; for example, Pico W repeater firmware v1.14.1 does not implement sleep.
@@ -897,6 +929,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
               Some unsupported builds return radio parameters instead of a gain result.</p>}
           {item.command === 'get rxdelay' && item.reply !== null &&
             <p className="contact-status">A read-back reports the preference, not measured delay or successful persistence.</p>}
+          {item.command === 'get agc.reset.interval' && item.reply !== null &&
+            <p className="contact-status">A numeric read-back reports the preference, not whether a reset occurred or the preference was saved.</p>}
           {item.command === 'discover.neighbors' && item.reply !== null &&
             <p className="contact-status">An OK reply does not prove a broadcast occurred or that any neighbors replied.
               Discovery responses are unauthenticated and do not prove identity. Wait up to 60 seconds, then request neighbors
