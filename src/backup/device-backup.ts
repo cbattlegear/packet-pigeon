@@ -128,6 +128,7 @@ export async function restoreBackup(session: BackupSession, key: RadioKey, backu
   let restoredChannels: RestoredChannels | undefined
   let cacheKey: RadioKey | null = key
   let transferredIdentity: string | undefined
+  let contactsHandled = false
   const snapshot = session.getSnapshot()
   const device = sections.size === 1 && sections.has('regions') &&
     (snapshot.phase !== 'ready' || snapshot.device?.publicKey !== key) ? null : connectedDevice(session, key)
@@ -193,20 +194,12 @@ export async function restoreBackup(session: BackupSession, key: RadioKey, backu
     restoredChannels = await session.importBackupChannels(key, backup.channels, signal)
     results.push(...restoredChannels.results.map(({ label, status, reason }) => ({ label, status, reason })))
   })
-  await restore('contacts', 'Contacts', async () => {
-    if (!backup.contacts?.length) return
-    const incomingOwnKey = sections.has('identity') ? backup.identity?.publicKey : undefined
-    const entries = backup.contacts.filter((entry) => {
-      if (entry.publicKey !== incomingOwnKey) return true
-      results.push({ label: entry.name, status: 'skipped', reason: 'This is the identity being restored.' })
-      return false
-    })
-    const contacts = entries.length ? await session.importBackupContacts(key, entries, signal) : []
+  function recordContacts(contacts: Awaited<ReturnType<BackupSession['importBackupContacts']>>) {
     for (const { publicKey, label, status, reason } of contacts) {
       if (status === 'saved') savedContacts.add(publicKey)
       results.push({ label, status, reason })
     }
-  })
+  }
   await restore('regions', 'Default flood region', async () => {
     if (backup.defaultRegion === undefined) return
     if (!device) {
@@ -225,18 +218,29 @@ export async function restoreBackup(session: BackupSession, key: RadioKey, backu
     }
     connectedDevice(session, key)
     try {
-      await session.restoreDeviceIdentity(key, identity.privateKey, identity.publicKey)
+      const selected = sections.has('contacts') ? backup.contacts ?? [] : []
+      const contacts = await session.restoreDeviceIdentity(key, identity.privateKey, identity.publicKey,
+        selected.filter((entry) => entry.publicKey !== identity.publicKey), signal)
       cacheKey = radioKeyFromPublicKey(identity.publicKey)
       transferredIdentity = identity.publicKey
+      contactsHandled = true
       results.push({ label: 'Private identity key', status: 'saved', reason: 'Reconnect to verify the restored public key.' })
+      recordContacts(contacts)
+      const self = selected.find((entry) => entry.publicKey === identity.publicKey)
+      if (self) results.push({ label: self.name, status: 'skipped', reason: 'This is the restored radio identity.' })
     } catch (error) {
-      if (session.getSnapshot().phase !== 'ready') {
+      if (signal.aborted && session.getSnapshot().phase === 'ready') {
+        results.push({ label: 'Private identity key', status: 'skipped', reason: 'Stopped before replacing the identity.' })
+      } else if (session.getSnapshot().phase !== 'ready') {
         cacheKey = null
         results.push({ label: 'Private identity key', status: 'uncertain', reason: 'Reconnect and check the radio’s public key.' })
       } else {
         results.push({ label: 'Private identity key', status: 'failed', reason: message(error) })
       }
     }
+  })
+  if (!contactsHandled) await restore('contacts', 'Contacts', async () => {
+    if (backup.contacts?.length) recordContacts(await session.importBackupContacts(key, backup.contacts, signal))
   })
   if (cacheKey) {
     try {

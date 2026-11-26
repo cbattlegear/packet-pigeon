@@ -76,6 +76,8 @@ test('backs up selected settings, restores data and identity, and guards mainten
           } else if (code === 23) send([14, ...bytes(identity.secret)])
           else if (code === 24 && data.slice(1).every((byte, index) => byte === bytes(target.secret)[index])) {
             identity = target
+            // Identity replacement reloads contacts and drops recent edits that have not reached flash.
+            contacts.clear()
             send([0])
           } else if (code === 31) {
             const channel = slots[slot]
@@ -157,13 +159,28 @@ test('backs up selected settings, restores data and identity, and guards mainten
 
   await preview.getByRole('button', { name: 'Deselect all restore sections' }).click()
   await preview.getByLabel(/^Private identity key/).check()
+  await preview.getByLabel(/^Contacts/).check()
   await restore.click()
   assert.equal(await page.evaluate(() => window.backupCommands.includes(24)), false)
   page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
   await restore.click()
+  await panel.getByRole('button', { name: 'Stop after current command' }).click()
+  await panel.getByText(/Operation stopped/).waitFor()
+  assert.equal(await page.evaluate(() => window.backupCommands.includes(24)), false)
+  page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
+  await restore.click()
   await panel.getByText(/Reconnect and verify the public key/).waitFor()
+  assert.ok(await page.evaluate(() => window.backupCommands.lastIndexOf(9) > window.backupCommands.lastIndexOf(24)))
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await panel.getByText(/Restored identity verified/).waitFor()
+  const restoredName = await page.evaluate(async ({ publicKey, contactKey }) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try { return (await storage.read(radioKeyFromPublicKey(publicKey)))?.contactPreferences
+      ?.find(({ publicKey }) => publicKey === contactKey)?.customName }
+    finally { storage.close() }
+  }, { publicKey: target.publicKey, contactKey })
+  assert.equal(restoredName, 'Custom relay')
   await panel.getByText('Local archive and radio maintenance', { exact: true }).click()
   const reset = panel.getByRole('button', { name: 'Factory reset radio' })
   await reset.click()
