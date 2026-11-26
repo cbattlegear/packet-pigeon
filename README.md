@@ -634,6 +634,15 @@ power may be unlawful. Firmware saves the preference and attempts to apply it,
 but may report `OK` even if applying it fails. Read `get tx` before and after
 and sync replies: a matching read-back shows only the stored preference, not
 the applied or radiated RF power.
+Administrators can read and confirm changes to the receiver boosted-gain
+preference. Support depends on the radio and firmware build; repeater firmware
+v1.14.1 implements it for SX1262 and SX1268 builds. Changing gain may affect
+reception and power use. Some unsupported builds return radio parameters
+instead of `on` or `off` for the gain query; that is not a gain result. Sync
+the reply and read the preference again. `OK` or matching read-back does not
+prove the radio applied the preference or saved it successfully. In v1.14.1,
+saving also sets a local advert interval below 60 minutes to zero; an already
+scheduled advert may still be sent.
 Owner information can be requested
 over the mesh; do not put passwords or private data in it. Editing it requires
 repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line

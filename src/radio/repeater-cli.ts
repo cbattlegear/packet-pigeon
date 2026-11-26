@@ -3,6 +3,8 @@ import { CompanionError, Response } from './protocol.ts'
 import { expectResponse } from './serial-link.ts'
 import type { SerialLink } from './serial-link.ts'
 
+const receiverGainWarning = 'Support depends on the repeater radio and firmware build. Changing gain may affect reception and power use. OK or matching read-back does not prove the radio applied the preference or saved it successfully. On some unsupported builds, a gain query returns radio parameters instead of on/off. In v1.14.1, saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent.'
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -17,6 +19,11 @@ export const repeaterCliCommands = [
   { command: 'powersaving off', description: 'Disable repeater power-saving preference', confirm: true,
     warning: 'This may increase repeater power consumption on boards that support sleep. Firmware support varies; verify the reply and preference.' },
   { command: 'get radio', description: 'Read radio parameters' },
+  { command: 'get radio.rxgain', description: 'Read receiver boosted-gain preference' },
+  { command: 'set radio.rxgain on', description: 'Enable receiver boosted-gain preference', confirm: true,
+    warning: receiverGainWarning },
+  { command: 'set radio.rxgain off', description: 'Disable receiver boosted-gain preference', confirm: true,
+    warning: receiverGainWarning },
   { command: 'get tx', description: 'Read stored transmit power preference' },
   { command: 'get repeat', description: 'Read forwarding mode' },
   { command: 'get af', description: 'Read airtime factor' },

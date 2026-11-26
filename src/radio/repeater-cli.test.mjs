@@ -112,6 +112,22 @@ test('power-saving query is read-only and mutations require confirmation', () =>
   }
 })
 
+test('receiver gain query is read-only and changes require confirmation', () => {
+  assert.equal(repeaterCliCommand('get radio.rxgain').command, 'get radio.rxgain')
+  for (const command of ['set radio.rxgain on', 'set radio.rxgain off']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /does not prove the radio applied the preference or saved it successfully/)
+    assert.match(action.warning, /returns radio parameters instead of on\/off/)
+    assert.match(action.warning, /local advert interval below 60 minutes to zero/)
+    assert.match(action.warning, /already scheduled advert may still be sent/)
+  }
+  for (const command of ['get radio.rxgain ', 'set radio.rxgain', 'set radio.rxgain true',
+    'set radio.rxgain on extra', 'set radio.rxgain off\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('advertisement interval changes accept only supported exact values', () => {
   for (const command of ['set advert.interval 0', 'set advert.interval 60', 'set advert.interval 240',
     'set flood.advert.interval 0', 'set flood.advert.interval 3', 'set flood.advert.interval 168']) {

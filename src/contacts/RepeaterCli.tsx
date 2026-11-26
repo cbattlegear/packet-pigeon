@@ -68,6 +68,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [advertPolicy, setAdvertPolicy] = useState('')
   const powerSavingCommands = repeaterCliCommands.filter((item) =>
     item.command === 'powersaving on' || item.command === 'powersaving off')
+  const receiverGainCommands = repeaterCliCommands.filter((item) =>
+    item.command === 'set radio.rxgain on' || item.command === 'set radio.rxgain off')
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -626,6 +628,23 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
+      <summary>Change receiver boosted-gain preference</summary>
+      <p>Support depends on the radio and firmware build; repeater firmware v1.14.1 implements this for SX1262 and
+        SX1268 builds. Changing gain may affect reception and power use. Read the preference first, sync the reply, and
+        compare it after a change. On some unsupported builds the read can return radio parameters rather than{' '}
+        <code>on</code> or <code>off</code>; that is not a gain result. An OK reply or matching read-back does not prove
+        that the radio applied the preference or saved it successfully. In v1.14.1, saving also sets a local advert
+        interval below 60 minutes to zero; an already scheduled advert may still be sent.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get radio.rxgain', 'Read receiver boosted-gain preference', false)}>Read receiver gain preference</button>
+        {receiverGainCommands.map((item) => (
+          <button key={item.command} type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+            onClick={() => sendChoice(item)}>{item.description}</button>
+        ))}
+      </div>
+    </details>
+    <details>
       <summary>Change repeater power-saving preference</summary>
       <p>Depending on the board and firmware, enabling this preference may let the repeater sleep when idle and be less responsive.
         An <code>on</code> reply reports the preference, not actual sleep; for example, Pico W repeater firmware v1.14.1 does not implement sleep.
@@ -765,6 +784,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">Firmware may match a prefix to a different region. Compare the returned name.</p>}
           {item.command === 'powersaving' && item.reply !== null &&
             <p className="contact-status">An on reply reports the preference, not actual sleep; behavior depends on the board and firmware.</p>}
+          {item.command === 'get radio.rxgain' && item.reply !== null &&
+            <p className="contact-status">An on/off reply reports the current preference, not the applied radio setting or successful persistence.
+              Some unsupported builds return radio parameters instead of a gain result.</p>}
           {item.command === 'neighbors' && item.reply !== null &&
             <NeighborReport reply={item.reply.text} syncedAt={item.reply.syncedAt} name={name} repeaterPosition={repeaterPosition}
               nodes={neighborNodes} onMap={onMap} />}
