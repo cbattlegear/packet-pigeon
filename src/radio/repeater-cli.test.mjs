@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
+  repeaterNameCommand, repeaterPositionCommand,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -31,15 +32,48 @@ test('owner information is bounded, supports line breaks and rejects unsafe text
   }
 })
 
+test('repeater names preserve valid UTF-8 and reject unsupported or unsafe values', () => {
+  for (const value of ['Relay', 'é'.repeat(15) + 'x', 'Mesh | Home', 'Relay 🛰']) {
+    assert.equal(repeaterNameCommand(value).command, `set name ${value}`)
+    assert.equal(repeaterNameCommand(value).confirm, true)
+  }
+  for (const value of ['', ' ', ' leading', 'trailing ', 'x'.repeat(32), 'é'.repeat(16),
+    'newline\nreboot', 'tab\there', 'nul\0', '\ud800', ...'[]/\\:,?*']) {
+    assert.throws(() => repeaterNameCommand(value), /name/)
+  }
+})
+
+test('advertised position updates enforce coordinate ranges and decimal precision', () => {
+  for (const [axis, value] of [['lat', '-90'], ['lat', '90.000000'], ['lon', '-180'], ['lon', '180']]) {
+    assert.equal(repeaterPositionCommand(axis, value).command, `set ${axis} ${value}`)
+    assert.equal(repeaterPositionCommand(axis, value).confirm, true)
+  }
+  for (const [axis, value] of [['lat', '-90.000001'], ['lat', '90.1'], ['lon', '-181'], ['lon', '180.1'],
+    ['lat', '1.1234567'], ['lon', '1e2'], ['lon', ''], ['lat', 'Infinity'], ['lon', '0\nadvert'], ['lat', '1\n']]) {
+    assert.throws(() => repeaterPositionCommand(axis, value), /latitude|longitude/)
+  }
+  assert.throws(() => repeaterCliCommand('set lat 90.000001'), /latitude/)
+  assert.throws(() => repeaterCliCommand('set lon -180.000001'), /longitude/)
+  assert.throws(() => repeaterCliCommand('set lat 1\n'), /supported/)
+})
+
 test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   let writes = 0
   const link = { async request() { writes++; throw new Error('unexpected write') } }
-  for (const command of ['get guest.password', 'set guest.password secret', 'get prv.key', 'reboot', 'ver\nadvert']) {
-    await assert.rejects(sendRepeaterCli(link, key, command, 'AA'), /supported repeater CLI command/)
+  for (const command of ['get guest.password', 'set guest.password secret', 'get prv.key', 'reboot', 'ver\nadvert',
+    'set repeat', 'set repeat true', 'set repeat off\n', 'set repeat off extra',
+    'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off',
+    'set allow.read.only', 'set allow.read.only true', 'set allow.read.only off extra',
+    'set name Bad\nreboot', 'set name Bad/Name', `set name ${'x'.repeat(32)}`]) {
+    await assert.rejects(sendRepeaterCli(link, key, command, 'AA'), /supported repeater CLI command|name/)
   }
   assert.equal(writes, 0)
   assert.equal(repeaterCliCommand('advert').confirm, true)
   assert.equal(repeaterCliCommand('clock sync').confirm, true)
+  assert.equal(repeaterCliCommand('set repeat on').confirm, true)
+  assert.equal(repeaterCliCommand('set repeat off').confirm, true)
+  assert.equal(repeaterCliCommand('gps advert').command, 'gps advert')
+  assert.throws(() => repeaterCliCommand('gps advert prefs'), /supported/)
   assert.throws(() => repeaterCliCommand('time 9999999999'), /supported/)
 })
 

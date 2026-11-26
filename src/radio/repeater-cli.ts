@@ -14,12 +14,16 @@ export const repeaterCliCommands = [
   { command: 'get radio', description: 'Read radio parameters' },
   { command: 'get tx', description: 'Read transmit power' },
   { command: 'get repeat', description: 'Read forwarding mode' },
+  { command: 'set repeat on', description: 'Enable packet forwarding', confirm: true,
+    warning: 'Forwarding is still subject to the repeater routing and region settings.' },
+  { command: 'set repeat off', description: 'Disable packet forwarding', confirm: true,
+    warning: 'This stops the repeater forwarding packets and can disrupt mesh routes. Some firmware also stops responding to discovery requests.' },
   { command: 'get advert.interval', description: 'Read the local advert interval' },
   { command: 'get flood.advert.interval', description: 'Read the flood advert interval' },
-  { command: 'get lat', description: 'Read advert latitude' },
-  { command: 'get lon', description: 'Read advert longitude' },
+  { command: 'get lat', description: 'Read stored latitude' },
+  { command: 'get lon', description: 'Read stored longitude' },
+  { command: 'gps advert', description: 'Read GPS advert policy' },
   { command: 'get owner.info', description: 'Read operator information' },
-  { command: 'get allow.read.only', description: 'Read guest access policy' },
   { command: 'advert', description: 'Send a flood advertisement', confirm: true },
   { command: 'advert.zerohop', description: 'Send a zero-hop advertisement', confirm: true },
 ] as const
@@ -44,9 +48,40 @@ export function repeaterOwnerInfoCommand(value: string) {
   return repeaterCliCommand(`set owner.info ${value.replace(/\r\n/g, '\n').replace(/\n/g, '|')}`)
 }
 
+export function repeaterPositionCommand(axis: 'lat' | 'lon', value: string) {
+  validatePosition(axis, value)
+  return repeaterCliCommand(`set ${axis} ${value}`)
+}
+
+export function repeaterNameCommand(value: string) {
+  return repeaterCliCommand(`set name ${value}`)
+}
+
+function validatePosition(axis: 'lat' | 'lon', value: string) {
+  const maximum = axis === 'lat' ? 90 : 180
+  const coordinate = Number(value)
+  const match = /^-?\d+(?:\.\d{1,6})?$/.exec(value)
+  if (!match || match[0] !== value || !Number.isFinite(coordinate) ||
+    coordinate < -maximum || coordinate > maximum) {
+    throw new Error(`Enter a ${axis === 'lat' ? 'latitude from -90 to 90' : 'longitude from -180 to 180'} with up to 6 decimal places.`)
+  }
+}
+
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
+  const namePrefix = 'set name '
+  if (command.startsWith(namePrefix)) {
+    const value = command.slice(namePrefix.length)
+    const bytes = new TextEncoder().encode(value)
+    if (!value || value !== value.trim() || bytes.length > 31 ||
+      bytes.some((byte) => byte < 32 || byte === 127) ||
+      [...'[]/\\:,?*'].some((character) => value.includes(character)) ||
+      new TextDecoder().decode(bytes) !== value) {
+      throw new Error('Enter a name of 1 to 31 UTF-8 bytes without leading or trailing spaces, control characters, or []/\\:,?*.')
+    }
+    return { command, description: 'Set repeater name', confirm: true as const }
+  }
   const ownerPrefix = 'set owner.info '
   if (command.startsWith(ownerPrefix)) {
     const value = command.slice(ownerPrefix.length)
@@ -56,6 +91,12 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Owner information must be at most 119 UTF-8 bytes without control characters.')
     }
     return { command, description: 'Set owner information', confirm: true as const }
+  }
+  const position = /^set (lat|lon) (.*)$/.exec(command)
+  if (position && position[0] === command) {
+    const axis = position[1] === 'lat' ? 'lat' : 'lon'
+    validatePosition(axis, position[2])
+    return { command, description: `Set stored ${axis === 'lat' ? 'latitude' : 'longitude'}`, confirm: true as const }
   }
   const interval = /^set (advert\.interval|flood\.advert\.interval) (.*)$/.exec(command)
   if (interval && interval[0] === command) {

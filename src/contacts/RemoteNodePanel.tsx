@@ -62,7 +62,8 @@ export function RemoteNodeLogin({ session, radioKey, nodeKey, type, active, read
         onChange={(event) => setPassword(event.currentTarget.value)} /></label>
       <button type="submit" disabled={disabled}>Sign in</button>
     </form>
-    <p>Leave the password empty to request access already granted to this radio.</p>
+    <p>Leave the password empty to request access already granted to this radio.
+      {type === 3 && ' Depending on the room settings, an empty password may also grant new read-only or posting access.'}</p>
     {action.waiting && <button type="button" onClick={action.stop}>Stop waiting for login</button>}
     {action.error && <p role="alert">{action.error}</p>}
   </section>
@@ -79,8 +80,9 @@ export function RemoteNodePanel({ session, ...target }: Target & { session: Remo
   const disabled = !ready || busy || action.waiting
   const sensor = type === 4
 
-  function send(settings: RemoteNodeAdmin, description: string) {
-    if (disabled || !admin || !window.confirm(`${description} on ${name} (${nodeKey.slice(0, 12)})?`)) return
+  function send(settings: RemoteNodeAdmin, description: string, confirm = true, warning = '') {
+    if (disabled || !admin || (confirm &&
+      !window.confirm(`${description} on ${name} (${nodeKey.slice(0, 12)})?${warning ? ` ${warning}` : ''}`))) return
     void action.run(async (signal) => {
       const route = await session.administerNode(radioKey, nodeKey, settings, signal)
       action.setNotice(`Command queued over ${route === 'direct' ? 'direct' : 'flood'} routing. Use Sync messages in Chats to read the node’s reply.`)
@@ -160,9 +162,20 @@ export function RemoteNodePanel({ session, ...target }: Target & { session: Remo
         <button type="submit" disabled={disabled}>Set advertised name</button>
       </form>
       {!sensor && <>
+        <p>With automatic read-only entry enabled, an unrecognized password can grant read-only access.
+          Disabling it does not revoke existing access-list entries; known clients may still sign in with a blank password.
+          A blank room password may still grant posting access.</p>
+        <p>Companion firmware v1.11 and earlier may cause these commands to be ignored.
+          Read and change replies appear in Chats after a manual sync; they are not matched to commands and may arrive late.</p>
         <div className="contact-actions">
-          <button type="button" disabled={disabled} onClick={() => send({ kind: 'allow-read-only', enabled: true }, 'Allow read-only visitors')}>Allow read-only visitors</button>
-          <button type="button" disabled={disabled} onClick={() => send({ kind: 'allow-read-only', enabled: false }, 'Require room access')}>Require room access</button>
+          <button type="button" disabled={disabled}
+            onClick={() => send({ kind: 'read-allow-read-only' }, 'Read automatic read-only entry', false)}>Read read-only setting</button>
+          <button type="button" disabled={disabled}
+            onClick={() => send({ kind: 'allow-read-only', enabled: true }, 'Enable automatic read-only entry', true,
+              'Unrecognized passwords can grant read-only access.')}>Enable automatic read-only entry</button>
+          <button type="button" disabled={disabled}
+            onClick={() => send({ kind: 'allow-read-only', enabled: false }, 'Disable automatic read-only entry', true,
+              'Existing access-list entries are not revoked; known clients may still sign in with a blank password.')}>Disable automatic read-only entry</button>
         </div>
         <form className="contact-actions" onSubmit={(event) => {
           event.preventDefault()

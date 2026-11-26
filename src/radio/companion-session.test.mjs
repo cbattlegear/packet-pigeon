@@ -486,6 +486,76 @@ test('definite companion rejection leaves repeater login retryable', async (t) =
   assert.equal(port.commands.filter(([code]) => code === 26).length, 2)
 })
 
+test('room read-only policy commands require a current administrator and a uniquely saved room', async (t) => {
+  const contact = contactInfo()
+  contact[33] = 3
+  contact[35] = 1
+  contact[36] = 0x45
+  let admin = false
+  let duplicate = false
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, duplicate ? 2 : 1, 0, 0, 0)
+        serial.emit(...contact)
+        if (duplicate) {
+          const other = contact.slice()
+          other[7] = 0xdd
+          serial.emit(...other)
+        }
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      case 26:
+        serial.emit(6, 0, ...new Uint8Array(8))
+        serial.emit(0x85, 0, ...contact.slice(1, 7), 1, 0, 0, 0, admin ? 3 : 0, 1)
+        break
+      case 2: serial.emit(6, 0, ...new Uint8Array(8)); break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  t.after(() => session.disconnect())
+  const radio = 'ab'.repeat(32)
+  const room = 'bc'.repeat(32)
+  const signal = () => new AbortController().signal
+  const actions = [
+    [{ kind: 'read-allow-read-only' }, 'get allow.read.only'],
+    [{ kind: 'allow-read-only', enabled: true }, 'set allow.read.only on'],
+    [{ kind: 'allow-read-only', enabled: false }, 'set allow.read.only off'],
+  ]
+  for (const [action] of actions) {
+    await assert.rejects(session.administerNode(radio, room, action, signal()), /administrator/)
+  }
+  await session.loginNode(radio, room, '', signal())
+  for (const [action] of actions) {
+    await assert.rejects(session.administerNode(radio, room, action, signal()), /administrator/)
+  }
+  assert.equal(port.commands.some(([code]) => code === 2), false)
+  admin = true
+  await session.loginNode(radio, room, 'fixture-admin', signal())
+  for (const [action, text] of actions) {
+    assert.equal(await session.administerNode(radio, room, action, signal()), 'direct')
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(frame[1], 1)
+    assert.deepEqual(frame.slice(7, 13), new Array(6).fill(0xbc))
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), text)
+  }
+  const sent = port.commands.filter(([code]) => code === 2).length
+  contact[33] = 4
+  for (const [action] of actions) {
+    await assert.rejects(session.administerNode(radio, room, action, signal()), /room server/)
+  }
+  contact[33] = 2
+  await assert.rejects(session.administerNode(radio, room, actions[0][0], signal()), /saved room server or sensor/)
+  contact[33] = 3
+  duplicate = true
+  await assert.rejects(session.administerNode(radio, room, actions[0][0], signal()), /unique key prefix/)
+  assert.equal(port.commands.filter(([code]) => code === 2).length, sent)
+})
+
 test('repeater CLI requires current admin access, a verified route, and confirmed advertisements', async (t) => {
   t.mock.method(globalThis.crypto, 'getRandomValues', (values) => { values[0] = 0; return values })
   const contact = contactInfo()
@@ -534,19 +604,32 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
+  await assert.rejects(send('set name Relay', true), /administrator/)
+  await assert.rejects(send('set lat 45', true), /administrator/)
+  await assert.rejects(send('set repeat off', true), /administrator/)
+  await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
+  await assert.rejects(send('set name Relay', true), /administrator/)
+  await assert.rejects(send('set lat 45', true), /administrator/)
+  await assert.rejects(send('set repeat on', true), /administrator/)
+  await assert.rejects(send('gps advert'), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
-  for (const command of ['get guest.password', 'set guest.password test', 'reboot']) {
+  for (const command of ['get guest.password', 'set guest.password test', 'reboot',
+    'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
     await assert.rejects(send(command, true), /supported repeater CLI command/)
   }
   await assert.rejects(send('advert'), /Confirm/)
   await assert.rejects(send('clock sync'), /Confirm/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
+  await assert.rejects(send('set name Relay'), /Confirm/)
+  await assert.rejects(send('set lat 45'), /Confirm/)
+  await assert.rejects(send('set repeat on'), /Confirm/)
+  await assert.rejects(send('set repeat off'), /Confirm/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
@@ -594,6 +677,24 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const owner = await send('set owner.info Public|info', true)
   const ownerFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(ownerFrame.slice(13))), `${owner.tag}|set owner.info Public|info`)
+  const rename = await send('set name Relay 🛰', true)
+  const renameFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(renameFrame.slice(13))), `${rename.tag}|set name Relay 🛰`)
+  for (const command of ['set lat 90.1', 'set lon -180.1', 'set lat 1.1234567', 'set lon 1e2']) {
+    await assert.rejects(send(command, true), /latitude|longitude/)
+  }
+  const position = await send('set lat 47.123456', true)
+  const positionFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(positionFrame.slice(13))),
+    `${position.tag}|set lat 47.123456`)
+  const policy = await send('gps advert')
+  const policyFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(policyFrame.slice(13))), `${policy.tag}|gps advert`)
+  for (const command of ['set repeat on', 'set repeat off']) {
+    const receipt = await send(command, true)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {

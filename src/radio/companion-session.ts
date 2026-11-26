@@ -562,7 +562,7 @@ export class CompanionSession {
 
   readonly administerNode = (radioKey: string, nodeKey: string, action: RemoteNodeAdmin, signal: AbortSignal) =>
     this.withRemoteNode(radioKey, nodeKey, signal, async (link, { publicKey, type }, attempt, active) => {
-      if (attempt.remoteAccess?.get(publicKey)?.role !== 'admin') throw new Error('Sign in as an administrator before changing node settings.')
+      if (attempt.remoteAccess?.get(publicKey)?.role !== 'admin') throw new Error('Sign in as an administrator before managing this node.')
       const { remoteNodeAdminText, sendRemoteNodeAdmin } = await import('./remote-nodes.ts')
       const text = remoteNodeAdminText(action, type)
       active.throwIfAborted()

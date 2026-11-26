@@ -236,9 +236,10 @@ Browser data clearing or eviction can remove saved history.
 ## Room servers and sensors
 
 To join a room, select its saved contact in **Chats** and use **Room access**.
-Leave the password empty to request access already granted to your radio. The
-server reports whether the current connection has read-only, posting, or
-administrator access. Reconnect and sign in again to refresh that access.
+Leave the password empty to request access already granted to your radio. Room
+settings can also allow new clients to sign in with a blank password. The server
+reports whether the current connection has read-only, posting, or administrator
+access. Reconnect and sign in again to refresh that access.
 Room posts can contain up to 150 UTF-8 bytes. A timed-out or canceled login
 that the companion queued blocks another login to that node on the current
 connection. The firmware matches replies by key prefix. Even after connecting
@@ -253,12 +254,18 @@ conversation with a label and stay quiet in browser notifications.
 
 In **Contacts**, sign in to a room server to request its status. Administrators
 can read reported access entries, change a client's permissions, set the name,
-control read-only entry, or post an announcement. The room firmware reports
-administrator entries in its access list. For sensors, **Sensor telemetry** shows
-current readings and **Request sensor history** asks for the selected time window.
+read or change automatic read-only entry, or post an announcement. When enabled,
+an unrecognized password can grant read-only access. Disabling it does not
+revoke existing access-list entries; known clients may still sign in with a
+blank password. A blank room password may still grant posting access. The room
+firmware reports administrator entries in its access list. For sensors,
+**Sensor telemetry** shows current readings and **Request sensor history** asks
+for the selected time window.
 Sensor administrators can also set low- and high-priority alert permissions for
-a client. Commands report when the radio queues them. Sync to read the node's
-reply. These workflows were exercised with simulated radios.
+a client. Commands report when the radio queues them, not when the node executes
+them. Sync to read replies in Chats; these replies are not matched to commands
+and may arrive late. Companion firmware v1.11 and earlier may cause CLI commands
+to be ignored. These workflows were exercised with simulated radios.
 [Room-server firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/simple_room_server/MyMesh.cpp) ·
 [Sensor firmware](https://github.com/meshcore-dev/MeshCore/blob/main/examples/simple_sensor/SensorMesh.cpp)
 
@@ -495,8 +502,20 @@ one. The reported role is not a guarantee of current authorization.
 
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
-confirm a flood or zero-hop advertisement, or change advertisement intervals
-and owner information with confirmation. Owner information can be requested
+confirm a flood or zero-hop advertisement, or change advertisement intervals,
+owner information, repeater name, stored position, and packet forwarding with confirmation.
+Use `get repeat` to check forwarding before changing it. Disabling forwarding
+can disrupt mesh routes and some firmware also stops responding to discovery
+requests. Position edits change one coordinate at a time; current values can be
+read with `get lat` and `get lon`.
+Name changes do not change the public key or send an advertisement. Read the
+stored name before replacing it; names are 1 to 31 UTF-8 bytes without leading
+or trailing spaces, control characters, or `[]/\:,?*`. An advertisement with
+location may show a shorter name.
+Advertisements use stored coordinates only with GPS advert policy `prefs`;
+`none` omits location and `share` uses sensor coordinates. Use the explicit
+`gps advert` query to check the policy; some firmware builds do not support it.
+Owner information can be requested
 over the mesh; do not put passwords or private data in it. Editing it requires
 repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line
 breaks. The edit field starts empty; use `get owner.info` to read the current
