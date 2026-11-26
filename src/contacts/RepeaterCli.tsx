@@ -408,13 +408,13 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
-      <summary>Change repeater power-saving mode</summary>
-      <p>When enabled, the repeater sleeps between radio transmissions and may be less responsive. Firmware support varies.
-        Read the current mode explicitly; sync each reply and check the reported state after changing it. Radio acceptance
-        alone does not confirm the command succeeded.</p>
+      <summary>Change repeater power-saving preference</summary>
+      <p>Depending on the board and firmware, enabling this preference may let the repeater sleep when idle and be less responsive.
+        An <code>on</code> reply reports the preference, not actual sleep; for example, Pico W repeater firmware v1.14.1 does not implement sleep.
+        Read the preference explicitly; sync each reply and check it after changing it. Radio acceptance alone does not confirm the command succeeded.</p>
       <div className="contact-actions">
         <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
-          onClick={() => void send('powersaving', 'Read repeater power-saving mode', false)}>Read power-saving mode</button>
+          onClick={() => void send('powersaving', 'Read repeater power-saving preference', false)}>Read power-saving preference</button>
         {powerSavingCommands.map((item) => (
           <button key={item.command} type="button" disabled={!ready || busy || pending || syncStatus.syncing}
             onClick={() => sendChoice(item)}>{item.description}</button>
@@ -526,6 +526,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
               F marks flood permission, ^ marks the home region, and * is the unscoped wildcard.</p>}
           {item.command.startsWith('region get ') && item.reply !== null &&
             <p className="contact-status">Firmware may match a prefix to a different region. Compare the returned name.</p>}
+          {item.command === 'powersaving' && item.reply !== null &&
+            <p className="contact-status">An on reply reports the preference, not actual sleep; behavior depends on the board and firmware.</p>}
           {item.command === 'neighbors' && item.reply !== null &&
             <NeighborReport reply={item.reply.text} syncedAt={item.reply.syncedAt} name={name} repeaterPosition={repeaterPosition}
               nodes={neighborNodes} onMap={onMap} />}
