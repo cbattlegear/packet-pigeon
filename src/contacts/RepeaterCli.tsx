@@ -84,6 +84,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     item.command === 'powersaving on' || item.command === 'powersaving off')
   const receiverGainCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set radio.rxgain on' || item.command === 'set radio.rxgain off')
+  const multiAckCommands = repeaterCliCommands.filter((item) =>
+    item.command === 'set multi.acks 1' || item.command === 'set multi.acks 0')
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -752,6 +754,23 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
+      <summary>Change extra direct ACK preference</summary>
+      <p>In repeater firmware v1.14.1, enabling this attempts to queue one extra multipart acknowledgement (ACK)
+        when forwarding an eligible direct ACK, and can delay the normal ACK. It can use more airtime; other nodes
+        may not support multipart ACKs, and delivery or improved reliability is not guaranteed. Already queued ACKs
+        are unaffected. Firmware support varies. Read the preference first, sync the reply, and read it again after
+        a change. A numeric reply reports the preference, not whether ACKs were sent or the preference was saved.
+        Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get multi.acks', 'Read extra direct ACK preference', false)}>Read extra direct ACK preference</button>
+        {multiAckCommands.map((item) => (
+          <button key={item.command} type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+            onClick={() => sendChoice(item)}>{item.description}</button>
+        ))}
+      </div>
+    </details>
+    <details>
       <summary>Change repeater power-saving preference</summary>
       <p>Depending on the board and firmware, enabling this preference may let the repeater sleep when idle and be less responsive.
         An <code>on</code> reply reports the preference, not actual sleep; for example, Pico W repeater firmware v1.14.1 does not implement sleep.
@@ -931,6 +950,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">A read-back reports the preference, not measured delay or successful persistence.</p>}
           {item.command === 'get agc.reset.interval' && item.reply !== null &&
             <p className="contact-status">A numeric read-back reports the preference, not whether a reset occurred or the preference was saved.</p>}
+          {item.command === 'get multi.acks' && item.reply !== null &&
+            <p className="contact-status">A numeric read-back reports the preference, not whether ACKs were sent or the preference was saved.</p>}
           {item.command === 'discover.neighbors' && item.reply !== null &&
             <p className="contact-status">An OK reply does not prove a broadcast occurred or that any neighbors replied.
               Discovery responses are unauthenticated and do not prove identity. Wait up to 60 seconds, then request neighbors

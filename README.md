@@ -708,6 +708,14 @@ timer can carry over after a change.
 Saving also sets a local advert interval below 60 minutes to zero; an already
 scheduled advert may still be sent. `OK` or matching read-back does not prove a
 reset occurred or the preference was saved.
+Administrators can read and confirm changes to the extra direct ACK preference.
+When enabled, repeater v1.14.1 attempts to queue one extra multipart ACK when
+forwarding an eligible direct ACK, and can delay the normal ACK. This can use more
+airtime; other nodes may not support multipart ACKs, and delivery or improved
+reliability is not guaranteed. Already queued ACKs are unaffected. Firmware
+support varies. An `OK` or numeric read-back does not prove ACKs were sent or
+the preference was saved. Saving also sets a local advert interval below 60
+minutes to zero; an already scheduled advert may still be sent.
 Owner information can be requested
 over the mesh; do not put passwords or private data in it. Editing it requires
 repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line
