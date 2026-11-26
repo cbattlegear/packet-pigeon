@@ -5,11 +5,32 @@ import {
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
   repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand, repeaterRemoveAccessCommand,
   repeaterGrantAdminCommand, repeaterLimitedAccessCommand, repeaterRemoveNeighborCommand,
-  compareRepeaterPublicKey, parseRepeaterNeighbors,
+  compareRepeaterPublicKey, parseRepeaterNeighbors, repeaterClockCommand,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
 const encoder = new TextEncoder()
+
+test('manual UTC clock setting validates calendar and firmware timestamp bounds', () => {
+  for (const [time, seconds] of [
+    ['1970-01-01T00:00:01', 1], ['2024-02-29T12:34', 1709210040],
+    ['2106-02-07T06:28:15', 4294967295],
+  ]) {
+    const action = repeaterClockCommand(time)
+    assert.equal(action.command, `time ${seconds}`)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /cannot be corrected backwards/)
+  }
+  for (const value of ['', '2023-02-29T12:00', '2024-02-30T12:00',
+    '2024-01-01T24:00', '2024-01-01T12:00Z', '1970-01-01T00:00:00',
+    '2106-02-07T06:28:16', '2024-01-01T12:00:00\n']) {
+    assert.throws(() => repeaterClockCommand(value), /valid UTC time/)
+  }
+  for (const command of ['time 0', 'time 01', 'time 4294967296', 'time -1',
+    'time 1 ', 'time 1\n', 'time 1\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
 
 test('CLI queries use the repeater text type and a tagged command', async () => {
   let command

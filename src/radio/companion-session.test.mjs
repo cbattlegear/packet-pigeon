@@ -745,6 +745,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 1`, true), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
+  await assert.rejects(send('time 1709210040', true), /administrator/)
   await assert.rejects(send('clear stats', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set name Relay', true), /administrator/)
@@ -896,6 +897,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   }
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 4`, true), /supported repeater CLI command/)
   await assert.rejects(send('clock sync'), /Confirm/)
+  await assert.rejects(send('time 1709210040'), /Confirm/)
   await assert.rejects(send('clear stats'), /Confirm/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
   await assert.rejects(send('set name Relay'), /Confirm/)
