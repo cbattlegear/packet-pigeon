@@ -30,6 +30,7 @@ type Props = {
   onPending: (pending: boolean) => void
   onAccessChange: () => void
   onNeighborChange: () => void
+  onStatsReset: () => void
   onReboot: (notice: string) => void
   neighborNodes: readonly PathNode[]
   repeaterPosition: Coordinates | null
@@ -100,7 +101,7 @@ const managementForms = {
   position: { title: 'Change stored position', terms: 'set lat set lon gps setloc gps advert location' },
 } as const
 
-export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onNeighborChange, onReboot,
+export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onNeighborChange, onStatsReset, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
   const ownerInfoId = useId()
   const [query, setQuery] = useState('')
@@ -196,6 +197,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     setError('')
     try {
       const result = await session.sendRepeaterCommand(radioKey, contactKey, route, command, confirmed, controller.signal)
+      if (command === 'clear stats') onStatsReset()
       if (command === 'reboot') {
         onReboot(`Reboot accepted by the radio (${result.route}), but execution is unverified. No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.`)
         return
@@ -217,6 +219,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         return
       }
       if (reason instanceof UncertainRepeaterCliError) {
+        if (command === 'clear stats') onStatsReset()
         const sentAt = Date.now()
         setNow(sentAt)
         setHistory((current) => [...current.slice(-99), {
@@ -582,6 +585,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       In v1.14.1, 1 means active and 0 inactive; null means the setting was not found. Other firmware may differ and replies may be stale.</p>}
     {selected === 'gps sync' && gpsClockSync && <p>{gpsClockSync.warning}</p>}
     {selected === 'gps setloc' && gpsSetLocation && <p>{gpsSetLocation.warning}</p>}
+    {selected === 'clear stats' && action && 'warning' in action && <p>{action.warning}</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
@@ -1156,6 +1160,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">An ok reply does not prove a fix or clock change. Read the clock separately; it may still change later.</p>}
           {item.command === 'gps setloc' && item.reply !== null &&
             <p className="contact-status">An ok reply does not prove a valid fix or persistence. Read both stored coordinates separately; firmware support varies.</p>}
+          {item.command === 'clear stats' && item.reply !== null &&
+            <p className="contact-status">An OK reply does not verify every effect. Request status separately; counters can increase immediately.</p>}
           {item.command === 'region' && item.reply !== null &&
             <p className="contact-status">The region tree may be truncated without an indication; it is not a complete inventory.
               F marks flood permission, ^ marks the home region, and * is the unscoped wildcard.</p>}

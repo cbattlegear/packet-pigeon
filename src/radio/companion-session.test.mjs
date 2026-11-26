@@ -741,6 +741,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 1`, true), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
+  await assert.rejects(send('clear stats', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
@@ -795,6 +796,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     total: 1, entries: [{ publicKey: 'dd'.repeat(32), secondsAgo: 42, snrDb: -5 }],
   })
   await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(send('clear stats', true), /administrator/)
   await assert.rejects(send('get public.key'), /administrator/)
   await assert.rejects(send('get role'), /administrator/)
   for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
@@ -880,6 +882,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   }
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 4`, true), /supported repeater CLI command/)
   await assert.rejects(send('clock sync'), /Confirm/)
+  await assert.rejects(send('clear stats'), /Confirm/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
   await assert.rejects(send('set name Relay'), /Confirm/)
   await assert.rejects(send('set lat 45'), /Confirm/)

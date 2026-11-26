@@ -14,6 +14,8 @@ export const repeaterCliCommands = [
   { command: 'clock', description: 'Read the repeater clock' },
   { command: 'clock sync', description: 'Sync repeater clock from the connected radio', confirm: true,
     warning: 'Check the radio clock in Settings first. The repeater cannot move its clock backwards; a clock set too far ahead may disrupt later commands. Older companion firmware can cause the repeater to ignore this request.' },
+  { command: 'clear stats', description: 'Reset repeater statistics', confirm: true,
+    warning: 'This irreversibly clears packet and duplicate counters and error flags. In repeater v1.14.1, uptime, cumulative airtime, transmit budget, signal readings and duplicate caches are not reset. Counters can increase immediately, including when the reply is sent. Firmware support varies. An OK reply does not verify every effect. Request status separately; a delayed reset may still arrive after a new status read.' },
   { command: 'neighbors', description: 'List recently heard neighbors' },
   { command: 'discover.neighbors', description: 'Discover nearby repeaters', confirm: true,
     warning: 'Supported by repeater firmware v1.14.1; support on other builds varies. This asks the repeater to broadcast a zero-hop discovery request; nearby repeaters may also transmit replies. It replaces any discovery already in progress. Replies may update the limited neighbor cache and evict older entries. Discovery responses are unauthenticated and do not prove identity. An OK reply does not prove a broadcast occurred or that any neighbors replied. Wait up to 60 seconds, then request neighbors separately; old entries may remain and the list can be incomplete.' },

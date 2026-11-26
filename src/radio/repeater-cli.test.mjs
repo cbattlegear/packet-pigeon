@@ -39,6 +39,18 @@ test('identity queries accept only exact commands and compare complete public-ke
   }
 })
 
+test('statistics reset requires confirmation and only accepts the exact command', () => {
+  const action = repeaterCliCommand('clear stats')
+  assert.equal(action.confirm, true)
+  assert.match(action.warning, /irreversibly clears packet and duplicate counters and error flags/)
+  assert.match(action.warning, /uptime, cumulative airtime, transmit budget/)
+  assert.match(action.warning, /Counters can increase immediately/)
+  assert.match(action.warning, /delayed reset may still arrive/)
+  for (const command of ['clear stats ', 'clear stats extra', 'clear stats\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('power diagnostic queries accept only exact read-only commands', () => {
   for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
     const action = repeaterCliCommand(command)
