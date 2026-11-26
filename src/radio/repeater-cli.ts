@@ -25,6 +25,8 @@ export const repeaterClockRebootWarning = 'Recovery action: repeater v1.14.1 att
 
 export const repeaterBridgeDelayWarning = 'Changing the delay can affect latency, packet loss, routes and remote access. In repeater v1.14.1 it schedules packets entering from the bridge for later mesh processing, not packets sent to the bridge. Already queued packets retain their scheduled time. Zero removes this added delay but does not guarantee immediate processing; packets can be dropped if the queue is full. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove actual timing or persistence. A delayed command may arrive later; firmware and build support vary.'
 
+export const repeaterBridgeChannelWarning = 'Changing the ESP-NOW channel can disconnect bridge peers, interrupt routes and prevent remote access. Verify peer settings, local regulations, device support and a local recovery method first; the accepted range does not guarantee a legal or supported channel. In repeater v1.14.1, a running bridge turns Wi-Fi off before attempting an immediate restart; a stopped bridge is not started. Restart or saving can fail. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove the channel was applied, a peer is connected, or the setting was saved. A delayed command may arrive later; firmware and build support vary.'
+
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
@@ -454,6 +456,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole bridge delay from 0 to 10000 milliseconds.')
     }
     return { command, description: 'Set bridge inbound delay', confirm: true as const, warning: repeaterBridgeDelayWarning }
+  }
+  const bridgeChannelPrefix = 'set bridge.channel '
+  if (command.startsWith(bridgeChannelPrefix)) {
+    const value = command.slice(bridgeChannelPrefix.length)
+    const match = /^(?:[1-9]|1[0-4])$/.exec(value)
+    if (!match || match[0] !== value) {
+      throw new Error('Enter a whole ESP-NOW bridge channel from 1 to 14.')
+    }
+    return { command, description: 'Set ESP-NOW bridge channel', confirm: true as const, warning: repeaterBridgeChannelWarning }
   }
   const interferencePrefix = 'set int.thresh '
   if (command.startsWith(interferencePrefix)) {

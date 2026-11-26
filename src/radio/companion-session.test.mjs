@@ -742,6 +742,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     await assert.rejects(send(command, true), /administrator/)
   }
   await assert.rejects(send('set bridge.delay 500', true), /administrator/)
+  await assert.rejects(send('set bridge.channel 6', true), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
@@ -826,6 +827,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     await assert.rejects(send(command, true), /administrator/)
   }
   await assert.rejects(send('set bridge.delay 500', true), /administrator/)
+  await assert.rejects(send('set bridge.channel 6', true), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
@@ -893,6 +895,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, command, true, signal()), /route changed/)
   }
   await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, 'set bridge.delay 500', true, signal()), /route changed/)
+  await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, 'set bridge.channel 6', true, signal()), /route changed/)
   contact[36] = 0x45
   for (const command of ['get guest.password', 'get bridge.secret', 'set bridge.enabled yes', 'set bridge.source logRx', 'password secret', 'reboot now',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
@@ -926,6 +929,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   }
   await assert.rejects(send('set bridge.delay 500'), /Confirm/)
   await assert.rejects(send('set bridge.delay 10001', true), /whole bridge delay/)
+  await assert.rejects(send('set bridge.channel 6'), /Confirm/)
+  await assert.rejects(send('set bridge.channel 15', true), /whole ESP-NOW bridge channel/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
   await assert.rejects(send('set name Relay'), /Confirm/)
   await assert.rejects(send('set lat 45'), /Confirm/)
@@ -1104,6 +1109,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const receiverGainFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(receiverGainFrame.slice(13))), `${receiverGain.tag}|set radio.rxgain on`)
   for (const [command, confirmed] of [['get bridge.delay', false], ['set bridge.delay 0', true], ['set bridge.delay 10000', true]]) {
+    const receipt = await send(command, confirmed)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
+  for (const [command, confirmed] of [['get bridge.channel', false], ['set bridge.channel 1', true], ['set bridge.channel 14', true]]) {
     const receipt = await send(command, confirmed)
     const frame = port.commands.filter(([code]) => code === 2).at(-1)
     assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)

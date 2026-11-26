@@ -625,8 +625,17 @@ packets retain their scheduled time, and zero does not guarantee immediate
 processing. A full queue can drop packets. Changing delay can affect latency,
 routes and remote access. The advert-save side effect also applies. A reply
 or matching preference does not prove actual timing or persistence; commands
-and replies may arrive late. Firmware and build support vary. Other bridge
-changes and secret queries are not offered.
+and replies may arrive late. Firmware and build support vary.
+The separately confirmed **Change ESP-NOW bridge channel** control accepts
+whole channels from 1 to 14. Check peer settings, local regulations, device
+support and local recovery first: an accepted value is not proof of legality
+or support, and a mismatch can disconnect the bridge and remote access. In
+v1.14.1, a running bridge turns Wi-Fi off before attempting an immediate restart;
+a stopped bridge is not started. Restart or saving can fail, and the same
+advert-save side effect applies. Replies or matching preference read-back do
+not prove application, peer connectivity or persistence. Commands and replies
+may arrive late, and firmware and build support vary. Other bridge changes and
+secret queries are not offered.
 Administrators can explicitly read and confirm changes to repeater radio
 preferences (frequency, bandwidth, spreading factor and coding rate). Check
 the board, local regulations, channel plan and recovery method first: changing
