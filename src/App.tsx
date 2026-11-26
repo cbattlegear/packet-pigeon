@@ -7,11 +7,11 @@ import { ChatPanel } from './chats/ChatPanel.tsx'
 import { ContactsPanel } from './contacts/ContactsPanel.tsx'
 import { DiscoveryPanel } from './discovery/DiscoveryPanel.tsx'
 import { ChannelsPanel } from './channels/ChannelsPanel.tsx'
-import { discoveryEntries, discoveryMapNodes } from './discovery/model.ts'
+import { discoveryEntries, discoveryMapNodes, discoveryPathNodes } from './discovery/model.ts'
 import { useRadioDiscoveries } from './discovery/use-radio-discoveries.ts'
 import { storedContact } from './integration/contact-record.ts'
-import { mapRadioContacts } from './map/nodes.ts'
-import type { Coordinates } from './map/nodes.ts'
+import { mapRadioContacts, readSavedMapNodes } from './map/nodes.ts'
+import type { Coordinates, MapNode, MapNodeData } from './map/nodes.ts'
 import './App.css'
 import { OfflineStatus } from './offline/OfflineStatus.tsx'
 import { PreferencesPanel } from './preferences/PreferencesPanel.tsx'
@@ -23,6 +23,9 @@ import { RxInspector } from './diagnostics/RxInspector.tsx'
 import { openRadioStorage, radioKeyFromPublicKey } from './storage/index.ts'
 import type { RadioKey } from './storage/index.ts'
 import { messageAlert } from './chats/notification.ts'
+import { TraceWorkspace } from './paths/TraceWorkspace.tsx'
+import type { MapPath } from './paths/model.ts'
+import { contactPosition, contactRole } from './contacts/model.ts'
 
 const session = new CompanionSession()
 const cache = new SessionCache(session)
@@ -104,6 +107,10 @@ function App() {
   const [discoveryMapRequest, setDiscoveryMapRequest] = useState(0)
   const [contactFocus, setContactFocus] = useState<{ position: Coordinates; terrain: boolean } | null>(null)
   const [sharePosition, setSharePosition] = useState<Coordinates | null>(null)
+  const [displayPath, setDisplayPath] = useState<MapPath | null>(null)
+  const [mapData, setMapData] = useState<MapNodeData>(() => ({ local: readSavedMapNodes(), public: [] }))
+  const [mapTrace, setMapTrace] = useState<MapNode[]>([])
+  const [mapTraceRequest, setMapTraceRequest] = useState(0)
   const [shareDialog, setShareDialog] = useState<{ kind: 'import' } | { kind: 'export'; link: string } | null>(null)
   const [setupError, setSetupError] = useState('')
   const mapVisible = isMapSection(activeSection)
@@ -113,7 +120,7 @@ function App() {
   const directStatus = useSyncExternalStore(directMessages.subscribe, directMessages.getSnapshot)
   const discoveryConnected = snapshot.phase === 'syncing' || snapshot.phase === 'ready'
   const discovery = useRadioDiscoveries(snapshot.device?.publicKey, discoveryConnected,
-    hasOpenedDiscovery || hasOpenedMap, cacheStatus.saving)
+    hasOpenedDiscovery || hasOpenedMap || hasOpenedDiagnostics || hasOpenedContacts, cacheStatus.saving)
   const selectDiscoveryRadio = discovery.selectRadio
   const clearRadioNavigation = useCallback(() => setRadioNavigation(null), [])
   const navigateRadioAlert = useCallback((key: RadioKey, section: 'Chats' | 'Discovery' | 'Contacts' | 'Channels', id?: string) => {
@@ -139,6 +146,15 @@ function App() {
   [discovery.data, discoveryConnected, radioContacts, snapshot.progress?.stage])
   const radioNodes = useMemo(() => [...mapRadioContacts(snapshot.contacts), ...discoveryMapNodes(adverts)],
     [snapshot.contacts, adverts])
+  const discoveredHops = useMemo(() => discoveryPathNodes(adverts), [adverts])
+  const pathNodes = useMemo(() => [
+    ...radioContacts.map(({ publicKey, name, details }) => ({
+      publicKey, name, position: contactPosition(details), role: contactRole(details?.type),
+    })),
+    ...(discovery.key === snapshot.device?.publicKey ? discoveredHops : []),
+  ], [discoveredHops, discovery.key, radioContacts, snapshot.device?.publicKey])
+  const mapPathNodes = useMemo(() => [...mapData.local, ...mapData.public], [mapData])
+  const knownPathNodes = useMemo(() => [...pathNodes, ...mapPathNodes], [pathNodes, mapPathNodes])
   const usbSupport = getWebSerialSupport()
   const bluetoothSupport = getWebBluetoothSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
@@ -279,6 +295,11 @@ function App() {
     return () => window.removeEventListener('beforeunload', warn)
   }, [messageStatus.syncing, messageStatus.pending, directStatus.activeId, directStatus.pending])
 
+  function showPathOnMap(path: MapPath) {
+    setDisplayPath(path)
+    window.location.hash = 'map'
+  }
+
   if (retention.checking) return <div role="status">Applying channel retention…</div>
 
   return (
@@ -394,12 +415,16 @@ function App() {
             mapPosition={sharePosition}
             observationSource={session}
             navigationRequest={navigationRequest} onActiveConversation={setActiveChat}
+            pathNodes={knownPathNodes} mapPathNodes={mapPathNodes} onPathMap={showPathOnMap}
             readChannelKey={(key, channel) => session.readChannelShareKey(key, channel.index, channel.name)} />
         </div>
         {hasOpenedDiagnostics && <div hidden={activeSection !== 'Diagnostics'}>
           <div className="section-pane">
             <div className="pane-heading"><h1>Diagnostics</h1></div>
-            <RxInspector snapshot={snapshot} session={session} prefs={settings.preferences} locale={settings.locale} />
+            <TraceWorkspace active={activeSection === 'Diagnostics'} snapshot={snapshot} session={session}
+              nodes={knownPathNodes} mapSelection={mapTrace} mapRequest={mapTraceRequest} onMap={showPathOnMap} />
+            <RxInspector snapshot={snapshot} session={session} prefs={settings.preferences} locale={settings.locale}
+              pathNodes={knownPathNodes} mapPathNodes={mapPathNodes} onMap={showPathOnMap} />
           </div>
         </div>}
         {activeSection === 'Settings' && (
@@ -450,6 +475,8 @@ function App() {
                 messageSyncing={messageStatus.syncing} messageSending={directStatus.activeId !== null}
                 onImport={() => setShareDialog({ kind: 'import' })}
                 onShare={(link) => setShareDialog({ kind: 'export', link })}
+                mapPathNodes={mapPathNodes} onPathMap={showPathOnMap}
+                discoveredHops={discovery.data ? discoveredHops : undefined} discoveredRadio={discovery.key}
                 onMap={(position, terrain) => {
                   setContactFocus({ position, terrain })
                   window.location.hash = terrain ? 'tools' : 'map'
@@ -463,6 +490,7 @@ function App() {
               <div className="pane-heading"><h1>Discovery</h1></div>
               <DiscoveryPanel view={discovery} entries={adverts} radioContacts={radioContacts}
                 connected={discoveryConnected} ready={snapshot.phase === 'ready'} usb={snapshot.transport === 'usb'}
+                mapPathNodes={mapPathNodes} onPathMap={showPathOnMap}
                 pending={cacheStatus.pending}
                 session={session} openMap={() => {
                   setDiscoveryMapRequest((value) => value + 1)
@@ -479,7 +507,14 @@ function App() {
               </div>
               <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
                 <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'}
+                  mapData={mapData} setMapData={setMapData}
                   contactFocus={contactFocus} discoveryRequest={discoveryMapRequest}
+                  displayPath={displayPath} clearPath={() => setDisplayPath(null)}
+                  traceSelection={mapTrace} changeTraceSelection={setMapTrace}
+                  reviewTrace={() => {
+                    setMapTraceRequest((value) => value + 1)
+                    window.location.hash = 'diagnostics'
+                  }}
                   onSharePosition={mapVisible ? (position) => {
                     setSharePosition(position)
                     window.location.hash = 'chats'

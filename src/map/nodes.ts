@@ -21,6 +21,17 @@ export type MapNode = {
   favorite: boolean
 }
 
+export type MapNodeData = { local: MapNode[]; public: MapNode[] }
+export const localNodesKey = 'packet-pigeon:map:local-nodes'
+
+export function readSavedMapNodes(): MapNode[] {
+  try {
+    return readImportNodes(JSON.parse(localStorage.getItem(localNodesKey) ?? '[]'))
+  } catch {
+    return []
+  }
+}
+
 export const publicMapUrl = 'https://map.meshcore.io/'
 export const publicSnapshotUrl = new URL('api/v1/nodes', publicMapUrl).href
 export const mercatorLatitude = 85.05112878

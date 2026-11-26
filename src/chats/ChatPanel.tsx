@@ -19,6 +19,9 @@ import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { conversations, correlateChannelObservations, matchingChannelReceipts, messageVisibility, oldestUnreadReceipt, receiptPathDescription, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import { channelMentionNames, channelMessageBody, channelReply, channelTextParts, insertChannelMention, isSelfMention, mentionableName } from './mentions.ts'
+import { PathDetails } from '../paths/PathDetails.tsx'
+import type { MapPath, PathNode } from '../paths/model.ts'
+import { contactPosition } from '../contacts/model.ts'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
@@ -35,6 +38,9 @@ type Props = {
   locale: string
   readChannelKey?: (radioKey: RadioKey, channel: StoredChannel) => Promise<string>
   observationSource?: ChannelObservationSource
+  pathNodes?: readonly PathNode[]
+  mapPathNodes?: readonly PathNode[]
+  onPathMap?: (path: MapPath) => void
   mapPosition?: Coordinates | null
   navigationRequest?: { key: RadioKey; id: string; sequence: number } | null
   onActiveConversation?: (key: RadioKey | null, id: string | null) => void
@@ -52,6 +58,8 @@ type ChatDisplay = {
   observationSource?: ChannelObservationSource
   canObserve: boolean
   regionNames: string[] | null
+  pathNodes: readonly PathNode[]
+  onPathMap?: (path: MapPath) => void
   mapPosition?: Coordinates | null
 }
 
@@ -60,7 +68,8 @@ function errorText(error: unknown) {
 }
 
 export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status, cacheSaving,
-  active, preferences, locale, readChannelKey, observationSource, mapPosition, navigationRequest, onActiveConversation }: Props) {
+  active, preferences, locale, readChannelKey, observationSource, mapPosition, navigationRequest, onActiveConversation,
+  pathNodes, mapPathNodes = [], onPathMap }: Props) {
   const live = (snapshot.phase === 'ready' || snapshot.phase === 'syncing') && snapshot.device
     ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
   const last = snapshot.device ? radioKeyFromPublicKey(snapshot.device.publicKey) : null
@@ -176,6 +185,10 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
             readChannelKey: canSync && live && readChannelKey ? (channel) => readChannelKey(live, channel) : undefined,
             observationSource, canObserve: Boolean(live && canSync && snapshot.transport === 'usb'), regionNames,
+            pathNodes: live && live === radioKey && pathNodes ? pathNodes : [
+              ...data.contacts.map(({ publicKey, name, details }) => ({ publicKey, name, position: contactPosition(details) })),
+              ...mapPathNodes,
+            ], onPathMap,
           }} />
       )}
     </div>
@@ -270,7 +283,7 @@ const noObservation = () => idleObservation
 
 function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted }: ConversationProps) {
   const { active, preferences, read, formatTime, ownContact, contacts, channels, readChannelKey, mapPosition,
-    observationSource, canObserve, regionNames } = display
+    observationSource, canObserve, regionNames, pathNodes, onPathMap } = display
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
   const [actionError, setActionError] = useState('')
   const [savingNotification, setSavingNotification] = useState(false)
@@ -476,6 +489,9 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       <div className="conversation-heading">
         <p>{conversation.title}</p>
         <span>{conversation.description}</span>
+        {preferences.pathMetadata && conversation.messages.some(({ receipt }) => receipt &&
+          receipt.pathLength !== 0xff && (receipt.pathLength & 63) > 0) &&
+          <span>Saved receipts report hop count and hash width. For full paths, review live channel observations or packets captured in <a href="#diagnostics">Diagnostics</a>.</span>}
         {isChannel && <span>Radio acceptance does not confirm delivery. Live packet matches are best effort.</span>}
         {conversation.id.startsWith('direct:') && <label>Browser alerts
           <select aria-label={`Browser alerts for ${conversation.title}`} value={muted ? 'muted' : 'all'}
@@ -559,7 +575,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                 </li>)}</ul>}
               </details>}
               {correlation && <RxObservationDetails correlation={correlation} outgoing={Boolean(message.channelOutgoing)}
-                preferences={preferences} formatTime={formatTime} />}
+                preferences={preferences} formatTime={formatTime} pathNodes={pathNodes} onPathMap={onPathMap} />}
               {preferences.pathMetadata && message.receipt && <ReceiptPath receipt={message.receipt} />}
               {preferences.regionMetadata && message.region && <p className="chat-meta">Region {message.region}</p>}
               {message.outgoing && (
@@ -669,9 +685,10 @@ function ChannelMessageText({ text, ownName }: { text: string; ownName: string |
   })
 }
 
-function RxObservationDetails({ correlation, outgoing, preferences, formatTime }: {
+function RxObservationDetails({ correlation, outgoing, preferences, formatTime, pathNodes, onPathMap }: {
   correlation: { entries: CapturedChannelObservation[]; matchingMessages: number }
   outgoing: boolean; preferences: AppPreferences; formatTime: ChatDisplay['formatTime']
+  pathNodes: readonly PathNode[]; onPathMap?: (path: MapPath) => void
 }) {
   const [open, setOpen] = useState(false)
   return <details className="chat-meta" onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -688,13 +705,15 @@ function RxObservationDetails({ correlation, outgoing, preferences, formatTime }
         <time dateTime={new Date(entry.receivedAt).toISOString()}>{formatTime(new Date(entry.receivedAt))}</time>
         {preferences.pathMetadata && <> · {routeLabel({ routeCode: entry.routeCode, typeCode: 5, version: 1 })}
           {' · '}{entry.pathHashes.length} {entry.routeCode >= 2 ? 'remaining' : 'traversed'} hop{entry.pathHashes.length === 1 ? '' : 's'}
-          {entry.pathHashes.length > 0 && <> · {entry.hashWidth}-byte hashes <code>{entry.pathHashes.join(', ')}</code></>}
+          {entry.pathHashes.length > 0 && <> · {entry.hashWidth}-byte hashes</>}
           {entry.snrDb !== null && <> · SNR {entry.snrDb} dB</>}
           {entry.rssiDbm !== null && <> · RSSI {entry.rssiDbm} dBm</>}
         </>}
         {preferences.regionMetadata && <> · {entry.region.kind === 'candidates'
           ? `Possible regions: ${entry.region.names.join(', ')}`
           : entry.region.kind === 'unscoped' ? 'Unscoped transport code' : 'Region unknown'}</>}
+        {preferences.pathMetadata && entry.pathHashes.length > 0 && entry.hashWidth !== null &&
+          <PathDetails title="Observed channel path" width={entry.hashWidth} hashes={entry.pathHashes} nodes={pathNodes} onMap={onPathMap} />}
       </li>)}</ul>
     </>}
   </details>

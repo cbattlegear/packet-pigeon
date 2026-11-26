@@ -27,6 +27,12 @@ export function discoveryPosition(entry: StoredDiscovery) {
   return entry.latitude === 0 && entry.longitude === 0 ? null : readCoordinates(entry.latitude, entry.longitude)
 }
 
+export function discoveryPathNodes(entries: readonly DiscoveryEntry[]) {
+  return entries.map((entry) => ({
+    publicKey: entry.publicKey, name: entry.displayName, position: discoveryPosition(entry), role: entry.role,
+  }))
+}
+
 export function discoveryMapNodes(entries: readonly DiscoveryEntry[]): MapNode[] {
   return entries.flatMap((entry) => {
     const position = discoveryPosition(entry)
