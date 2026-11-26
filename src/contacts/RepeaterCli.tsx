@@ -7,6 +7,7 @@ import {
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
   repeaterRegionRemoveCommand,
   repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
+  repeaterLimitedAccessCommand, repeaterLimitedAccessWarning,
   repeaterTransmitPowerCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -84,6 +85,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [guestPassword, setGuestPassword] = useState('')
   const [accessKey, setAccessKey] = useState('')
   const [adminAccessKey, setAdminAccessKey] = useState('')
+  const [limitedAccessKey, setLimitedAccessKey] = useState('')
+  const [limitedRole, setLimitedRole] = useState<'' | 'read-only' | 'read-write'>('')
   const [advertPolicy, setAdvertPolicy] = useState('')
   const powerSavingCommands = repeaterCliCommands.filter((item) =>
     item.command === 'powersaving on' || item.command === 'powersaving off')
@@ -436,6 +439,22 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }
       void send(command.command, `${command.description} for ${command.accessTarget}`, command.confirm, command.warning,
         command.command, () => { setAdminAccessKey(''); onAccessChange() })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid client public key.')
+    }
+  }
+
+  function submitLimitedAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      if (!limitedRole) throw new Error('Choose a supported non-admin role.')
+      const command = repeaterLimitedAccessCommand(limitedAccessKey, limitedRole)
+      if (command.accessTarget === radioKey || command.accessTarget === contactKey) {
+        throw new Error('Cannot change the connected radio or repeater access-list role.')
+      }
+      void send(command.command, `${command.description} for ${command.accessTarget}`, command.confirm, command.warning,
+        command.command, () => { setLimitedAccessKey(''); onAccessChange() })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid client public key.')
     }
@@ -856,6 +875,31 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
+      <summary>Set non-admin repeater client role</summary>
+      <p>Enter the client's full 64-character hexadecimal public key, not an access-list prefix.
+        The connected radio and repeater are not offered as targets.</p>
+      <p>{repeaterLimitedAccessWarning}</p>
+      <form className="contact-actions" onSubmit={submitLimitedAccess}>
+        <label>Client role full public key
+          <input type="text" required value={limitedAccessKey} autoComplete="off" spellCheck={false}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setLimitedAccessKey(event.currentTarget.value)} />
+        </label>
+        <label>Non-admin role
+          <select required value={limitedRole} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => {
+              const role = event.currentTarget.value
+              if (role === '' || role === 'read-only' || role === 'read-write') setLimitedRole(role)
+            }}>
+            <option value="">Choose a role</option>
+            <option value="read-only">Read-only (1)</option>
+            <option value="read-write">Read-write (2)</option>
+          </select>
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set client role</button>
+      </form>
+    </details>
+    <details>
       <summary>Grant repeater administrator access</summary>
       <p>Enter the client's full 64-character hexadecimal public key, not an access-list prefix.
         The connected radio and repeater are not offered as targets.</p>
@@ -993,7 +1037,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.command.startsWith('setperm ') && item.command.endsWith(' 0') && item.reply !== null &&
             <p className="contact-status">An OK reply does not verify persistence. Firmware v1.14.1 may misdirect the reply,
               and absence from the access list does not prove removal.</p>}
-          {item.command.startsWith('setperm ') && item.command.endsWith(' 3') && item.reply !== null &&
+          {item.command.startsWith('setperm ') && !item.command.endsWith(' 0') && item.reply !== null &&
             <p className="contact-status">An OK reply does not verify persistence. Adding an entry to a full table can evict
               another client, including an administrator; the access list can omit entries.</p>}
           {item.command === 'neighbors' && item.reply !== null &&

@@ -539,6 +539,19 @@ table is full. Saving is delayed and can fail; `OK` does not verify persistence,
 and the access list can omit entries. Granting access to the connected radio
 or repeater is not offered.
 
+Administrators can confirm a non-admin read-only (1) or read-write (2) role for
+another client's full public key. These generic ACL labels do not imply distinct
+repeater capabilities: v1.14.1 treats both as non-admin and they may permit
+more telemetry than guests; other firmware may differ. Verify the full key
+independently. The client can log in without a password while the entry remains.
+The operation replaces all permission bits and can demote an administrator, but
+does not change passwords; a client with the administrator password may regain
+admin access. As with administrator grants, a full table can evict another
+client, even the connected radio or an administrator, and may misdirect the
+reply; the reported login role may then be stale. Saving is delayed and can
+fail, and the access list can omit entries. Changing the connected radio or
+repeater's role is not offered.
+
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 which can map unique matches with saved positions as separate points rather

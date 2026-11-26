@@ -173,6 +173,25 @@ export function repeaterGrantAdminCommand(value: string) {
   }
 }
 
+export const repeaterLimitedAccessWarning = 'Read-only and read-write are generic ACL role names; repeater v1.14.1 treats both as non-admin and they do not imply distinct repeater capabilities. They may allow more telemetry than guest access; other firmware may differ. ' +
+  'Verify the complete public key independently; access-list prefixes can collide. The client can log in without the password while its entry remains. ' +
+  'This replaces all permission bits and can demote an administrator, but does not change passwords; a client with the administrator password may regain admin access. ' +
+  'On repeater firmware v1.14.1, adding a new entry to a full table can evict another client, even an administrator or the connected radio, and may misdirect the reply. ' +
+  'The reported login role may then be stale. Logging in again can also evict an entry if the table is full. ' +
+  'Saving is delayed and can fail; an OK reply does not verify persistence. The access list can omit entries, so it cannot prove the complete state.'
+
+export function repeaterLimitedAccessCommand(value: string, role: 'read-only' | 'read-write') {
+  if (role !== 'read-only' && role !== 'read-write') throw new Error('Choose a supported non-admin role.')
+  const accessTarget = contactPublicKey(value)
+  return {
+    command: `setperm ${accessTarget} ${role === 'read-only' ? 1 : 2}`,
+    description: `Set repeater client role to ${role}`,
+    confirm: true as const,
+    accessTarget,
+    warning: repeaterLimitedAccessWarning,
+  }
+}
+
 export function repeaterNameCommand(value: string) {
   return repeaterCliCommand(`set name ${value}`)
 }
@@ -255,6 +274,10 @@ export function repeaterCliCommand(command: string) {
   if (removeAccess && removeAccess[0] === command) return repeaterRemoveAccessCommand(removeAccess[1])
   const grantAdmin = /^setperm ([0-9a-f]{64}) 3$/i.exec(command)
   if (grantAdmin && grantAdmin[0] === command) return repeaterGrantAdminCommand(grantAdmin[1])
+  const limitedAccess = /^setperm ([0-9a-f]{64}) ([12])$/i.exec(command)
+  if (limitedAccess && limitedAccess[0] === command) {
+    return repeaterLimitedAccessCommand(limitedAccess[1], limitedAccess[2] === '1' ? 'read-only' : 'read-write')
+  }
   const homeRegionPrefix = 'region home '
   if (command.startsWith(homeRegionPrefix)) return repeaterHomeRegionCommand(command.slice(homeRegionPrefix.length))
   const regionPrefix = 'region get '

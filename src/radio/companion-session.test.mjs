@@ -718,6 +718,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 0`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /administrator/)
+  await assert.rejects(send(`setperm ${'dd'.repeat(32)} 1`, true), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set name Relay', true), /administrator/)
@@ -756,6 +757,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 0`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /administrator/)
+  await assert.rejects(send(`setperm ${'dd'.repeat(32)} 2`, true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
@@ -816,7 +818,12 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`), /Confirm/)
   await assert.rejects(send(`setperm ${key} 3`, true), /connected radio or repeater/)
   await assert.rejects(send(`setperm ${target.toUpperCase()} 3`, true), /connected radio or repeater/)
-  await assert.rejects(send(`setperm ${'dd'.repeat(32)} 2`, true), /supported repeater CLI command/)
+  for (const role of [1, 2]) {
+    await assert.rejects(send(`setperm ${'dd'.repeat(32)} ${role}`), /Confirm/)
+    await assert.rejects(send(`setperm ${key.toUpperCase()} ${role}`, true), /connected radio or repeater/)
+    await assert.rejects(send(`setperm ${target} ${role}`, true), /connected radio or repeater/)
+  }
+  await assert.rejects(send(`setperm ${'dd'.repeat(32)} 4`, true), /supported repeater CLI command/)
   await assert.rejects(send('clock sync'), /Confirm/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
   await assert.rejects(send('set name Relay'), /Confirm/)
@@ -878,6 +885,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   contact[36] = 0x46
   await assert.rejects(send('ver'), /route changed/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /route changed/)
+  await assert.rejects(send(`setperm ${'dd'.repeat(32)} 1`, true), /route changed/)
   contact[36] = 0x45
   duplicate = true
   await assert.rejects(send('ver'), /shares a response prefix/)
@@ -997,6 +1005,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const grant = await send(`setperm ${'dd'.repeat(32)} 3`, true)
   const grantFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(grantFrame.slice(13))), `${grant.tag}|setperm ${'dd'.repeat(32)} 3`)
+  for (const role of [1, 2]) {
+    const receipt = await send(`setperm ${'dd'.repeat(32)} ${role}`, true)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|setperm ${'dd'.repeat(32)} ${role}`)
+  }
 })
 
 test('confirmed reboot invalidates repeater access after acceptance or uncertain dispatch', async (t) => {
