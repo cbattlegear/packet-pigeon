@@ -11,6 +11,7 @@ import type { useRadioDiscoveries } from './use-radio-discoveries.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
 import { contactPosition } from '../contacts/model.ts'
+import { NoiseFloorMonitor } from './NoiseFloorMonitor.tsx'
 import '../contacts/contacts.css'
 
 type View = ReturnType<typeof useRadioDiscoveries>
@@ -21,6 +22,8 @@ type DiscoveryProps = {
   connected: boolean
   ready: boolean
   usb: boolean
+  active: boolean
+  firmware: number
   pending: number
   session: CompanionSession
   openMap: () => void
@@ -74,7 +77,7 @@ export function DiscoveryPanel(props: DiscoveryProps) {
 }
 
 function DiscoveryBrowser({
-  radioKey, view, entries, radioContacts, ready, usb, pending, session, onPathMap, mapPathNodes = [],
+  radioKey, view, entries, radioContacts, ready, usb, active, firmware, pending, session, onPathMap, mapPathNodes = [],
 }: DiscoveryProps & { radioKey: RadioKey }) {
   const [query, setQuery] = useState('')
   const [role, setRole] = useState(0)
@@ -178,6 +181,7 @@ function DiscoveryBrowser({
   return (
     <>
       <p>Connect over USB to record live adverts and read paths from the radio. Saved discovery history is available while connected over Bluetooth or disconnected.</p>
+      <NoiseFloorMonitor radioKey={radioKey} active={active} ready={ready} usb={usb} firmware={firmware} session={session} />
       <div className="contact-filters">
         <label>Search discovered nodes
           <input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />

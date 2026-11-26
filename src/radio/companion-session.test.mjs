@@ -110,6 +110,71 @@ function selfInfo() {
   return Uint8Array.of(5, 1, 0, 0, ...new Uint8Array(32).fill(0xab), ...new Uint8Array(22), ...encode('Pigeon'))
 }
 
+test('noise-floor reads are local, capability gated, and decode signed radio stats', async () => {
+  let version = 14
+  let reply = [24, 1, 0x85, 0xff, ...new Uint8Array(10)]
+  const port = new FixturePort(([code], serial) => {
+    if (code === 22) {
+      const info = deviceInfo()
+      info[1] = version
+      serial.emit(...info)
+    } else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) { serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0) }
+    else if (code === 56) serial.emit(...reply)
+    else assert.fail(`Unexpected command ${code}`)
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  const key = session.getSnapshot().device.publicKey
+  assert.equal(await session.noiseFloor(key), -123)
+  assert.deepEqual(port.commands.at(-1), [56, 1])
+  reply = [1, 1]
+  await assert.rejects(session.noiseFloor(key), { code: 'unsupported-firmware' })
+  await session.disconnect()
+
+  version = 7
+  const oldPort = new FixturePort(([code], serial) => {
+    if (code === 22) { const info = deviceInfo(); info[1] = version; serial.emit(...info) }
+    else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) { serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0) }
+    else assert.fail(`Unexpected command ${code}`)
+  })
+  const oldSession = sessionWith(oldPort)
+  await oldSession.connect()
+  await assert.rejects(oldSession.noiseFloor(key), { code: 'unsupported-firmware' })
+  assert.equal(oldPort.commands.some(([code]) => code === 56), false)
+  await oldSession.disconnect()
+})
+
+test('noise-floor reads reject malformed statistics without accepting a partial frame', async () => {
+  const port = new FixturePort(([code], serial) => {
+    if (code === 22) serial.emit(...deviceInfo())
+    else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) { serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0) }
+    else if (code === 56) serial.emit(24, 1, 0x85, 0xff)
+    else assert.fail(`Unexpected command ${code}`)
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  await assert.rejects(session.noiseFloor(session.getSnapshot().device.publicKey), { code: 'protocol' })
+  await session.disconnect()
+})
+
+test('a timed-out noise-floor command closes the link rather than misattributing a late reply', async () => {
+  const port = new FixturePort(([code], serial) => {
+    if (code === 22) serial.emit(...deviceInfo())
+    else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) { serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0) }
+    else if (code !== 56) assert.fail(`Unexpected command ${code}`)
+  })
+  const session = sessionWith(port, 40)
+  await session.connect()
+  await assert.rejects(session.noiseFloor(session.getSnapshot().device.publicKey), { code: 'timeout' })
+  await waitFor(() => session.getSnapshot().phase === 'error')
+  assert.equal(port.closed, true)
+  await session.disconnect()
+})
+
 function contactInfo() {
   const frame = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), 1, 2, 0xff, ...new Uint8Array(112))
   frame.set(encode('Contact'), 100)

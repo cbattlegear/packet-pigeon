@@ -17,7 +17,7 @@ import { decodeDirectSent, directMessageCommand, resetPathCommand } from './dire
 import type { DirectSendReceipt } from './direct-message.ts'
 import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort } from './web-bluetooth.ts'
 import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bluetooth.ts'
-import { readAdvertPath, readAutoAddPolicy, writeAutoAddPolicy } from './discovery-commands.ts'
+import { readAdvertPath, readAutoAddPolicy, readNoiseFloor, writeAutoAddPolicy } from './discovery-commands.ts'
 import type { AutoAddPolicy } from './discovery-commands.ts'
 import { channelName, makeChannelSecret, readChannelSlot, secretHex, writeChannelSlot } from './channel-commands.ts'
 import { channelMessageCommand } from './channel-message.ts'
@@ -422,6 +422,18 @@ export class CompanionSession {
 
   readonly getAutoAdd = (radioKey: string) => (
     this.runRadioCommand(radioKey, (link) => readAutoAddPolicy(link, this.snapshot.device!.contactMode))
+  )
+
+  readonly noiseFloor = (radioKey: string) => (
+    this.runRadioCommand(radioKey, (link) => {
+      if (this.connection?.kind !== 'usb') {
+        throw new CompanionError('unsupported-transport', 'Connect over USB to read radio statistics.')
+      }
+      if (this.snapshot.device!.capabilities.firmwareProtocolVersion < 8) {
+        throw new CompanionError('unsupported-firmware', 'Radio statistics require companion protocol v8 or newer.')
+      }
+      return readNoiseFloor(link)
+    })
   )
 
   readonly setAutoAdd = (radioKey: string, policy: AutoAddPolicy) => (
