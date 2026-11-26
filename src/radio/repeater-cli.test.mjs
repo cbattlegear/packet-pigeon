@@ -103,6 +103,18 @@ test('advertisement interval changes accept only supported exact values', () => 
   }
 })
 
+test('flood hop limits accept exact whole values and require confirmation', () => {
+  for (const kind of ['flood.max', 'flood.max.unscoped', 'flood.max.advert']) {
+    assert.equal(repeaterCliCommand(`get ${kind}`).command, `get ${kind}`)
+    for (const value of ['0', '1', '64']) {
+      assert.equal(repeaterCliCommand(`set ${kind} ${value}`).confirm, true)
+    }
+    for (const value of ['', '-1', '65', '256', '01', '1.0', '1e1', ' 1', '1 ', '1\n', '1\nreboot', '999999999999999999999']) {
+      assert.throws(() => repeaterCliCommand(`set ${kind} ${value}`), /flood hop limit|supported/)
+    }
+  }
+})
+
 test('CLI confirmation failures distinguish rejection from uncertain dispatch', async () => {
   const link = (reply) => ({ async request(_bytes, receive) { return receive(Uint8Array.of(...reply)).value } })
   await assert.rejects(sendRepeaterCli(link([1, 2]), key, 'ver', 'AA'), { code: 'device-error' })
