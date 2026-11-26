@@ -62,7 +62,9 @@ export function TraceWorkspace({ active, snapshot, session, nodes, mapSelection,
       parseTracePath(route, selectedWidth)
       pending.current = controller
       setRunning(true)
-      setResult({ trace: await session.tracePath(ready.publicKey, route, selectedWidth, controller.signal), width: selectedWidth })
+      const publicKeys = candidates.map(({ publicKey }) => publicKey)
+      const trace = await session.tracePath(ready.publicKey, route, selectedWidth, controller.signal, publicKeys)
+      setResult({ trace, width: selectedWidth })
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'The trace failed.')
     } finally {

@@ -549,7 +549,9 @@ export class CompanionSession {
     })
   }
 
-  readonly tracePath = async (radioKey: string, text: string, width: TraceHashWidth, signal: AbortSignal) => {
+  readonly tracePath = async (
+    radioKey: string, text: string, width: TraceHashWidth, signal: AbortSignal, knownPublicKeys: readonly string[] = [],
+  ) => {
     const hashes = parseTracePath(text, width)
     signal.throwIfAborted()
     return this.runRadioCommand(radioKey, async (link) => {
@@ -566,9 +568,11 @@ export class CompanionSession {
       try {
         const contacts = await this.readContacts(link)
         request.throwIfAborted()
+        const keys = [...new Set([...contacts.map(({ publicKey }) => publicKey), ...knownPublicKeys]
+          .map((key) => key.toLowerCase()))]
         for (const hash of hashes) {
-          if (contacts.filter(({ publicKey }) => publicKey.startsWith(hash)).length > 1) {
-            throw new Error(`Trace hash ${hash} matches more than one saved radio.`)
+          if (keys.filter((key) => key.startsWith(hash)).length > 1) {
+            throw new Error(`Trace hash ${hash} matches more than one known radio.`)
           }
           if (radioKey.startsWith(hash)) throw new Error(`Trace hash ${hash} matches the connected radio.`)
         }

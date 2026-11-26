@@ -61,6 +61,13 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
 
   await page.goto(server.resolvedUrls.local[0] + '#map')
   await page.getByRole('button', { name: 'Connect USB' }).click()
+  await page.getByText('Node data and public map', { exact: true }).click()
+  await page.getByLabel('Import local or discovered nodes').setInputFiles({
+    name: 'unselected-map-node.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify([{ publicKey: 'bc01ffff'.padEnd(64, '1'), name: 'Unselected collision',
+      role: 2, position: { lat: 39, lon: -90 } }])),
+  })
+  await page.getByText('1 nodes loaded.', { exact: true }).waitFor()
   const nodes = page.locator('.map-node-list')
   for (const name of ['Relay A', 'Relay B']) {
     await nodes.getByRole('button', { name: new RegExp(name) }).click()
@@ -77,24 +84,30 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
   await audible.check()
   assert(await send.isDisabled())
   await width.selectOption('2')
+  await page.getByText(/These hashes match multiple known nodes or the connected radio: bc01/).waitFor()
+  await audible.check()
+  assert(await send.isDisabled())
+  assert.deepEqual(await page.evaluate(() => window.traces), [])
+  await width.selectOption('4')
   assert(await send.isDisabled())
   await audible.check()
   await send.click()
   const result = page.getByRole('region', { name: 'Trace result' })
   await result.getByText(/Return SNR 8 dB/).waitFor()
   await result.getByText(/Relay B.*-1 dB.*85.2 km/).waitFor()
-  assert.deepEqual(await page.evaluate(() => window.traces), [[0xbc, 1, 0xbc, 2]])
+  const mapTrace = [0xbc, 1, 0x11, 0x11, 0xbc, 2, 0x11, 0x11]
+  assert.deepEqual(await page.evaluate(() => window.traces), [mapTrace])
   await result.getByRole('button', { name: 'Copy reverse path' }).click()
-  assert.equal(await page.evaluate(() => window.copiedPath), 'bc02,bc01')
+  assert.equal(await page.evaluate(() => window.copiedPath), 'bc021111,bc011111')
   await result.getByRole('button', { name: 'Show path on map' }).click()
   await page.getByRole('region', { name: 'Displayed route' }).getByText('Relay A', { exact: true }).waitFor()
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Diagnostics' }).click()
   await page.getByRole('combobox', { name: 'Route source' }).selectOption('manual')
-  await page.getByRole('textbox', { name: 'Repeater hashes in order' }).fill('bc02')
+  await page.getByRole('textbox', { name: 'Repeater hashes in order' }).fill('bc021111')
   await audible.check()
   await send.click()
   await page.getByRole('alert').filter({ hasText: 'No trace reply was received before the deadline.' }).waitFor()
   await page.getByRole('button', { name: 'Reset trace' }).click()
   assert.equal(await page.getByRole('textbox', { name: 'Repeater hashes in order' }).inputValue(), '')
-  assert.deepEqual(await page.evaluate(() => window.traces), [[0xbc, 1, 0xbc, 2], [0xbc, 2]])
+  assert.deepEqual(await page.evaluate(() => window.traces), [mapTrace, [0xbc, 2, 0x11, 0x11]])
 })

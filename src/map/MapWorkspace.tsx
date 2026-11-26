@@ -4,9 +4,9 @@ import { MapCanvas } from './MapCanvas.tsx'
 import { TerrainTools } from './TerrainTools.tsx'
 import type { CoordinateText } from './TerrainTools.tsx'
 import {
-  filterNodes, mapPosition, publicMapUrl, publicSnapshotUrl, readCoordinates, readImportNodes, readPublicNodes, roles,
+  filterNodes, localNodesKey, mapPosition, publicMapUrl, publicSnapshotUrl, readCoordinates, readImportNodes, readPublicNodes, roles,
 } from './nodes.ts'
-import type { Coordinates, MapNode, NodeRole, NodeSource } from './nodes.ts'
+import type { Coordinates, MapNode, MapNodeData, NodeRole, NodeSource } from './nodes.ts'
 import { distanceBetween } from './terrain.ts'
 import type { CoverageLayer, ProfileResult } from './terrain.ts'
 import type { MapPath } from '../paths/model.ts'
@@ -14,18 +14,9 @@ import './map.css'
 
 const emptyCoordinate: CoordinateText = { lat: '', lon: '' }
 const emptyNodes: readonly MapNode[] = []
-const localNodesKey = 'packet-pigeon:map:local-nodes'
 const favoritesKey = 'packet-pigeon:map:favorites'
 const sourceTitles = { local: 'Local contacts', discovery: 'Discovered nodes', public: 'Public snapshot' }
 type PointToPick = 'start' | 'end'
-
-function savedNodes(): MapNode[] {
-  try {
-    return readImportNodes(JSON.parse(localStorage.getItem(localNodesKey) ?? '[]'))
-  } catch {
-    return []
-  }
-}
 
 function savedFavorites(): Record<string, boolean> {
   try {
@@ -47,6 +38,7 @@ function formatPosition(position: Coordinates) {
 export default function MapWorkspace({
   radioNodes = emptyNodes, radioPosition = null, showTerrain = false, contactFocus = null, discoveryRequest = 0, onSharePosition,
   displayPath = null, clearPath, traceSelection = emptyNodes, changeTraceSelection, reviewTrace,
+  mapData, setMapData,
 }: {
   radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null; showTerrain?: boolean
   contactFocus?: { position: Coordinates; terrain: boolean } | null
@@ -57,9 +49,10 @@ export default function MapWorkspace({
   traceSelection?: readonly MapNode[]
   changeTraceSelection?: (nodes: MapNode[]) => void
   reviewTrace?: () => void
+  mapData: MapNodeData
+  setMapData: (update: (previous: MapNodeData) => MapNodeData) => void
 }) {
-  const [localNodes, setLocalNodes] = useState(savedNodes)
-  const [publicNodes, setPublicNodes] = useState<MapNode[]>([])
+  const { local: localNodes, public: publicNodes } = mapData
   const [favorites, setFavorites] = useState(savedFavorites)
   const [source, setSource] = useState<NodeSource>('local')
   const [search, setSearch] = useState('')
@@ -188,10 +181,10 @@ export default function MapWorkspace({
       setSelection(null)
       setResultPage(0)
       if (publicSnapshot) {
-        setPublicNodes(imported)
+        setMapData((previous) => ({ ...previous, public: imported }))
         setSource('public')
       } else {
-        setLocalNodes(imported)
+        setMapData((previous) => ({ ...previous, local: imported }))
         setSource(imported.length && imported.every((node) => node.source === 'discovery') ? 'discovery' : 'local')
         try {
           localStorage.setItem(localNodesKey, JSON.stringify(imported))

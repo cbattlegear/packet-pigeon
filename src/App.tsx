@@ -10,8 +10,8 @@ import { ChannelsPanel } from './channels/ChannelsPanel.tsx'
 import { discoveryEntries, discoveryMapNodes, discoveryPosition } from './discovery/model.ts'
 import { useRadioDiscoveries } from './discovery/use-radio-discoveries.ts'
 import { storedContact } from './integration/contact-record.ts'
-import { mapRadioContacts } from './map/nodes.ts'
-import type { Coordinates, MapNode } from './map/nodes.ts'
+import { mapRadioContacts, readSavedMapNodes } from './map/nodes.ts'
+import type { Coordinates, MapNode, MapNodeData } from './map/nodes.ts'
 import './App.css'
 import { OfflineStatus } from './offline/OfflineStatus.tsx'
 import { PreferencesPanel } from './preferences/PreferencesPanel.tsx'
@@ -94,6 +94,7 @@ function App() {
   const [contactFocus, setContactFocus] = useState<{ position: Coordinates; terrain: boolean } | null>(null)
   const [sharePosition, setSharePosition] = useState<Coordinates | null>(null)
   const [displayPath, setDisplayPath] = useState<MapPath | null>(null)
+  const [mapData, setMapData] = useState<MapNodeData>(() => ({ local: readSavedMapNodes(), public: [] }))
   const [mapTrace, setMapTrace] = useState<MapNode[]>([])
   const [mapTraceRequest, setMapTraceRequest] = useState(0)
   const [shareDialog, setShareDialog] = useState<{ kind: 'import' } | { kind: 'export'; link: string } | null>(null)
@@ -120,6 +121,7 @@ function App() {
       publicKey: entry.publicKey, name: entry.displayName, position: discoveryPosition(entry), role: entry.role,
     })) : []),
   ], [adverts, discovery.key, radioContacts, snapshot.device?.publicKey])
+  const traceNodes = useMemo(() => [...pathNodes, ...mapData.local, ...mapData.public], [pathNodes, mapData])
   const usbSupport = getWebSerialSupport()
   const bluetoothSupport = getWebBluetoothSupport()
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
@@ -308,7 +310,7 @@ function App() {
           <div className="section-pane">
             <div className="pane-heading"><h1>Diagnostics</h1></div>
             <TraceWorkspace active={activeSection === 'Diagnostics'} snapshot={snapshot} session={session}
-              nodes={pathNodes} mapSelection={mapTrace} mapRequest={mapTraceRequest} onMap={showPathOnMap} />
+              nodes={traceNodes} mapSelection={mapTrace} mapRequest={mapTraceRequest} onMap={showPathOnMap} />
             <RxInspector snapshot={snapshot} session={session} prefs={settings.preferences} locale={settings.locale}
               pathNodes={pathNodes} onMap={showPathOnMap} />
           </div>
@@ -389,6 +391,7 @@ function App() {
               </div>
               <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
                 <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'}
+                  mapData={mapData} setMapData={setMapData}
                   contactFocus={contactFocus} discoveryRequest={discoveryMapRequest}
                   displayPath={displayPath} clearPath={() => setDisplayPath(null)}
                   traceSelection={mapTrace} changeTraceSelection={setMapTrace}
