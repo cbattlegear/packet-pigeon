@@ -1,4 +1,5 @@
 import { CompanionError } from './protocol.ts'
+import { maxCompanionFrameSize } from './transport.ts'
 
 export interface CompanionSerialPort extends EventTarget {
   readonly readable: ReadableStream<Uint8Array> | null
@@ -49,11 +50,10 @@ export async function choosePort(environment: WebSerialEnvironment) {
 }
 
 // MeshCore ArduinoSerialInterface: marker, uint16 little-endian length, payload.
-const maxFrameSize = 176
 
 export function encodeCommand(payload: Uint8Array) {
-  if (payload.length < 1 || payload.length > maxFrameSize) {
-    throw new CompanionError('protocol', 'Invalid USB serial command length.')
+  if (payload.length < 1 || payload.length > maxCompanionFrameSize) {
+    throw new CompanionError('protocol', 'Invalid companion command length.')
   }
   const packet = new Uint8Array(3 + payload.length)
   packet.set([0x3c, payload.length, 0])
@@ -79,7 +79,7 @@ export class SerialFrameDecoder {
       offset = start
       if (bytes.length - start < 3) break
       const length = bytes[start + 1] + bytes[start + 2] * 256
-      if (length === 0 || length > maxFrameSize) {
+      if (length === 0 || length > maxCompanionFrameSize) {
         offset++
         continue
       }

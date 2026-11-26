@@ -1,17 +1,19 @@
 import { routeLabel, typeLabel } from '../radio/rx-packet.ts'
 import type { RxPacket } from '../radio/rx-packet.ts'
+import { framedTransport } from '../radio/transport.ts'
+import type { CompanionTransport } from '../radio/transport.ts'
 
 export const maxRxPackets = 500
 
 export type CapturedPacket = {
   id: number
   time: number
-  transport: 'usb' | 'bluetooth'
+  transport: CompanionTransport
   packet: RxPacket
 }
 
 export function matchingChannelObservations(selected: CapturedPacket, entries: readonly CapturedPacket[]) {
-  const valid = ({ packet, transport }: CapturedPacket) => transport === 'usb'
+  const valid = ({ packet, transport }: CapturedPacket) => framedTransport(transport)
     && packet.status === 'decoded' && packet.header?.version === 1 && packet.header.typeCode === 5
     && packet.payload !== undefined && packet.payload.length >= 19 && (packet.payload.length - 3) % 16 === 0
     && packet.path?.hashes !== undefined

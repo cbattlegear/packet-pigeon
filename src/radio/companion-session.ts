@@ -18,6 +18,9 @@ import { decodeDirectSent, directMessageCommand, resetPathCommand } from './dire
 import type { DirectSendReceipt } from './direct-message.ts'
 import { browserBluetoothEnvironment, chooseBluetoothDevice, openBluetoothPort } from './web-bluetooth.ts'
 import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bluetooth.ts'
+import { getLanCompanionUrl } from './lan-bridge.ts'
+import { framedTransport } from './transport.ts'
+import type { CompanionTransport } from './transport.ts'
 import {
   readAdvertPath, readAutoAddPolicy, readNoiseFloor, requestRepeaterDetails, scanNearby, sendNearbyRequest, writeAutoAddPolicy,
 } from './discovery-commands.ts'
@@ -40,7 +43,7 @@ export interface SyncProgress {
 
 export interface CompanionSnapshot {
   readonly phase: 'idle' | 'choosing' | 'opening' | 'handshake' | 'syncing' | 'ready' | 'reconnecting' | 'closing' | 'error'
-  readonly transport: 'usb' | 'bluetooth' | null
+  readonly transport: CompanionTransport | null
   readonly error: CompanionError | null
   readonly device: CompanionDevice | null
   readonly contacts: readonly CompanionContact[]
@@ -74,6 +77,7 @@ interface Attempt {
 type SelectedTransport =
   | { kind: 'usb'; device: CompanionSerialPort }
   | { kind: 'bluetooth'; device: CompanionBluetoothDevice }
+  | { kind: 'lan'; url: string }
 
 interface LockProvider {
   request(name: string, options: { ifAvailable: true }, callback: (lock: unknown | null) => Promise<void>): Promise<void>
@@ -234,6 +238,12 @@ export class CompanionSession {
     return device ? { kind: 'bluetooth', device } : null
   })
 
+  readonly connectLan = () => this.connectUsing(async () => {
+    const url = getLanCompanionUrl()
+    if (!url) throw new CompanionError('unsupported-transport', 'Open Packet Pigeon from the local companion bridge.')
+    return { kind: 'lan', url }
+  })
+
   private async connectUsing(choose: () => Promise<SelectedTransport | null>) {
     if (this.attempt || this.ownership || this.snapshot.phase === 'closing' || this.snapshot.phase === 'reconnecting') return
     const generation = ++this.generation
@@ -279,8 +289,11 @@ export class CompanionSession {
       if (connection.kind === 'usb') {
         await connection.device.open({ baudRate: 115200 })
         port = connection.device
-      } else {
+      } else if (connection.kind === 'bluetooth') {
         port = await openBluetoothPort(connection.device)
+      } else {
+        const { openLanPort } = await import('./web-lan.ts')
+        port = await openLanPort(connection.url)
       }
     } catch (error) {
       if (error instanceof CompanionError && error.code === 'cleanup-failed') {
@@ -440,8 +453,8 @@ export class CompanionSession {
 
   readonly advertPath = (radioKey: string, contactKey: string) => (
     this.runRadioCommand(radioKey, (link) => {
-      if (this.connection?.kind !== 'usb') {
-        throw new CompanionError('unsupported-transport', 'Connect over USB to read an advert path from the radio.')
+      if (!framedTransport(this.snapshot.transport)) {
+        throw new CompanionError('unsupported-transport', 'Connect over USB or the local network to read an advert path from the radio.')
       }
       return readAdvertPath(link, contactKey)
     })
@@ -600,7 +613,7 @@ export class CompanionSession {
     const key = contactPublicKey(contactKey)
     let clockAdvanced = false
     await this.changeContacts(radioKey, async (link) => {
-      if (this.snapshot.transport !== 'usb') throw new Error('Connect over USB to edit radio paths or permissions.')
+      if (!framedTransport(this.snapshot.transport)) throw new Error('Connect over USB or the local network to edit radio paths or permissions.')
       const { frame, since } = await readContactForEdit(link, key)
       if (this.attempt?.link !== link || this.snapshot.phase !== 'ready') throw new Error('The radio disconnected before the edit.')
       await writeContactCommand(link, edit(frame))
@@ -701,7 +714,7 @@ export class CompanionSession {
     const hashes = parseTracePath(text, width)
     signal.throwIfAborted()
     return this.runRadioCommand(radioKey, async (link) => {
-      if (this.snapshot.transport !== 'usb') throw new Error('Connect over USB to trace a multi-hop path.')
+      if (!framedTransport(this.snapshot.transport)) throw new Error('Connect over USB or the local network to trace a multi-hop path.')
       const version = this.snapshot.device?.capabilities.firmwareProtocolVersion ?? 0
       if (!contactPingWidth(version, width)) throw new Error('This firmware does not support that trace hash width.')
       const abort = new AbortController()
@@ -1290,7 +1303,7 @@ export class CompanionSession {
 
   private async reconnectConnection(): Promise<SelectedTransport | undefined> {
     const current = this.connection
-    if (current?.kind === 'bluetooth') return current
+    if (current && current.kind !== 'usb') return current
     const serial = (this.environment ?? browserSerialEnvironment()).serial
     if (!serial?.getPorts || !current?.device.getInfo) {
       throw new CompanionError('reconnect-failed', 'Automatic reconnection is unavailable. Use Connect USB to reconnect.')
@@ -1316,7 +1329,8 @@ export class CompanionSession {
 
   private async reconnect(generation: number) {
     let lastError = this.snapshot.error
-    const action = this.connection?.kind === 'bluetooth' ? 'Connect Bluetooth' : 'Connect USB'
+    const kind = this.connection?.kind
+    const action = kind === 'lan' ? 'Connect local network' : kind === 'bluetooth' ? 'Connect Bluetooth' : 'Connect USB'
     try {
       await this.cleanup
       for (const delay of this.retryDelays) {

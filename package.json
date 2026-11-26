@@ -2,12 +2,14 @@
   "name": "packet-pigeon",
   "private": true,
   "version": "0.0.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "companion:lan": "node scripts/lan-companion.mjs",
     "test:browser": "node --test tests/browser/*.browser.mjs",
     "test:storage": "node --test src/storage/index.test.js"
   },
@@ -17,7 +19,8 @@
     "leaflet": "^1.9.4",
     "qrcode": "^1.5.4",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "ws": "8.23.0"
   },
   "devDependencies": {
     "@types/leaflet": "^1.9.23",

@@ -4,6 +4,7 @@ import type { MapNode, NodeRole } from '../map/nodes.ts'
 import type { CompanionSession, CompanionSnapshot } from '../radio/companion-session.ts'
 import { contactPingWidth, parseTracePath } from '../radio/contact-ping.ts'
 import type { PathTraceResult, TraceHashWidth } from '../radio/contact-ping.ts'
+import { framedTransport } from '../radio/transport.ts'
 import { PathDetails } from './PathDetails.tsx'
 import { resolvePath } from './model.ts'
 import type { MapPath, PathNode } from './model.ts'
@@ -34,7 +35,7 @@ export function TraceWorkspace({ active, snapshot, session, nodes, mapSelection,
   const route = source === 'map' ? mapSelection.map(({ publicKey }) => publicKey.slice(0, selectedWidth * 2)).join(',') : text
   const candidates = [...nodes, ...mapSelection]
   const repeaters = [...new Map(candidates.filter(({ role }) => role === 2).map((node) => [node.publicKey, node])).values()]
-  const ready = snapshot.phase === 'ready' && snapshot.transport === 'usb' && snapshot.device
+  const ready = snapshot.phase === 'ready' && framedTransport(snapshot.transport) && snapshot.device
   const audible = Boolean(ready && audibleFor?.radioKey === ready.publicKey &&
     audibleFor.route === route && audibleFor.width === selectedWidth)
   const resolved = route.trim() ? resolvePath(readValidHashes(route, selectedWidth), candidates) : []
@@ -76,7 +77,7 @@ export function TraceWorkspace({ active, snapshot, session, nodes, mapSelection,
   return <section className="trace-workspace" aria-labelledby="trace-heading">
     <h2 id="trace-heading">Path tracing</h2>
     <p>Send a trace through the repeaters in order. The final repeater must be directly audible so it can return the result.</p>
-    {!ready && <p>Connect a companion over USB and finish syncing to send a trace.</p>}
+    {!ready && <p>Connect a companion over USB or the local network and finish syncing to send a trace.</p>}
     <form onSubmit={(event) => void start(event)}>
       <fieldset disabled={running}>
         <legend>Trace route</legend>

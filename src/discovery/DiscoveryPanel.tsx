@@ -22,7 +22,7 @@ type DiscoveryProps = {
   radioContacts: readonly StoredContact[]
   connected: boolean
   ready: boolean
-  usb: boolean
+  framed: boolean
   active: boolean
   firmware: number
   pending: number
@@ -78,7 +78,7 @@ export function DiscoveryPanel(props: DiscoveryProps) {
 }
 
 function DiscoveryBrowser({
-  radioKey, view, entries, radioContacts, ready, usb, active, firmware, pending, session, onPathMap, mapPathNodes = [],
+  radioKey, view, entries, radioContacts, ready, framed, active, firmware, pending, session, onPathMap, mapPathNodes = [],
 }: DiscoveryProps & { radioKey: RadioKey }) {
   const [query, setQuery] = useState('')
   const [role, setRole] = useState(0)
@@ -181,10 +181,10 @@ function DiscoveryBrowser({
   const addable = picked.filter((entry) => !entry.alreadyAdded && entry.role)
   return (
     <>
-      <p>Connect over USB to record live adverts and read paths from the radio. Saved discovery history is available while connected over Bluetooth or disconnected.</p>
-      <ActiveDiscovery radioKey={radioKey} active={active} ready={ready} usb={usb} firmware={firmware}
+      <p>Connect over USB or the local network to record live adverts and read radio paths. Saved discovery history is available while connected over Bluetooth or disconnected.</p>
+      <ActiveDiscovery radioKey={radioKey} active={active} ready={ready} framed={framed} firmware={firmware}
         session={session} entries={entries} radioContacts={radioContacts} />
-      <NoiseFloorMonitor radioKey={radioKey} active={active} ready={ready} usb={usb} firmware={firmware} session={session} />
+      <NoiseFloorMonitor radioKey={radioKey} active={active} ready={ready} framed={framed} firmware={firmware} session={session} />
       <div className="contact-filters">
         <label>Search discovered nodes
           <input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
@@ -216,7 +216,7 @@ function DiscoveryBrowser({
         <button type="button" disabled={!picked.length} onClick={() => setSelected(new Set())}>Clear selection</button>
         <button type="button" disabled={!picked.length} onClick={() => download(picked)}>Export selected adverts</button>
         <button type="button" disabled={!ready || busy || !addable.length} onClick={() => void act(() => add(addable))}>Add selected to radio</button>
-        <button type="button" disabled={!ready || !usb || busy || !picked.length} onClick={() => void act(() => paths(picked))}>Load selected paths</button>
+        <button type="button" disabled={!ready || !framed || busy || !picked.length} onClick={() => void act(() => paths(picked))}>Load selected paths</button>
         <button type="button" disabled={busy || pending > 0 || !picked.length} onClick={() => void act(async () => {
           await view.update(radioKey, { remove: picked.map(({ publicKey }) => publicKey) })
           setSelected(new Set())
@@ -265,7 +265,7 @@ function DiscoveryBrowser({
                 publicKey: entry.publicKey, name: entry.name, position: contactPosition(entry.details),
               })), ...mapPathNodes]} onMap={onPathMap} />}
             <div className="contact-actions">
-              <button type="button" disabled={!ready || !usb || busy} onClick={() => void act(() => paths([detail]))}>Load advert path</button>
+              <button type="button" disabled={!ready || !framed || busy} onClick={() => void act(() => paths([detail]))}>Load advert path</button>
               <button type="button" disabled={!ready || busy || detail.alreadyAdded || !detail.role}
                 onClick={() => void act(() => add([detail]))}>Add discovered node</button>
             </div>

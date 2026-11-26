@@ -7,3 +7,4 @@ export type {
 export { getWebSerialSupport } from './web-serial.ts'
 export type { WebSerialSupport } from './web-serial.ts'
 export { getWebBluetoothSupport } from './web-bluetooth.ts'
+export { getLanCompanionUrl } from './lan-bridge.ts'

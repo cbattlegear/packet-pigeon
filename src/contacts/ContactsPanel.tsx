@@ -5,6 +5,7 @@ import { mapPosition, roles } from '../map/nodes.ts'
 import type { Coordinates, NodeRole } from '../map/nodes.ts'
 import { distanceBetween } from '../map/terrain.ts'
 import type { CompanionSnapshot } from '../radio/index.ts'
+import { framedTransport } from '../radio/transport.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { ContactPreferenceEdit, RadioData, RadioKey, StoredContact } from '../storage/index.ts'
 import { contactEntries, contactPosition, contactRole, contactRoute, roleLabel, visibleContacts } from './model.ts'
@@ -169,7 +170,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
           session={session}
           canWrite={liveKey === radioKey && snapshot.phase === 'ready'}
           firmware={lastSessionKey === radioKey ? snapshot.device?.capabilities.firmwareProtocolVersion ?? 0 : 0}
-          usb={snapshot.transport === 'usb'}
+          framed={framedTransport(snapshot.transport)}
           radioBusy={messageSyncing || messageSending}
           active={active}
           savePreference={savePreference}
@@ -191,7 +192,7 @@ type BrowserProps = {
   session: ContactsProps['session']
   canWrite: boolean
   firmware: number
-  usb: boolean
+  framed: boolean
   radioBusy: boolean
   active: boolean
   savePreference: (radioKey: RadioKey, change: ContactPreferenceEdit) => Promise<void>
@@ -201,7 +202,7 @@ type BrowserProps = {
   additionalPathNodes: readonly PathNode[]
 }
 
-function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite, firmware, usb, radioBusy, active, savePreference, onMap, onShare,
+function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite, firmware, framed, radioBusy, active, savePreference, onMap, onShare,
   onPathMap, additionalPathNodes }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
@@ -363,7 +364,7 @@ function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite,
               {detail.publicKey !== radioKey && <ContactTelemetry key={`telemetry:${detail.publicKey}`} active={active} session={session}
                 radioKey={radioKey} contactKey={detail.publicKey} ready={canWrite} firmware={firmware} radioBusy={busy || radioBusy} />}
               {detail.details && <ContactRadioActions key={detail.publicKey} session={session}
-                contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} usb={usb}
+                contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} framed={framed}
                 firmware={firmware} busy={busy || radioBusy} onMap={onPathMap} additionalPathNodes={additionalPathNodes} />}
             </>} />
         ) : <p className="contact-note">{visited.length ? 'Select a contact to see details.' : 'No contacts match.'}</p>}
