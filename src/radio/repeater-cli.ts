@@ -17,6 +17,7 @@ export const repeaterCliCommands = [
   { command: 'get flood.max', description: 'Read the overall flood hop limit' },
   { command: 'get flood.max.unscoped', description: 'Read the unscoped flood hop limit' },
   { command: 'get flood.max.advert', description: 'Read the flood advertisement hop limit' },
+  { command: 'get loop.detect', description: 'Read flood loop detection mode' },
   { command: 'set repeat on', description: 'Enable packet forwarding', confirm: true,
     warning: 'Forwarding is still subject to the repeater routing and region settings.' },
   { command: 'set repeat off', description: 'Disable packet forwarding', confirm: true,
@@ -147,6 +148,10 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole flood hop limit from 0 to 64.')
     }
     return { command, description: `Set ${floodLimit[1]} hop limit`, confirm: true as const }
+  }
+  const loopDetection = /^set loop\.detect (off|minimal|moderate|strict)$/.exec(command)
+  if (loopDetection && loopDetection[0] === command) {
+    return { command, description: `Set flood loop detection to ${loopDetection[1]}`, confirm: true as const }
   }
   throw new Error('Choose a supported repeater CLI command.')
 }
