@@ -19,6 +19,7 @@ export const repeaterCliCommands = [
   { command: 'get radio', description: 'Read radio parameters' },
   { command: 'get tx', description: 'Read stored transmit power preference' },
   { command: 'get repeat', description: 'Read forwarding mode' },
+  { command: 'get af', description: 'Read airtime factor' },
   { command: 'get txdelay', description: 'Read flood retransmission delay factor' },
   { command: 'get direct.txdelay', description: 'Read direct retransmission delay factor' },
   { command: 'get flood.max', description: 'Read the overall flood hop limit' },
@@ -235,6 +236,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a retransmission delay factor from 0 to 2 with up to 2 decimal places.')
     }
     return { command, description: `Set ${retransmitDelay[1] === 'txdelay' ? 'flood' : 'direct'} retransmission delay factor`, confirm: true as const }
+  }
+  const airtimePrefix = 'set af '
+  if (command.startsWith(airtimePrefix)) {
+    const value = command.slice(airtimePrefix.length)
+    const match = /^[0-9](?:\.[0-9]{1,2})?$/.exec(value)
+    if (!match || match[0] !== value || Number(value) > 9) {
+      throw new Error('Enter an airtime factor from 0 to 9 with up to 2 decimal places.')
+    }
+    return { command, description: 'Set airtime factor', confirm: true as const }
   }
   const loopDetection = /^set loop\.detect (off|minimal|moderate|strict)$/.exec(command)
   if (loopDetection && loopDetection[0] === command) {
