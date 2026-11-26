@@ -694,6 +694,9 @@ Use management controls for changes and do not enter passwords or private
 keys. The field clears on submission, and synced replies are saved with other
 messages. The frequency query reports the preference, not the active radio
 frequency or proof of persistence; v1.14.1 uses floating-point precision.
+Read-only entries in CLI history can be sent again explicitly; each send is a
+new mesh request, and replies appear after a manual message sync. Earlier requests or
+replies may still arrive. Management actions cannot be repeated from history.
 The confirmed `discover.neighbors` action asks the repeater to broadcast a
 zero-hop discovery request; nearby repeaters may also transmit replies. It
 replaces any discovery already in progress. Supported by repeater firmware

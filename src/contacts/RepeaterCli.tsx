@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import {
-  compareRepeaterPublicKey, parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterCliQuery, repeaterNameCommand, repeaterOwnerInfoCommand,
+  compareRepeaterPublicKey, parseRepeaterNeighbors, isRepeaterCliQuery, repeaterCliCommand, repeaterCliCommands, repeaterCliQuery, repeaterNameCommand, repeaterOwnerInfoCommand,
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
   repeaterRegionRemoveCommand,
   repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
@@ -1543,11 +1543,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {syncRequested && syncStatus.error && <p role="alert">{syncStatus.error}</p>}
     {error && <p role="alert">{error}</p>}
     <h4>CLI history</h4>
+    {history.length > 0 && <p>Sending a read-only query again creates a new request over the mesh.
+      An earlier request or reply may still arrive; replies require a separate message sync.</p>}
     {!history.length ? <p>No commands sent in this view.</p> : !matchingHistory.length ? <p>No history matches.</p> :
       <ol className="repeater-cli-history">
         {[...matchingHistory].reverse().map((item) => <li key={item.tag}>
           <strong><code>{item.command}</code></strong>
           <span> · {item.unconfirmed ? 'Send unconfirmed' : `Accepted by radio (${item.route})`}</span>
+          {isRepeaterCliQuery(item.command) && <div>
+            <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+              onClick={() => void send(item.command, item.description, false)}
+              aria-label={`Repeat query: ${item.command}`}>Repeat query</button>
+          </div>}
           {item.reply !== null ? <pre>{item.reply.text || '(empty reply)'}</pre> :
             <p>{now >= item.deadline ? 'No reply synced before the deadline. It may still arrive.' :
               'Waiting for a reply. Sync messages to check.'}</p>}

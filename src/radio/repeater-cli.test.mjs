@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  allocateRepeaterCliTag, repeaterCliCommand, repeaterCliQuery, repeaterCliCommands, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
+  allocateRepeaterCliTag, isRepeaterCliQuery, repeaterCliCommand, repeaterCliQuery, repeaterCliCommands, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
   repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand, repeaterRemoveAccessCommand,
   repeaterGrantAdminCommand, repeaterLimitedAccessCommand, repeaterRemoveNeighborCommand,
@@ -58,16 +58,21 @@ test('CLI queries use the repeater text type and a tagged command', async () => 
 })
 
 test('typed CLI queries accept only supported read-only commands', () => {
-  for (const command of ['get freq', 'ver', 'clock', 'sensor get gps', 'region get #North']) {
+  for (const command of ['region get *', 'region get #North', `region get ${'x'.repeat(30)}`,
+    ...repeaterCliCommands.filter((item) => !('confirm' in item)).map((item) => item.command)]) {
     assert.equal(repeaterCliQuery(command).command, command)
+    assert.equal(isRepeaterCliQuery(command), true)
   }
   for (const { command } of repeaterCliCommands.filter((item) => 'confirm' in item)) {
     assert.throws(() => repeaterCliQuery(command), /read-only CLI query/)
+    assert.equal(isRepeaterCliQuery(command), false)
   }
   for (const command of ['get guest.password', 'get prv.key', 'get bridge.secret', 'password fixture-secret',
-    'set guest.password fixture-secret', 'region put #North', 'region get #North\nreboot',
+    'set guest.password fixture-secret', 'region put #North', 'region get #North\nreboot', 'region get #',
+    'region get bad name', `region get ${'x'.repeat(31)}`, 'region get \ud800',
     'get freq ', 'get freq extra', 'gps', 'unknown']) {
     assert.throws(() => repeaterCliQuery(command), /read-only CLI query|region name or prefix/)
+    assert.equal(isRepeaterCliQuery(command), false)
   }
 })
 
