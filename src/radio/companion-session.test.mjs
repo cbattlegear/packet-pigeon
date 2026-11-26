@@ -614,6 +614,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('region denyf *', true), /administrator/)
   await assert.rejects(send('region save', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
+  await assert.rejects(send('gps advert prefs', true), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
   await assert.rejects(send('ver'), /administrator/)
@@ -628,6 +629,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('region get *'), /administrator/)
   await assert.rejects(send('region allowf *', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
+  await assert.rejects(send('gps advert share', true), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
   for (const command of ['get guest.password', 'set guest.password test', 'reboot now',
@@ -649,6 +651,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   for (const command of ['region allowf *', 'region denyf *', 'region save']) {
     await assert.rejects(send(command), /Confirm/)
   }
+  for (const policy of ['none', 'prefs', 'share']) {
+    await assert.rejects(send(`gps advert ${policy}`), /Confirm/)
+  }
+  await assert.rejects(send('gps advert share extra', true), /supported repeater CLI command/)
   await assert.rejects(send('region denyf North', true), /supported repeater CLI command/)
   await assert.rejects(send('set flood.max 256', true), /flood hop limit/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)

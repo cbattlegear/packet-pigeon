@@ -56,6 +56,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [regionName, setRegionName] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
+  const [advertPolicy, setAdvertPolicy] = useState('')
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -250,6 +251,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid advertised position.')
     }
+  }
+
+  function submitAdvertPolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    const command = repeaterCliCommands.find((item) => item.command === `gps advert ${advertPolicy}`)
+    if (!command) {
+      setError('Choose a supported GPS advert policy.')
+      return
+    }
+    sendChoice(command)
   }
 
   return <details>
@@ -449,9 +461,23 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       <p>Advertisements use these stored coordinates only when the GPS advert policy is <code>prefs</code>.
         Policy <code>none</code> omits location; <code>share</code> uses sensor coordinates.
         Read the current values with <code>get lat</code> and <code>get lon</code>. Changing one coordinate does not change the other.</p>
-      <p>Check the policy explicitly below. Some firmware builds do not support this query; an unsupported reply does not establish the policy.</p>
+      <p>Check the policy explicitly below. Some firmware builds do not support this command; an unsupported reply does not establish the policy.
+        Changes affect newly created advertisements but do not send one or recall already queued or transmitted locations. Sensor coordinates may be stale or zero;
+        selecting share does not enable GPS. Sync replies and read the policy again to check the change.</p>
       <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
         onClick={() => void send('gps advert', 'Read GPS advert policy', false)}>Read GPS advert policy</button>
+      <form className="contact-actions" onSubmit={submitAdvertPolicy}>
+        <label>New GPS advert policy
+          <select required value={advertPolicy} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setAdvertPolicy(event.currentTarget.value)}>
+            <option value="">Choose a policy</option>
+            <option value="none">None — omit location</option>
+            <option value="prefs">Prefs — stored coordinates</option>
+            <option value="share">Share — sensor coordinates</option>
+          </select>
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set GPS advert policy</button>
+      </form>
       <form className="repeater-position-form" onSubmit={(event) => submitPosition(event, 'lat', latitude)}>
         <label htmlFor={`${ownerInfoId}-latitude`}>Latitude (-90 to 90)</label>
         <input id={`${ownerInfoId}-latitude`} type="text" inputMode="decimal" required

@@ -86,8 +86,17 @@ test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   assert.equal(repeaterCliCommand('set repeat on').confirm, true)
   assert.equal(repeaterCliCommand('set repeat off').confirm, true)
   assert.equal(repeaterCliCommand('gps advert').command, 'gps advert')
-  assert.throws(() => repeaterCliCommand('gps advert prefs'), /supported/)
   assert.throws(() => repeaterCliCommand('time 9999999999'), /supported/)
+})
+
+test('GPS advert policy changes accept only exact supported values and require confirmation', () => {
+  for (const policy of ['none', 'prefs', 'share']) {
+    assert.equal(repeaterCliCommand(`gps advert ${policy}`).confirm, true)
+  }
+  for (const command of ['gps advert ', 'gps advert on', 'gps advert PREFS', 'gps advert prefs ',
+    'gps advert prefs extra', 'gps advert share\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported/)
+  }
 })
 
 test('advertisement interval changes accept only supported exact values', () => {

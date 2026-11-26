@@ -561,6 +561,12 @@ location may show a shorter name.
 Advertisements use stored coordinates only with GPS advert policy `prefs`;
 `none` omits location and `share` uses sensor coordinates. Use the explicit
 `gps advert` query to check the policy; some firmware builds do not support it.
+Administrators can confirm a policy change. Newly created advertisements may publish
+stored or sensor coordinates over the mesh; sensor coordinates may be stale or
+zero, and choosing `share` does not enable GPS. Policy changes do not send an
+advertisement or recall already queued or transmitted locations. Sync replies and read
+the policy again to check the change; radio acceptance alone does not prove it
+succeeded.
 Owner information can be requested
 over the mesh; do not put passwords or private data in it. Editing it requires
 repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line
