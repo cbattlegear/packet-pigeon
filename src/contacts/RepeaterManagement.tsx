@@ -27,6 +27,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
   const [login, setLogin] = useState<RepeaterLogin | null>(null)
   const [status, setStatus] = useState<RepeaterStatus | null>(null)
   const [statsResetSent, setStatsResetSent] = useState(false)
+  const [batteryCalibrationSent, setBatteryCalibrationSent] = useState(false)
   const [clients, setClients] = useState<{
     entries: Awaited<ReturnType<CompanionSession['readRepeaterAccessList']>>
     receivedAt: number
@@ -166,6 +167,8 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
     {login && <button type="button" disabled={!ready || busy || pending || cliPending} onClick={() => void run('status')}>Request status</button>}
     {statsResetSent && <p role="status">A statistics reset was sent or may have been sent. Earlier status was cleared;
       the reset may still arrive after a new status request.</p>}
+    {batteryCalibrationSent && <p role="status">A battery calibration change was sent or may have been sent. Earlier status was cleared;
+      the change may still arrive after a new status request.</p>}
     {login && <details>
       <summary>Inspect nearby repeater keys</summary>
       <p>Each page is an explicit request over the mesh, up to three entries ordered by most recently heard.
@@ -241,6 +244,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
       onAccessChange={() => setClients(null)}
       onNeighborChange={() => setNeighbors(null)}
       onStatsReset={() => { setStatus(null); setStatsResetSent(true) }}
+      onBatteryCalibration={() => { setStatus(null); setBatteryCalibrationSent(true) }}
       onReboot={(notice) => { setLogin(null); setStatus(null); setClients(null); setNeighbors(null); setRebootNotice(notice) }} />}
     {rebootNotice && <p role="status">{rebootNotice}</p>}
     {pending && <p role="status">Waiting for the repeater…

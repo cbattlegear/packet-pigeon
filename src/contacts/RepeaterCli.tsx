@@ -8,7 +8,8 @@ import {
   repeaterRegionRemoveCommand,
   repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
   repeaterLimitedAccessCommand, repeaterLimitedAccessWarning, repeaterRemoveNeighborCommand, repeaterRemoveNeighborWarning,
-  repeaterTransmitPowerCommand, UncertainRepeaterCliError,
+  repeaterTransmitPowerCommand, repeaterAdcMultiplierSafety, repeaterAdcMultiplierCaveats, repeaterAdcMultiplierWarning,
+  UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 import { mapPosition } from '../map/nodes.ts'
@@ -31,6 +32,7 @@ type Props = {
   onAccessChange: () => void
   onNeighborChange: () => void
   onStatsReset: () => void
+  onBatteryCalibration: () => void
   onReboot: (notice: string) => void
   neighborNodes: readonly PathNode[]
   repeaterPosition: Coordinates | null
@@ -85,6 +87,7 @@ const managementForms = {
   retransmission: { title: 'Change retransmission delays', terms: 'set txdelay set direct.txdelay get txdelay get direct.txdelay' },
   receiveDelay: { title: 'Change receive-delay base', terms: 'set rxdelay get rxdelay' },
   transmitPower: { title: 'Change repeater transmit power', terms: 'set tx get tx' },
+  batteryCalibration: { title: 'Calibrate battery voltage', terms: 'get adc.multiplier set adc.multiplier battery voltage' },
   receiverGain: { title: 'Change receiver boosted-gain preference', terms: 'set radio.rxgain get radio.rxgain' },
   agc: { title: 'Change AGC reset interval', terms: 'set agc.reset.interval get agc.reset.interval' },
   interference: { title: 'Change interference threshold', terms: 'set int.thresh get int.thresh' },
@@ -101,7 +104,7 @@ const managementForms = {
   position: { title: 'Change stored position', terms: 'set lat set lon gps setloc gps advert location' },
 } as const
 
-export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onNeighborChange, onStatsReset, onReboot,
+export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onNeighborChange, onStatsReset, onBatteryCalibration, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
   const ownerInfoId = useId()
   const [query, setQuery] = useState('')
@@ -117,6 +120,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [interferenceThreshold, setInterferenceThreshold] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
+  const [adcMultiplier, setAdcMultiplier] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
   const [pathHashMode, setPathHashMode] = useState('')
   const [regionName, setRegionName] = useState('')
@@ -198,6 +202,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     try {
       const result = await session.sendRepeaterCommand(radioKey, contactKey, route, command, confirmed, controller.signal)
       if (command === 'clear stats') onStatsReset()
+      if (command.startsWith('set adc.multiplier ')) onBatteryCalibration()
       if (command === 'reboot') {
         onReboot(`Reboot accepted by the radio (${result.route}), but execution is unverified. No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.`)
         return
@@ -220,6 +225,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }
       if (reason instanceof UncertainRepeaterCliError) {
         if (command === 'clear stats') onStatsReset()
+        if (command.startsWith('set adc.multiplier ')) onBatteryCalibration()
         const sentAt = Date.now()
         setNow(sentAt)
         setHistory((current) => [...current.slice(-99), {
@@ -313,6 +319,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       void send(command.command, `${command.description} to ${receiveDelay}`, true, receiveDelayWarning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid receive-delay base.')
+    }
+  }
+
+  function submitAdcMultiplier(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set adc.multiplier ${adcMultiplier}`)
+      void send(command.command, `${command.description} to ${adcMultiplier}`, true, repeaterAdcMultiplierWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid battery ADC multiplier.')
     }
   }
 
@@ -586,6 +603,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'gps sync' && gpsClockSync && <p>{gpsClockSync.warning}</p>}
     {selected === 'gps setloc' && gpsSetLocation && <p>{gpsSetLocation.warning}</p>}
     {selected === 'clear stats' && action && 'warning' in action && <p>{action.warning}</p>}
+    {selected === 'get adc.multiplier' && <p>In v1.14.1, a supported query returns the board-reported multiplier to three decimals,
+      not whether it is the default or an override. Board and firmware support varies.</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
@@ -833,6 +852,21 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set receive-delay base</button>
       </form>
+    </details>
+    <details data-cli-section="batteryCalibration">
+      <summary>{managementForms.batteryCalibration.title}</summary>
+      <p>{repeaterAdcMultiplierSafety}</p>
+      <form className="contact-actions" onSubmit={submitAdcMultiplier}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get adc.multiplier', 'Read battery ADC multiplier', false)}>Read battery ADC multiplier</button>
+        <label>New battery ADC multiplier (0–10, up to 3 decimals)
+          <input type="text" inputMode="decimal" required value={adcMultiplier}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setAdcMultiplier(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set battery ADC multiplier</button>
+      </form>
+      <p>{repeaterAdcMultiplierCaveats}</p>
     </details>
     <details data-cli-section="transmitPower">
       <summary>{managementForms.transmitPower.title}</summary>
@@ -1162,6 +1196,10 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">An ok reply does not prove a valid fix or persistence. Read both stored coordinates separately; firmware support varies.</p>}
           {item.command === 'clear stats' && item.reply !== null &&
             <p className="contact-status">An OK reply does not verify every effect. Request status separately; counters can increase immediately.</p>}
+          {item.command === 'get adc.multiplier' && item.reply !== null &&
+            <p className="contact-status">A read-back does not prove accurate voltage or persistence. In v1.14.1 it is rounded and does not identify a default or override.</p>}
+          {item.command.startsWith('set adc.multiplier ') && item.reply !== null &&
+            <p className="contact-status">An OK reply does not prove accurate voltage or persistence. Read the multiplier and battery status separately.</p>}
           {item.command === 'region' && item.reply !== null &&
             <p className="contact-status">The region tree may be truncated without an indication; it is not a complete inventory.
               F marks flood permission, ^ marks the home region, and * is the unscoped wildcard.</p>}

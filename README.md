@@ -751,6 +751,19 @@ increase immediately, including when the reply is sent. The previous status
 snapshot is cleared after an accepted or unconfirmed send; request status
 separately. A delayed reset may still arrive after a new status read. Firmware
 support varies, and an `OK` reply does not verify every effect.
+Administrators can read and confirm a battery ADC multiplier from 0 to 10 with
+up to three decimal places; zero requests the board default. Support varies.
+Incorrect calibration can misreport voltage and affect battery-dependent
+behavior, including power management on some boards. Check board guidance and
+compare with an independently measured voltage. In v1.14.1, a supported query
+returns the board-reported multiplier to three decimals, not whether it is the
+default or an override. An unsupported change resets the in-memory preference
+to zero, which a later save may persist. Saving also sets a local advert
+interval below 60 minutes to zero; an already scheduled advert may still be sent.
+An `OK` or matching read-back
+does not prove voltage accuracy or persistence. An accepted or unconfirmed
+change clears the previous status snapshot; explicitly request the multiplier
+and status again. A delayed change may still arrive after those reads.
 Administrators can also read and change the repeater power-saving preference.
 Depending on the board and firmware, enabling it may allow sleep when idle and
 affect responsiveness; disabling it may increase power consumption. An `on`
