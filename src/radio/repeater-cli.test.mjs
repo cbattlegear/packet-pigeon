@@ -249,7 +249,19 @@ test('GPS activity is explicit and receiver changes require confirmation', () =>
     assert.match(action.warning, /does not prove a fix, hardware state, or persistence/)
   }
   for (const command of ['gps', 'gps ', 'gps status', 'sensor get gps ', 'gps on ', 'gps off extra',
-    'gps on\nreboot', 'gps sync']) {
+    'gps on\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('GPS clock synchronization is confirmation-gated and accepts only the exact command', () => {
+  const action = repeaterCliCommand('gps sync')
+  assert.equal(action.confirm, true)
+  assert.match(action.warning, /does not enable GPS/)
+  assert.match(action.warning, /only acknowledges the request/)
+  assert.match(action.warning, /may change the clock later/)
+  assert.match(action.warning, /forwards or backwards/)
+  for (const command of ['gps sync ', 'gps sync now', 'gps sync\nreboot']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
   }
 })
