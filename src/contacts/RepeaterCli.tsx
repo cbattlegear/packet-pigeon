@@ -115,6 +115,7 @@ const managementForms = {
   multiAck: { title: 'Change extra direct ACK preference', terms: 'set multi.acks get multi.acks' },
   powerSaving: { title: 'Change repeater power-saving preference', terms: 'powersaving' },
   packetLog: { title: 'Manage repeater packet log', terms: 'log start stop erase logging packet diagnostics' },
+  bridge: { title: 'Manage repeater bridge', terms: 'get bridge.type get bridge.enabled set bridge.enabled on off' },
   advertInterval: { title: 'Change advertisement interval', terms: 'set advert.interval set flood.advert.interval' },
   removeAccess: { title: 'Remove repeater access-list entry', terms: 'setperm acl permissions' },
   limitedAccess: { title: 'Set non-admin repeater client role', terms: 'setperm acl permissions read-only read-write' },
@@ -171,6 +172,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     item.command === 'powersaving on' || item.command === 'powersaving off')
   const packetLogCommands = repeaterCliCommands.filter((item) =>
     item.command === 'log start' || item.command === 'log stop' || item.command === 'log erase')
+  const bridgeCommands = repeaterCliCommands.filter((item) =>
+    item.command === 'set bridge.enabled on' || item.command === 'set bridge.enabled off')
   const receiverGainCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set radio.rxgain on' || item.command === 'set radio.rxgain off')
   const gpsCommands = repeaterCliCommands.filter((item) => item.command === 'gps on' || item.command === 'gps off')
@@ -229,7 +232,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     const rebootFollowup = command === 'clkreboot'
       ? 'No reply is expected on repeater v1.14.1. Log in again when the repeater is available; a delayed clock reset and reboot may still arrive. Read and set the clock separately using a trusted time.'
       : 'No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.'
-    const target = reboots || command.startsWith('log ') ? `${name} (${contactKey.slice(0, 12)})` : name
+    const target = reboots || command.startsWith('log ') || command.startsWith('set bridge.enabled ')
+      ? `${name} (${contactKey.slice(0, 12)})` : name
     if (confirmed) {
       if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
       afterConfirmation?.()
@@ -686,6 +690,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'gps setloc' && gpsSetLocation && <p>{gpsSetLocation.warning}</p>}
     {selected === 'clear stats' && action && 'warning' in action && <p>{action.warning}</p>}
     {selected.startsWith('log ') && action && 'warning' in action && <p>{action.warning}</p>}
+    {selected.startsWith('set bridge.enabled ') && action && 'warning' in action && <p>{action.warning}</p>}
     {selected === 'clkreboot' && action && 'warning' in action && <p>{action.warning}</p>}
     {selected === 'get adc.multiplier' && <p>In v1.14.1, a supported query returns the board-reported multiplier to three decimals,
       not whether it is the default or an override. Board and firmware support varies.</p>}
@@ -1141,6 +1146,26 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         ))}
       </div>
     </details>
+    <details data-cli-section="bridge">
+      <summary>{managementForms.bridge.title}</summary>
+      <p>Enabling a bridge can expose mesh packets to an external interface and introduce packets from it into the mesh.
+        Disabling it can interrupt routes and remote access that depend on the bridge; queued packets can still be processed.
+        Check the interface, peer and local recovery method before changing it.</p>
+      <p>In repeater v1.14.1 the change attempts to start or stop the bridge immediately and save the preference.
+        Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent.
+        A reply or preference read-back does not prove the bridge is working, stopped, or saved. Commands and replies may
+        arrive late, and firmware and build support vary. Read the bridge type and enabled preference separately.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get bridge.type', 'Read compiled bridge type', false)}>Read compiled bridge type</button>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get bridge.enabled', 'Read bridge enabled preference', false)}>Read bridge enabled preference</button>
+        {bridgeCommands.map((item) => (
+          <button key={item.command} type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+            onClick={() => sendChoice(item)}>{item.description}</button>
+        ))}
+      </div>
+    </details>
     <details data-cli-section="advertInterval">
       <summary>{managementForms.advertInterval.title}</summary>
       <p>Changing an interval affects future transmissions. Use 0 to disable. Local intervals are even minutes
@@ -1371,6 +1396,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">{powerDiagnosticHelp(item.command)} Firmware and hardware support vary; replies may be delayed.</p>}
           {bridgeDiagnosticHelp(item.command) && item.reply !== null &&
             <p className="contact-status">{bridgeDiagnosticHelp(item.command)} Firmware and build support vary; replies may be delayed or unsupported.</p>}
+          {item.command.startsWith('set bridge.enabled ') && item.reply !== null &&
+            <p className="contact-status">A reply does not prove the bridge is working, stopped, or saved. Read the preference separately;
+              a delayed command may still change it later.</p>}
           {item.command === 'sensor get gps' && item.reply !== null &&
             <p className="contact-status">This is a reported activity setting, not proof of a current fix, receiver power state, or persistence.
               In v1.14.1, 1 means active and 0 inactive. A null or unsupported reply does not establish hardware support. Firmware and hardware support vary.</p>}

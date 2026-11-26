@@ -114,7 +114,7 @@ test('power diagnostic queries accept only exact read-only commands', () => {
   assert.throws(() => repeaterCliCommand('set pwrmgt.source battery'), /supported repeater CLI command/)
 })
 
-test('bridge diagnostics are exact read-only queries and exclude secrets and mutations', () => {
+test('bridge diagnostics are exact read-only queries and exclude secrets and unsupported mutations', () => {
   for (const command of ['get bridge.type', 'get bridge.enabled', 'get bridge.delay',
     'get bridge.source', 'get bridge.baud', 'get bridge.channel']) {
     const action = repeaterCliCommand(command)
@@ -124,8 +124,24 @@ test('bridge diagnostics are exact read-only queries and exclude secrets and mut
       assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
     }
   }
-  for (const command of ['get bridge.secret', 'set bridge.secret secret', 'set bridge.enabled on',
+  for (const command of ['get bridge.secret', 'set bridge.secret secret',
     'set bridge.delay 500', 'set bridge.source rx', 'set bridge.baud 9600', 'set bridge.channel 1']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('bridge enable and disable require confirmation and exact commands', () => {
+  for (const command of ['set bridge.enabled on', 'set bridge.enabled off']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /delayed command/i)
+    for (const invalid of [`${command} `, `${command} extra`, `${command}\nreboot`]) {
+      assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
+    }
+  }
+  assert.match(repeaterCliCommand('set bridge.enabled on').warning, /expose mesh packets/)
+  assert.match(repeaterCliCommand('set bridge.enabled off').warning, /interrupt routes/)
+  for (const command of ['set bridge.enabled', 'set bridge.enabled yes', 'set bridge.enabled OFF']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
   }
 })
