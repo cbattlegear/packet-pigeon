@@ -114,6 +114,7 @@ const managementForms = {
   interference: { title: 'Change interference threshold', terms: 'set int.thresh get int.thresh' },
   multiAck: { title: 'Change extra direct ACK preference', terms: 'set multi.acks get multi.acks' },
   powerSaving: { title: 'Change repeater power-saving preference', terms: 'powersaving' },
+  packetLog: { title: 'Manage repeater packet log', terms: 'log start stop erase logging packet diagnostics' },
   advertInterval: { title: 'Change advertisement interval', terms: 'set advert.interval set flood.advert.interval' },
   removeAccess: { title: 'Remove repeater access-list entry', terms: 'setperm acl permissions' },
   limitedAccess: { title: 'Set non-admin repeater client role', terms: 'setperm acl permissions read-only read-write' },
@@ -168,6 +169,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [advertPolicy, setAdvertPolicy] = useState('')
   const powerSavingCommands = repeaterCliCommands.filter((item) =>
     item.command === 'powersaving on' || item.command === 'powersaving off')
+  const packetLogCommands = repeaterCliCommands.filter((item) =>
+    item.command === 'log start' || item.command === 'log stop' || item.command === 'log erase')
   const receiverGainCommands = repeaterCliCommands.filter((item) =>
     item.command === 'set radio.rxgain on' || item.command === 'set radio.rxgain off')
   const gpsCommands = repeaterCliCommands.filter((item) => item.command === 'gps on' || item.command === 'gps off')
@@ -226,7 +229,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     const rebootFollowup = command === 'clkreboot'
       ? 'No reply is expected on repeater v1.14.1. Log in again when the repeater is available; a delayed clock reset and reboot may still arrive. Read and set the clock separately using a trusted time.'
       : 'No reply is expected. Log in again when the repeater is available; a delayed reboot may still arrive.'
-    const target = reboots ? `${name} (${contactKey.slice(0, 12)})` : name
+    const target = reboots || command.startsWith('log ') ? `${name} (${contactKey.slice(0, 12)})` : name
     if (confirmed) {
       if (!window.confirm(`${description} on ${target}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
       afterConfirmation?.()
@@ -682,6 +685,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {selected === 'gps sync' && gpsClockSync && <p>{gpsClockSync.warning}</p>}
     {selected === 'gps setloc' && gpsSetLocation && <p>{gpsSetLocation.warning}</p>}
     {selected === 'clear stats' && action && 'warning' in action && <p>{action.warning}</p>}
+    {selected.startsWith('log ') && action && 'warning' in action && <p>{action.warning}</p>}
     {selected === 'clkreboot' && action && 'warning' in action && <p>{action.warning}</p>}
     {selected === 'get adc.multiplier' && <p>In v1.14.1, a supported query returns the board-reported multiplier to three decimals,
       not whether it is the default or an override. Board and firmware support varies.</p>}
@@ -1122,6 +1126,21 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         ))}
       </div>
     </details>
+    <details data-cli-section="packetLog">
+      <summary>{managementForms.packetLog.title}</summary>
+      <p>These actions send separate commands and require confirmation. On repeater v1.14.1 the log stores packet metadata
+        on the repeater, including timestamps and some address prefixes; it can expose traffic patterns and consume storage.
+        Logging stops on reboot, but stopping does not erase the log. Erasing does not stop logging, and the file can be recreated.
+        Erasure is not guaranteed to be secure and does not remove backups. Firmware support varies.</p>
+      <p>This app cannot read the log or check whether logging is active. In v1.14.1 reading the log is serial-only;
+        writing or removing it can fail even when the command replies. Replies and commands may arrive late.</p>
+      <div className="contact-actions">
+        {packetLogCommands.map((item) => (
+          <button key={item.command} type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+            onClick={() => sendChoice(item)}>{item.description}</button>
+        ))}
+      </div>
+    </details>
     <details data-cli-section="advertInterval">
       <summary>{managementForms.advertInterval.title}</summary>
       <p>Changing an interval affects future transmissions. Use 0 to disable. Local intervals are even minutes
@@ -1363,6 +1382,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">An ok reply does not prove a valid fix or persistence. Read both stored coordinates separately; firmware support varies.</p>}
           {item.command === 'clear stats' && item.reply !== null &&
             <p className="contact-status">An OK reply does not verify every effect. Request status separately; counters can increase immediately.</p>}
+          {item.command.startsWith('log ') && item.reply !== null &&
+            <p className="contact-status">A reply does not verify the current logging state, saved records, or successful erasure.
+              A delayed command may still change the log later.</p>}
           {item.command === 'get adc.multiplier' && item.reply !== null &&
             <p className="contact-status">A read-back does not prove accurate voltage or persistence. In v1.14.1 it is rounded and does not identify a default or override.</p>}
           {item.command.startsWith('set adc.multiplier ') && item.reply !== null &&

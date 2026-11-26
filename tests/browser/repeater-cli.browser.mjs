@@ -2389,4 +2389,43 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await tempHistory.getByText('OK - temp params for 15 mins', { exact: true }).waitFor()
   await tempHistory.getByText(/does not prove the override applied/).waitFor()
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+
+  await search.fill('packet log')
+  const beforeLog = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  await page.getByRole('button', { name: 'Open form: Manage repeater packet log' }).click()
+  const logSection = page.locator('[data-cli-section="packetLog"]')
+  await logSection.getByText(/cannot read the log or check whether logging is active/).waitFor()
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 1280, height: 900 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeLog)
+  for (const [command, label, warning, reply] of [
+    ['log start', 'Start repeater packet logging', /expose traffic patterns and consume storage/, 'logging on'],
+    ['log stop', 'Stop repeater packet logging', /does not erase the existing log/, 'logging off'],
+    ['log erase', 'Erase repeater packet log', /does not stop logging/, 'log erased'],
+  ]) {
+    const button = logSection.getByRole('button', { name: label, exact: true })
+    const before = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+    const beforeSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+    page.once('dialog', (dialog) => {
+      assert.match(dialog.message(), /Fixture repeater \(bcbcbcbcbcbc\)/)
+      assert.match(dialog.message(), warning)
+      void dialog.dismiss()
+    })
+    await button.click()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), before)
+    if (command === 'log erase') await page.evaluate(() => { window.fixtureUnconfirmed = true })
+    page.once('dialog', (dialog) => dialog.accept())
+    await button.click()
+    assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+      window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), command)
+    const history = page.locator('.repeater-cli-history li').filter({ hasText: command }).first()
+    await history.getByText(command === 'log erase' ? /Send unconfirmed/ : /Accepted by radio/).waitFor()
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), before + 1)
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeSync)
+    await page.evaluate((value) => window.queueRepeaterReply(value), reply)
+    await sync.click()
+    await history.getByText(reply, { exact: true }).waitFor()
+    await history.getByText(/does not verify the current logging state/).waitFor()
+  }
 })

@@ -584,6 +584,15 @@ The `get public.key` query compares a recognized reply with the saved contact;
 a match alone does not prove identity, and replies can be delayed or
 misattributed. `get role` reports the firmware role, not the user's access
 level. Firmware support for either query may vary.
+**Manage repeater packet log** offers separately confirmed start, stop and
+erase commands. On repeater v1.14.1 the log can record timestamps, packet
+metadata and some address prefixes, revealing traffic patterns and consuming
+device storage. Starting can append to a previous log; stopping does not erase
+it, and erasing does not stop logging. The file may be recreated immediately.
+Logging stops on reboot. Removal can fail even when firmware replies, and it
+does not guarantee secure deletion or remove backups. This app cannot read the
+log or verify logging state; v1.14.1 permits log reading only over serial.
+Replies and commands can arrive late, and firmware behavior may vary.
 Read-only bridge diagnostics let an administrator explicitly query the
 compiled bridge type and enabled, delay, packet-source, RS-232 baud, or ESP-NOW
 channel preferences. In repeater v1.14.1, the type reflects the build, and the

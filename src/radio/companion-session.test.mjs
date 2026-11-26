@@ -747,6 +747,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('time 1709210040', true), /administrator/)
   await assert.rejects(send('clear stats', true), /administrator/)
+  for (const command of ['log start', 'log stop', 'log erase']) {
+    await assert.rejects(send(command, true), /administrator/)
+  }
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
@@ -875,6 +878,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const changedRoute = { pathLength: 1, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
   await assert.rejects(session.readRepeaterAccessList(key, target, changedRoute, signal()), /route changed/)
   await assert.rejects(session.readRepeaterNeighbors(key, target, changedRoute, 0, signal()), /route changed/)
+  for (const command of ['log start', 'log stop', 'log erase']) {
+    await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, command, true, signal()), /route changed/)
+  }
   contact[36] = 0x45
   for (const command of ['get guest.password', 'get bridge.secret', 'set bridge.enabled on', 'password secret', 'reboot now',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
@@ -900,6 +906,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('clock sync'), /Confirm/)
   await assert.rejects(send('time 1709210040'), /Confirm/)
   await assert.rejects(send('clear stats'), /Confirm/)
+  for (const command of ['log start', 'log stop', 'log erase']) {
+    await assert.rejects(send(command), /Confirm/)
+  }
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
   await assert.rejects(send('set name Relay'), /Confirm/)
   await assert.rejects(send('set lat 45'), /Confirm/)
