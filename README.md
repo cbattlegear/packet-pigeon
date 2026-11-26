@@ -513,6 +513,14 @@ Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 which can map unique matches with saved positions as separate points rather
 than a route. Unknown or ambiguous four-byte prefixes are not mapped.
+The confirmed `discover.neighbors` action asks the repeater to broadcast a
+zero-hop discovery request; nearby repeaters may also transmit replies. It
+replaces any discovery already in progress. Supported by repeater firmware
+v1.14.1; other builds may differ. Replies can update the limited neighbor cache
+and evict older entries. Discovery responses are unauthenticated and do not
+prove identity. An `OK` reply does not prove a broadcast occurred or that any
+neighbors replied. Wait up to 60 seconds, then request `neighbors` separately.
+Old entries may remain, and the reported list can be incomplete.
 **Inspect repeater regions** offers explicit read-only tree, home, default-scope,
 and individual region queries. The region-tree reply can be truncated silently
 and is not a complete inventory. `F` marks flood permission, `^` the home

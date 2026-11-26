@@ -12,6 +12,8 @@ export const repeaterCliCommands = [
   { command: 'clock sync', description: 'Sync repeater clock from the connected radio', confirm: true,
     warning: 'Check the radio clock in Settings first. The repeater cannot move its clock backwards; a clock set too far ahead may disrupt later commands. Older companion firmware can cause the repeater to ignore this request.' },
   { command: 'neighbors', description: 'List recently heard neighbors' },
+  { command: 'discover.neighbors', description: 'Discover nearby repeaters', confirm: true,
+    warning: 'Supported by repeater firmware v1.14.1; support on other builds varies. This asks the repeater to broadcast a zero-hop discovery request; nearby repeaters may also transmit replies. It replaces any discovery already in progress. Replies may update the limited neighbor cache and evict older entries. Discovery responses are unauthenticated and do not prove identity. An OK reply does not prove a broadcast occurred or that any neighbors replied. Wait up to 60 seconds, then request neighbors separately; old entries may remain and the list can be incomplete.' },
   { command: 'get name', description: 'Read the advertised name' },
   { command: 'powersaving', description: 'Read repeater power-saving preference' },
   { command: 'powersaving on', description: 'Enable repeater power-saving preference', confirm: true,

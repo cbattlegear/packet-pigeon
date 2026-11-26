@@ -619,6 +619,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(readAccess(), /administrator/)
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
+  await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set name Relay', true), /administrator/)
@@ -649,6 +650,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(readAccess(), /administrator/)
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
+  await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
@@ -694,6 +696,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     await assert.rejects(send(command, true), /supported repeater CLI command/)
   }
   await assert.rejects(send('advert'), /Confirm/)
+  await assert.rejects(send('discover.neighbors'), /Confirm/)
+  await assert.rejects(send('discover.neighbors extra', true), /supported repeater CLI command/)
   await assert.rejects(send('clock sync'), /Confirm/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
   await assert.rejects(send('set name Relay'), /Confirm/)
@@ -830,6 +834,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const receiverGain = await send('set radio.rxgain on', true)
   const receiverGainFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(receiverGainFrame.slice(13))), `${receiverGain.tag}|set radio.rxgain on`)
+  const discovery = await send('discover.neighbors', true)
+  const discoveryFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(discoveryFrame.slice(13))), `${discovery.tag}|discover.neighbors`)
 })
 
 test('confirmed reboot invalidates repeater access after acceptance or uncertain dispatch', async (t) => {
