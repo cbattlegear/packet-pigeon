@@ -725,6 +725,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set repeat off', true), /administrator/)
   await assert.rejects(send('set af 9', true), /administrator/)
   await assert.rejects(send('set txdelay 0.5', true), /administrator/)
+  await assert.rejects(send('set rxdelay 10', true), /administrator/)
   await assert.rejects(send('set tx 12', true), /administrator/)
   await assert.rejects(send('get radio.rxgain'), /administrator/)
   await assert.rejects(send('set radio.rxgain on', true), /administrator/)
@@ -758,6 +759,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set repeat on', true), /administrator/)
   await assert.rejects(send('set af 0', true), /administrator/)
   await assert.rejects(send('set direct.txdelay 0.5', true), /administrator/)
+  await assert.rejects(send('get rxdelay'), /administrator/)
   await assert.rejects(send('set tx 12', true), /administrator/)
   await assert.rejects(send('get radio.rxgain'), /administrator/)
   await assert.rejects(send('set radio.rxgain off', true), /administrator/)
@@ -816,6 +818,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set af 9'), /Confirm/)
   await assert.rejects(send('set txdelay 0'), /Confirm/)
   await assert.rejects(send('set direct.txdelay 2'), /Confirm/)
+  await assert.rejects(send('set rxdelay 10'), /Confirm/)
   await assert.rejects(send('set tx 12'), /Confirm/)
   await assert.rejects(send('set radio.rxgain on'), /Confirm/)
   await assert.rejects(send('set radio.rxgain off'), /Confirm/)
@@ -854,6 +857,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set af 1\nreboot', true), /airtime factor/)
   await assert.rejects(send('set txdelay 2.01', true), /retransmission delay factor/)
   await assert.rejects(send('set direct.txdelay 1\nreboot', true), /retransmission delay factor/)
+  await assert.rejects(send('set rxdelay 20.01', true), /receive-delay base/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
@@ -925,6 +929,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   assert.equal(new TextDecoder().decode(Uint8Array.from(txPowerFrame.slice(13))), `${txPower.tag}|set tx 14`)
   for (const command of ['set txdelay 0.5', 'set direct.txdelay 0.25']) {
     const receipt = await send(command, true)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
+  for (const [command, confirmed] of [['get rxdelay', false], ['set rxdelay 10.25', true]]) {
+    const receipt = await send(command, confirmed)
     const frame = port.commands.filter(([code]) => code === 2).at(-1)
     assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
   }

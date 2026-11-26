@@ -45,6 +45,11 @@ type HistoryEntry = {
 }
 
 const neighborTiming = 'Ages are seconds since heard when the repeater generated the reply; the reply may have been delayed before syncing.'
+const receiveDelayWarning = 'This experimental setting can affect flood processing, routing and remote access. ' +
+  'It is a base, not milliseconds. In repeater firmware v1.14.1, the delay depends on packet score and estimated airtime; direct packets are not deferred by this mechanism. ' +
+  'Already queued floods retain their scheduled time. ' +
+  'Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. ' +
+  'An OK reply or matching read-back does not prove persistence or actual timing. Other firmware may behave differently.'
 
 export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
@@ -57,6 +62,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [floodLimit, setFloodLimit] = useState('')
   const [retransmitKind, setRetransmitKind] = useState<'txdelay' | 'direct.txdelay'>('txdelay')
   const [retransmitDelay, setRetransmitDelay] = useState('')
+  const [receiveDelay, setReceiveDelay] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
@@ -231,6 +237,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         'Changing retransmission delays can affect collisions, latency and remote access. Zero removes this random delay, not all other delays. Sync the reply and read the selected factor again.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid retransmission delay factor.')
+    }
+  }
+
+  function submitReceiveDelay(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set rxdelay ${receiveDelay}`)
+      void send(command.command, `${command.description} to ${receiveDelay}`, true, receiveDelayWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid receive-delay base.')
     }
   }
 
@@ -652,6 +669,22 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
+      <summary>Change receive-delay base</summary>
+      <p>{receiveDelayWarning} A base of zero disables this delay calculation. Calculated delays below 50 ms
+        are processed immediately; larger delays are capped. This control accepts 0–20 with up to 2 decimal places.
+        Read the preference first, then sync the reply and read it again.</p>
+      <form className="contact-actions" onSubmit={submitReceiveDelay}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get rxdelay', 'Read receive-delay base', false)}>Read receive-delay base</button>
+        <label>New receive-delay base (0–20)
+          <input type="text" inputMode="decimal" required value={receiveDelay}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setReceiveDelay(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set receive-delay base</button>
+      </form>
+    </details>
+    <details>
       <summary>Change repeater transmit power</summary>
       <p>Read the stored preference first. Firmware documents a range of 1–22 dBm, but supported values vary by board.
         Check the repeater manual and local regulations; an external power amplifier can increase output, and excessive
@@ -862,6 +895,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.command === 'get radio.rxgain' && item.reply !== null &&
             <p className="contact-status">An on/off reply reports the current preference, not the applied radio setting or successful persistence.
               Some unsupported builds return radio parameters instead of a gain result.</p>}
+          {item.command === 'get rxdelay' && item.reply !== null &&
+            <p className="contact-status">A read-back reports the preference, not measured delay or successful persistence.</p>}
           {item.command === 'discover.neighbors' && item.reply !== null &&
             <p className="contact-status">An OK reply does not prove a broadcast occurred or that any neighbors replied.
               Discovery responses are unauthenticated and do not prove identity. Wait up to 60 seconds, then request neighbors
