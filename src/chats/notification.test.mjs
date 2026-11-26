@@ -51,3 +51,14 @@ test('direct mute follows the sender prefix when contact attribution changes', (
   assert.equal(messageAlert(withDirect, direct, ''), null)
   assert.equal(messageAlert({ ...withDirect, mutedDirectConversations: [] }, direct, '').conversationId, `direct:${key}`)
 })
+
+test('CLI replies do not create message notifications', () => {
+  const key = 'bc'.repeat(32)
+  const directReceipt = {
+    kind: 'direct-text', receiptId: 'cli', senderKeyPrefix: key.slice(0, 12), signatureHex: null,
+    textType: 1, senderTimestamp: 12, text: 'AB|> Relay', pathLength: 0, snrDb: null,
+  }
+  const entry = { id: 'cli', conversationId: `direct:${key.slice(0, 12)}`, sender: key.slice(0, 12),
+    timestamp: 12000, text: directReceipt.text, receipt: directReceipt }
+  assert.equal(messageAlert({ ...data, contacts: [{ publicKey: key, name: 'Relay' }], messages: [entry] }, entry, ''), null)
+})

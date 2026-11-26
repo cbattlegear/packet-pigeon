@@ -517,7 +517,7 @@ function App() {
           <div hidden={activeSection !== 'Contacts'}>
             <div className="section-pane">
               <div className="pane-heading"><h1>Contacts</h1><a href="#discovery">Browse discovered adverts</a></div>
-              <ContactsPanel snapshot={snapshot} session={session} cacheSaving={cacheStatus.saving}
+              <ContactsPanel snapshot={snapshot} session={session} messageSync={messageSync} cacheSaving={cacheStatus.saving}
                 active={activeSection === 'Contacts'} messageStatus={directStatus}
                 radioNavigation={radioNavigation?.section === 'Contacts' ? radioNavigation : null} onRadioNavigationHandled={clearRadioNavigation}
                 messageSyncing={messageStatus.syncing} messageSending={directStatus.activeId !== null}

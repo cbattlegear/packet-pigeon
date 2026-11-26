@@ -160,6 +160,23 @@
   color: var(--error);
 }
 
+.repeater-cli-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.repeater-cli-choices button {
+  text-align: left;
+}
+
+.repeater-cli-history pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 780px) {
   .contact-layout {
     grid-template-columns: minmax(0, 1fr);

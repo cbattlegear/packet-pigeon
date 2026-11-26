@@ -434,9 +434,21 @@ blocks further login and status requests to that repeater for the current connec
 reply cannot remove that block. Reconnect and log in again to retry. The
 firmware does not tag these replies, so even after
 reconnecting a delayed reply cannot be conclusively distinguished from a new
-one. The reported role is not a guarantee of current authorization. CLI, saved
-credentials, session resumption and repeater administration controls are not
-yet available.
+one. The reported role is not a guarantee of current authorization.
+
+Administrators can open **Administrator CLI** to search and send a limited set
+of read-only queries, or confirm a flood or zero-hop advertisement. Password,
+identity, and arbitrary commands are not supported. The radio's acceptance is
+not proof that the repeater executed a command. **Sync messages for replies**
+explicitly drains and saves the ordinary message queue, including unrelated
+messages; nothing is synced automatically. CLI replies are saved in Chats but
+do not generate message notifications. The searchable history in Contacts lasts
+only while that repeater remains selected. Reply tags are unique within the
+tab, but a delayed reply from an earlier browser session can still be mistaken
+for a new response. Commands are never retried automatically.
+
+Saved credentials, session resumption, broader CLI commands, and the remaining
+repeater administration controls are not yet available.
 With USB connected, enter hex hops or append saved repeaters. An empty
 route sends directly with zero hops. Clearing the saved route allows the
 firmware to use flood routing. Newer firmware supports two- and three-byte

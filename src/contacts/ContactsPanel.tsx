@@ -19,11 +19,13 @@ import type { MapPath, PathNode } from '../paths/model.ts'
 import { discoveryEntries, discoveryPathNodes } from '../discovery/model.ts'
 import { conversations, unreadReceipts } from '../chats/model.ts'
 import type { DirectStatus } from '../integration/direct-messages.ts'
+import type { RepeaterMessageSync } from './RepeaterCli.tsx'
 import './contacts.css'
 
 type ContactsProps = {
   snapshot: CompanionSnapshot
   session: ContactRadioSession & TelemetrySession
+  messageSync: RepeaterMessageSync
   cacheSaving: boolean
   messageSyncing: boolean
   messageSending: boolean
@@ -75,7 +77,7 @@ function exportContacts(contacts: readonly ContactEntry[]) {
   setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
-export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare,
+export function ContactsPanel({ snapshot, session, messageSync, cacheSaving, messageSyncing, messageSending, onMap, onImport, onShare,
   radioNavigation, onRadioNavigationHandled, onPathMap, mapPathNodes, discoveredHops, discoveredRadio,
   messageStatus, active }: ContactsProps) {
   const live = snapshot.phase === 'ready' || snapshot.phase === 'syncing' ? snapshot.device : null
@@ -168,6 +170,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
           entries={entries}
           unreadByContact={unreadByContact}
           session={session}
+          messageSync={messageSync}
           canWrite={liveKey === radioKey && snapshot.phase === 'ready'}
           firmware={lastSessionKey === radioKey ? snapshot.device?.capabilities.firmwareProtocolVersion ?? 0 : 0}
           framed={framedTransport(snapshot.transport)}
@@ -190,6 +193,7 @@ type BrowserProps = {
   entries: ContactEntry[]
   unreadByContact: ReadonlyMap<string, number>
   session: ContactsProps['session']
+  messageSync: RepeaterMessageSync
   canWrite: boolean
   firmware: number
   framed: boolean
@@ -202,7 +206,7 @@ type BrowserProps = {
   additionalPathNodes: readonly PathNode[]
 }
 
-function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite, firmware, framed, radioBusy, active, savePreference, onMap, onShare,
+function ContactBrowser({ radioKey, entries, unreadByContact, session, messageSync, canWrite, firmware, framed, radioBusy, active, savePreference, onMap, onShare,
   onPathMap, additionalPathNodes }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
@@ -363,7 +367,7 @@ function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite,
             radioControls={<>
               {detail.publicKey !== radioKey && <ContactTelemetry key={`telemetry:${detail.publicKey}`} active={active} session={session}
                 radioKey={radioKey} contactKey={detail.publicKey} ready={canWrite} firmware={firmware} radioBusy={busy || radioBusy} />}
-              {detail.details && <ContactRadioActions key={detail.publicKey} session={session}
+              {detail.details && <ContactRadioActions key={detail.publicKey} session={session} messageSync={messageSync}
                 contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} framed={framed}
                 firmware={firmware} busy={busy || radioBusy} onMap={onPathMap} additionalPathNodes={additionalPathNodes} />}
             </>} />

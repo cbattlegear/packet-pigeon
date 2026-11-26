@@ -5,6 +5,7 @@ import type { RadioData, StoredMessage } from '../storage/index.ts'
 export function messageAlert(data: RadioData, message: StoredMessage, ownName: string) {
   if (!message.receipt || message.receipt.kind === 'channel-data'
     || data.readMessages?.includes(message.id) || possibleRepeats(data.messages).has(message.id)) return null
+  if (message.receipt.kind === 'direct-text' && message.receipt.textType === 1) return null
   const conversation = conversations(data).find((item) => item.messages.some((entry) => entry.id === message.id))
   if (!conversation) return null
   if (conversation.id.startsWith('direct:') && data.mutedDirectConversations?.includes(conversation.id.slice(0, 19))) return null

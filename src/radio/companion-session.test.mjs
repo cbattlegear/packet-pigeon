@@ -486,6 +486,122 @@ test('definite companion rejection leaves repeater login retryable', async (t) =
   assert.equal(port.commands.filter(([code]) => code === 26).length, 2)
 })
 
+test('repeater CLI requires current admin access, a verified route, and confirmed advertisements', async (t) => {
+  const contact = contactInfo()
+  contact[33] = 2
+  contact[35] = 1
+  contact[36] = 0x45
+  let admin = false
+  let duplicate = false
+  let malformed = false
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: serial.emit(...deviceInfo()); break
+      case 1: serial.emit(...selfInfo()); break
+      case 4:
+        serial.emit(2, 1, 0, 0, 0)
+        serial.emit(...contact)
+        if (duplicate) {
+          const other = contact.slice()
+          other[5] = 0xdd
+          serial.emit(...other)
+        }
+        serial.emit(4, 0, 0, 0, 0)
+        break
+      case 26:
+        serial.emit(6, 0, ...new Uint8Array(8))
+        serial.emit(0x85, Number(admin), ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+        break
+      case 2:
+        if (malformed) serial.emit(6, 0)
+        else serial.emit(6, 0, 0, 0, 0, 0, 0xe8, 3, 0, 0)
+        break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  t.after(() => session.disconnect())
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const route = { pathLength: 1, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+  const signal = () => new AbortController().signal
+  const send = (command, confirmed = false) => session.sendRepeaterCommand(key, target, route, command, confirmed, signal())
+  await assert.rejects(send('ver'), /administrator/)
+  await session.manageRepeater(key, target, route, 'login', '', signal())
+  await assert.rejects(send('ver'), /administrator/)
+  admin = true
+  await session.manageRepeater(key, target, route, 'login', '', signal())
+  for (const command of ['get guest.password', 'set guest.password test', 'reboot']) {
+    await assert.rejects(send(command, true), /supported repeater CLI command/)
+  }
+  await assert.rejects(send('advert'), /Confirm/)
+  contact[36] = 0x46
+  await assert.rejects(send('ver'), /route changed/)
+  contact[36] = 0x45
+  duplicate = true
+  await assert.rejects(send('ver'), /shares a response prefix/)
+  duplicate = false
+  assert.equal(port.commands.some(([code]) => code === 2), false)
+  const first = await send('get name')
+  assert.equal(first.route, 'direct')
+  const firstFrame = port.commands.find(([code]) => code === 2)
+  assert.equal(firstFrame[1], 1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(firstFrame.slice(13))), `${first.tag}|get name`)
+  const second = await send('advert.zerohop', true)
+  assert.notEqual(second.tag, first.tag)
+  assert.equal(port.commands.filter(([code]) => code === 2).length, 2)
+  malformed = true
+  let unconfirmedTag
+  await assert.rejects(send('ver'), (error) => {
+    unconfirmedTag = error.tag
+    return /may have sent/.test(error.message)
+  })
+  assert.equal(port.commands.filter(([code]) => code === 2).length, 3)
+  malformed = false
+  const retry = await send('ver')
+  assert.notEqual(retry.tag, unconfirmedTag)
+})
+
+test('repeater CLI respects uncertain login state and an active message lease', async (t) => {
+  const contact = contactInfo()
+  contact[33] = 2
+  contact[35] = 0
+  let reply = true
+  const port = new FixturePort(([code], serial) => {
+    if (code === 22) serial.emit(...deviceInfo())
+    else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) {
+      serial.emit(2, 1, 0, 0, 0)
+      serial.emit(...contact)
+      serial.emit(4, 0, 0, 0, 0)
+    } else if (code === 26) {
+      serial.emit(6, 0, ...new Uint8Array(8))
+      if (reply) serial.emit(0x85, 1, ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+    } else if (code === 2) serial.emit(6, 0, ...new Uint8Array(8))
+    else assert.fail(`Unexpected command ${code}`)
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  t.after(() => session.disconnect())
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const route = { pathLength: 0, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+  const signal = () => new AbortController().signal
+  await session.manageRepeater(key, target, route, 'login', '', signal())
+  const lease = session.reserveQueuedMessage(key)
+  await assert.rejects(session.sendRepeaterCommand(key, target, route, 'ver', false, signal()), /message sync/)
+  lease.release()
+  reply = false
+  const controller = new AbortController()
+  const pending = session.manageRepeater(key, target, route, 'login', '', controller.signal)
+  await waitFor(() => port.commands.filter(([code]) => code === 26).length === 2)
+  controller.abort(new Error('Stopped waiting'))
+  await assert.rejects(pending, /Stopped waiting/)
+  await assert.rejects(session.sendRepeaterCommand(key, target, route, 'ver', false, signal()), /Reconnect/)
+  assert.equal(port.commands.some(([code]) => code === 2), false)
+})
+
 test('repeater details verify the current contact and direct route before sending', async () => {
   const contact = contactInfo()
   contact[33] = 2
