@@ -27,6 +27,8 @@ export const repeaterCliCommands = [
   { command: 'region', description: 'Read the region tree' },
   { command: 'region home', description: 'Read the home region' },
   { command: 'region default', description: 'Read the default scope region' },
+  { command: 'region home *', description: 'Set the home region to the wildcard', confirm: true,
+    warning: 'This changes the active home-region setting. Firmware may resolve a prefix to a different region; check the reply and tree. The change is not saved until region save, which writes the entire region map.' },
   { command: 'region allowf *', description: 'Allow unscoped flood forwarding', confirm: true,
     warning: 'Other routing rules can still block forwarding. This changes the live region map but does not save it.' },
   { command: 'region denyf *', description: 'Deny unscoped flood forwarding', confirm: true,
@@ -109,6 +111,11 @@ export function repeaterNameCommand(value: string) {
 }
 
 export function repeaterRegionQuery(value: string) {
+  validateRegionName(value)
+  return { command: `region get ${value}`, description: `Read region ${value}` }
+}
+
+function validateRegionName(value: string) {
   const bytes = new TextEncoder().encode(value)
   if (value !== '*' && (!value || value === '#' || bytes.length > 30 ||
     new TextDecoder().decode(bytes) !== value || /[\s\p{Cc}]/u.test(value) ||
@@ -116,7 +123,16 @@ export function repeaterRegionQuery(value: string) {
       !(byte >= 48 && byte <= 57) && !(byte >= 65 && byte !== 127)))) {
     throw new Error('Enter * or a valid region name or prefix of up to 30 UTF-8 bytes without spaces or control characters.')
   }
-  return { command: `region get ${value}`, description: `Read region ${value}` }
+}
+
+export function repeaterHomeRegionCommand(value: string) {
+  validateRegionName(value)
+  return {
+    command: `region home ${value}`,
+    description: value === '*' ? 'Set home region to the wildcard' : `Set repeater home region to ${value}`,
+    confirm: true as const,
+    warning: 'Firmware prefers an exact name but may resolve an incomplete prefix to a different region. Read the reply and home setting after changing it. This change is not saved until region save, which writes the entire region map.',
+  }
 }
 
 function validatePosition(axis: 'lat' | 'lon', value: string) {
@@ -132,6 +148,8 @@ function validatePosition(axis: 'lat' | 'lon', value: string) {
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
+  const homeRegionPrefix = 'region home '
+  if (command.startsWith(homeRegionPrefix)) return repeaterHomeRegionCommand(command.slice(homeRegionPrefix.length))
   const regionPrefix = 'region get '
   if (command.startsWith(regionPrefix)) return repeaterRegionQuery(command.slice(regionPrefix.length))
   const namePrefix = 'set name '

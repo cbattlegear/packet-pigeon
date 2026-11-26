@@ -518,7 +518,12 @@ rules. These changes apply to the live region map but are not saved by the
 change commands. Sync the reply and read the wildcard state before saving.
 The separate confirmed save writes the entire current region map, including
 unrelated changes by other administrators. Radio acceptance does not prove a
-change or save succeeded. Other region changes are not yet supported.
+change or save succeeded.
+Administrators can also change the home-region marker to a named region or the
+wildcard with confirmation. Firmware may resolve an incomplete prefix to a
+different region; compare the reply and read the home setting again. The change
+is active but not saved until the separate region-map save, which writes all
+current region settings.
 Administrators can also confirm a flood or zero-hop advertisement, or change
 advertisement intervals, owner information, repeater name, stored position,
 packet forwarding, and flood hop limits with confirmation.
