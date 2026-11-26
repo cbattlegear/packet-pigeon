@@ -119,6 +119,9 @@ test('Bluetooth noise-floor polling is opt-in, local, and stops on errors or nav
   await start.click()
   await monitor.getByText(/Last reading: -123 dBm/).waitFor()
   assert.deepEqual((await page.evaluate(() => window.commands)).at(-1), [56, 1])
+  await page.evaluate(() => { window.noiseReply[2] = 0x84 })
+  await monitor.getByText(/Last reading: -124 dBm/).waitFor()
+  assert((await page.evaluate(() => window.commands)).filter(([code]) => code === 56).length >= 2)
   await monitor.getByRole('button', { name: 'Stop noise-floor polling' }).click()
   const afterStop = (await page.evaluate(() => window.commands)).length
   await page.waitForTimeout(2200)
