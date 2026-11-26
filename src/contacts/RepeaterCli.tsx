@@ -5,6 +5,7 @@ import type { CompanionSession } from '../radio/companion-session.ts'
 import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
+  repeaterRegionRemoveCommand,
   repeaterGuestPasswordCommand,
   repeaterTransmitPowerCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
@@ -314,6 +315,16 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function removeRegion() {
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterRegionRemoveCommand(regionName)
+      void send(command.command, command.description, command.confirm, command.warning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid region name.')
+    }
+  }
+
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -431,6 +442,14 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         Sync the reply and read the region again. The change is not saved until the separate entire region-map save.</p>
       <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
         onClick={putRegion}>Add or move region under wildcard</button>
+      <p>Remove uses an exact name, ignoring a leading <code>#</code>; the wildcard cannot be removed.
+        Firmware refuses to remove a region with children. Before removing the home region, set another home region
+        and verify its reply: removal does not reset the home reference, and a later home query can misleadingly
+        report <code>*</code>. Removing a region can disrupt routes and remote access and does not remove private keys.
+        Sync the reply and inspect the map again; changes remain unsaved until the separate entire region-map save.
+        The tree can be truncated and individual reads use prefix matching, so read-back has limitations.</p>
+      <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+        onClick={removeRegion}>Remove named region</button>
       <p>To change a named region's flood permission, read it first and compare the returned name. Firmware prefers
         exact names but may match a different region, including when names differ only by a leading <code>#</code>.
         The change reply does not identify the affected entry. Read and compare it again afterward, but read-back uses

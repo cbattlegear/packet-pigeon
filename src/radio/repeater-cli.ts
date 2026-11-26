@@ -180,6 +180,17 @@ export function repeaterRegionPutCommand(value: string) {
   }
 }
 
+export function repeaterRegionRemoveCommand(value: string) {
+  validateRegionName(value)
+  if (value === '*') throw new Error('Enter a named region, not the wildcard.')
+  return {
+    command: `region remove ${value}`,
+    description: `Remove region ${value}`,
+    confirm: true as const,
+    warning: 'Firmware removes an exact name, including one differing only by a leading #, and refuses regions with children. Removing a region can disrupt routes and remote access. Set another home region first if needed: removal does not reset the home reference, and a later home query may misleadingly report *. Private keys are not removed. This change is not saved until the separate region-map save, which saves the entire map.',
+  }
+}
+
 function validatePosition(axis: 'lat' | 'lon', value: string) {
   const maximum = axis === 'lat' ? 90 : 180
   const coordinate = Number(value)
@@ -199,6 +210,8 @@ export function repeaterCliCommand(command: string) {
   if (command.startsWith(regionPrefix)) return repeaterRegionQuery(command.slice(regionPrefix.length))
   const regionPutPrefix = 'region put '
   if (command.startsWith(regionPutPrefix)) return repeaterRegionPutCommand(command.slice(regionPutPrefix.length))
+  const regionRemovePrefix = 'region remove '
+  if (command.startsWith(regionRemovePrefix)) return repeaterRegionRemoveCommand(command.slice(regionRemovePrefix.length))
   const regionFlood = /^region (allowf|denyf) ([\s\S]*)$/.exec(command)
   if (regionFlood) return repeaterRegionFloodCommand(regionFlood[2], regionFlood[1] === 'allowf')
   const namePrefix = 'set name '
