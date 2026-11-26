@@ -138,8 +138,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     try {
       const command = repeaterPositionCommand(axis, value)
       const coordinate = axis === 'lat' ? 'latitude' : 'longitude'
-      void send(command.command, `Change advertised ${coordinate}`,
-        true, 'This changes the repeater location published in future advertisements. Check the value carefully before confirming.')
+      void send(command.command, `Set stored ${coordinate} to ${value}`,
+        true, 'Advertisements use stored coordinates only when the GPS advert policy is prefs.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid advertised position.')
     }
@@ -213,9 +213,13 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
-      <summary>Change advertised position</summary>
-      <p>These coordinates are published in future repeater advertisements. Read the current values with <code>get lat</code> and <code>get lon</code>.
-        Changing one coordinate does not change the other. Confirm each update carefully.</p>
+      <summary>Change stored position</summary>
+      <p>Advertisements use these stored coordinates only when the GPS advert policy is <code>prefs</code>.
+        Policy <code>none</code> omits location; <code>share</code> uses sensor coordinates.
+        Read the current values with <code>get lat</code> and <code>get lon</code>. Changing one coordinate does not change the other.</p>
+      <p>Check the policy explicitly below. Some firmware builds do not support this query; an unsupported reply does not establish the policy.</p>
+      <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+        onClick={() => void send('gps advert', 'Read GPS advert policy', false)}>Read GPS advert policy</button>
       <form className="repeater-position-form" onSubmit={(event) => submitPosition(event, 'lat', latitude)}>
         <label htmlFor={`${ownerInfoId}-latitude`}>Latitude (-90 to 90)</label>
         <input id={`${ownerInfoId}-latitude`} type="text" inputMode="decimal" required

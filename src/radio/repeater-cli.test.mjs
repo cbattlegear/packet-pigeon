@@ -38,11 +38,12 @@ test('advertised position updates enforce coordinate ranges and decimal precisio
     assert.equal(repeaterPositionCommand(axis, value).confirm, true)
   }
   for (const [axis, value] of [['lat', '-90.000001'], ['lat', '90.1'], ['lon', '-181'], ['lon', '180.1'],
-    ['lat', '1.1234567'], ['lon', '1e2'], ['lon', ''], ['lat', 'Infinity'], ['lon', '0\nadvert']]) {
+    ['lat', '1.1234567'], ['lon', '1e2'], ['lon', ''], ['lat', 'Infinity'], ['lon', '0\nadvert'], ['lat', '1\n']]) {
     assert.throws(() => repeaterPositionCommand(axis, value), /latitude|longitude/)
   }
   assert.throws(() => repeaterCliCommand('set lat 90.000001'), /latitude/)
   assert.throws(() => repeaterCliCommand('set lon -180.000001'), /longitude/)
+  assert.throws(() => repeaterCliCommand('set lat 1\n'), /supported/)
 })
 
 test('CLI rejects unsafe and unsupported text before dispatch', async () => {
@@ -54,6 +55,8 @@ test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   assert.equal(writes, 0)
   assert.equal(repeaterCliCommand('advert').confirm, true)
   assert.equal(repeaterCliCommand('clock sync').confirm, true)
+  assert.equal(repeaterCliCommand('gps advert').command, 'gps advert')
+  assert.throws(() => repeaterCliCommand('gps advert prefs'), /supported/)
   assert.throws(() => repeaterCliCommand('time 9999999999'), /supported/)
 })
 

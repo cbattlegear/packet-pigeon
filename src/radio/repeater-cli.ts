@@ -16,8 +16,9 @@ export const repeaterCliCommands = [
   { command: 'get repeat', description: 'Read forwarding mode' },
   { command: 'get advert.interval', description: 'Read the local advert interval' },
   { command: 'get flood.advert.interval', description: 'Read the flood advert interval' },
-  { command: 'get lat', description: 'Read advert latitude' },
-  { command: 'get lon', description: 'Read advert longitude' },
+  { command: 'get lat', description: 'Read stored latitude' },
+  { command: 'get lon', description: 'Read stored longitude' },
+  { command: 'gps advert', description: 'Read GPS advert policy' },
   { command: 'get owner.info', description: 'Read operator information' },
   { command: 'get allow.read.only', description: 'Read guest access policy' },
   { command: 'advert', description: 'Send a flood advertisement', confirm: true },
@@ -52,7 +53,8 @@ export function repeaterPositionCommand(axis: 'lat' | 'lon', value: string) {
 function validatePosition(axis: 'lat' | 'lon', value: string) {
   const maximum = axis === 'lat' ? 90 : 180
   const coordinate = Number(value)
-  if (!/^-?\d+(?:\.\d{1,6})?$/.test(value) || !Number.isFinite(coordinate) ||
+  const match = /^-?\d+(?:\.\d{1,6})?$/.exec(value)
+  if (!match || match[0] !== value || !Number.isFinite(coordinate) ||
     coordinate < -maximum || coordinate > maximum) {
     throw new Error(`Enter a ${axis === 'lat' ? 'latitude from -90 to 90' : 'longitude from -180 to 180'} with up to 6 decimal places.`)
   }
@@ -72,10 +74,10 @@ export function repeaterCliCommand(command: string) {
     return { command, description: 'Set owner information', confirm: true as const }
   }
   const position = /^set (lat|lon) (.*)$/.exec(command)
-  if (position) {
+  if (position && position[0] === command) {
     const axis = position[1] === 'lat' ? 'lat' : 'lon'
     validatePosition(axis, position[2])
-    return { command, description: `Set advertised ${axis === 'lat' ? 'latitude' : 'longitude'}`, confirm: true as const }
+    return { command, description: `Set stored ${axis === 'lat' ? 'latitude' : 'longitude'}`, confirm: true as const }
   }
   const interval = /^set (advert\.interval|flood\.advert\.interval) (.*)$/.exec(command)
   if (interval && interval[0] === command) {

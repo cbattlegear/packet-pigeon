@@ -535,12 +535,14 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
+  await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
+  await assert.rejects(send('gps advert'), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
   for (const command of ['get guest.password', 'set guest.password test', 'reboot']) {
@@ -604,6 +606,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const positionFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(positionFrame.slice(13))),
     `${position.tag}|set lat 47.123456`)
+  const policy = await send('gps advert')
+  const policyFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(policyFrame.slice(13))), `${policy.tag}|gps advert`)
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {
