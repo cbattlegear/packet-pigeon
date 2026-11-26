@@ -245,6 +245,16 @@ test('retransmission delay factors accept bounded decimal values and require con
   }
 })
 
+test('receive-delay base accepts bounded decimals and requires confirmation', () => {
+  assert.equal(repeaterCliCommand('get rxdelay').command, 'get rxdelay')
+  for (const value of ['0', '0.01', '0.5', '1', '9.99', '10', '19.99', '20', '20.00']) {
+    assert.equal(repeaterCliCommand(`set rxdelay ${value}`).confirm, true)
+  }
+  for (const value of ['', '-1', '20.01', '21', '00', '0.001', '.5', '1e0', ' 1', '1 ', '1\n', '1\nreboot']) {
+    assert.throws(() => repeaterCliCommand(`set rxdelay ${value}`), /receive-delay base/)
+  }
+})
+
 test('transmit power uses the documented whole dBm range and requires confirmation', () => {
   assert.equal(repeaterCliCommand('get tx').command, 'get tx')
   for (const value of ['1', '9', '10', '21', '22']) {

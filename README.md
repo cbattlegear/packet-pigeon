@@ -625,6 +625,17 @@ after every transmission. Existing budget and scheduled timing can carry over
 after a change. It does not guarantee regulatory compliance; check your
 jurisdiction and channel plan. Sync the reply and read the factor again;
 read-back is a preference, not a measurement of airtime.
+Administrators can read and confirm changes to the experimental receive-delay
+base from 0 to 20, with up to two decimal places. It is not a time in
+milliseconds. Repeater firmware v1.14.1 derives delay from the base, packet
+score and estimated airtime for received floods; direct packets are not
+deferred by this mechanism. Zero disables its delay calculation, calculated
+delays below 50 ms are processed immediately, and larger delays are capped.
+Already queued floods retain their scheduled time. Changes may affect routing
+and remote access; other firmware may behave differently. Saving also sets a
+local advert interval below 60 minutes to zero; an already scheduled advert
+may still be sent. Sync the reply and read the preference again; `OK` or a
+matching read-back does not prove persistence or actual timing.
 Administrators can also read and change the advert path hash size. This affects
 hashes used in the repeater's manual flood advertisements; it does not change
 the hash widths of packets it forwards. On repeater v1.14.0, scheduled flood
