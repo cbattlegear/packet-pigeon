@@ -48,6 +48,18 @@ test('neighbor discovery requires confirmation and only accepts the exact comman
   }
 })
 
+test('filtered region lists allow only the two exact read-only commands', () => {
+  for (const command of ['region list allowed', 'region list denied']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.command, command)
+    assert.equal('confirm' in action, false)
+  }
+  for (const command of ['region list', 'region list all', 'region list allowed ', 'region list denied extra',
+    'region list allowed\nregion save']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('access removal requires an exact full public key and confirmation', () => {
   const key = 'ab'.repeat(32)
   const action = repeaterRemoveAccessCommand(key.toUpperCase())
