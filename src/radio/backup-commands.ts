@@ -108,21 +108,41 @@ export async function restoreBackupChannels(link: SerialLink, capacity: number, 
   }
 }
 
-export async function restoreBackupContacts(link: SerialLink, entries: readonly BackupContact[], firmware: number,
-  ownKey: string, signal: AbortSignal, connected: () => boolean) {
+export async function restoreBackupContacts(link: SerialLink, entries: readonly BackupContact[], signal: AbortSignal, target: {
+  ownKey: string
+  firmware: number
+  capacity: number
+  connected: () => boolean
+  readContacts: () => Promise<readonly CompanionContact[]>
+}) {
+  if (!entries.length) return []
+  const current = signal.aborted || !target.connected() ? [] : await target.readContacts().catch(() => null)
+  if (!current) {
+    return entries.map(({ name: label, publicKey }): ContactResult => ({ label, publicKey, status: 'skipped',
+      reason: 'The current contact table could not be verified.' }))
+  }
+  const knownKeys = new Set(current.map(({ publicKey }) => publicKey))
   const results: ContactResult[] = []
   for (const entry of entries) {
     const { name: label, publicKey } = entry
-    if (signal.aborted || !connected()) {
+    if (signal.aborted || !target.connected()) {
       results.push({ label, publicKey, status: 'skipped', reason: 'The operation stopped before this contact.' })
       continue
     }
+    if (!knownKeys.has(publicKey) && (target.capacity <= 0 || knownKeys.size >= target.capacity)) {
+      const reason = target.capacity <= 0 ? 'The radio did not report its contact capacity.' : 'Radio contact storage is full.'
+      results.push({ label, publicKey, status: 'skipped', reason })
+      continue
+    }
     try {
-      if (publicKey === ownKey) throw new Error('The connected radio cannot be its own contact.')
-      await writeContactCommand(link, backupContactCommand(entry, firmware))
+      if (publicKey === target.ownKey) throw new Error('The connected radio cannot be its own contact.')
+      await writeContactCommand(link, backupContactCommand(entry, target.firmware))
+      knownKeys.add(publicKey)
       results.push({ label, publicKey, status: 'saved' })
     } catch (error) {
-      results.push({ label, publicKey, status: writeStatus(error), reason: failure(error) })
+      const status = writeStatus(error)
+      if (status === 'uncertain') knownKeys.add(publicKey)
+      results.push({ label, publicKey, status, reason: failure(error) })
     }
   }
   return results

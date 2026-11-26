@@ -1006,8 +1006,9 @@ export class CompanionSession {
     try {
       await this.runRadioCommand(radioKey, async (link) => {
         const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
-        results = await restoreBackupContacts(link, entries, this.snapshot.device!.capabilities.firmwareProtocolVersion,
-          radioKey, signal, connected)
+        const { firmwareProtocolVersion: firmware, maxContacts: capacity } = this.snapshot.device!.capabilities
+        results = await restoreBackupContacts(link, entries, signal, { ownKey: radioKey, firmware, capacity, connected,
+          readContacts: () => this.readContacts(link) })
         if (connected() && results.some(({ status }) => status === 'saved')) {
           this.update({ contacts: await this.readContacts(link) })
         }
@@ -1047,27 +1048,21 @@ export class CompanionSession {
 
   readonly restoreDeviceIdentity = async (radioKey: string, key: Uint8Array, expectedPublicKey: string,
     contacts: readonly Omit<CompanionContact, 'lastModifiedAt'>[], signal: AbortSignal) => {
-    const { backupPublicKey, writeBackupIdentity } = await import('./identity-backup.ts')
+    const { waitForPendingContactSave, writeBackupIdentity } = await import('./identity-backup.ts')
     const { restoreBackupContacts } = await import('./backup-commands.ts')
-    if (backupPublicKey(key) !== expectedPublicKey) throw new Error('The backup private key does not match the public identity.')
     if (radioKey === expectedPublicKey) return []
     let identitySaved = false
     let results: Awaited<ReturnType<typeof restoreBackupContacts>> = []
     try {
       await this.runMaintenance(radioKey, async (link) => {
-        const firmware = this.snapshot.device!.capabilities.firmwareProtocolVersion
+        const { firmwareProtocolVersion: firmware, maxContacts: capacity } = this.snapshot.device!.capabilities
         await writeBackupIdentity(link, key, expectedPublicKey)
         identitySaved = true
         // The firmware reloads contacts from flash after replacing the identity.
         const connected = () => this.attempt?.link === link && this.snapshot.phase === 'ready'
-        results = await restoreBackupContacts(link, contacts, firmware, expectedPublicKey, signal, connected)
-      }, async () => {
-        // Allow recent contact edits to reach flash before firmware reloads the table.
-        signal.throwIfAborted()
-        const settled = AbortSignal.any([signal, AbortSignal.timeout(5_100)])
-        await new Promise<void>((resolve) => settled.addEventListener('abort', () => resolve(), { once: true }))
-        signal.throwIfAborted()
-      })
+        results = await restoreBackupContacts(link, contacts, signal, { ownKey: expectedPublicKey, firmware, capacity,
+          connected, readContacts: () => this.readContacts(link) })
+      }, () => waitForPendingContactSave(signal))
     } catch (error) {
       if (!identitySaved) throw error
     }

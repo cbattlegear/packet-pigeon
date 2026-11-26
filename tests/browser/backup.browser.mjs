@@ -32,17 +32,24 @@ test('backs up selected settings, restores data and identity, and guards mainten
   const channelKey = '42'.repeat(16)
   const regionKey = '73'.repeat(16)
   const contactKey = 'bc'.repeat(32)
-  await page.addInitScript(({ current, target }) => {
+  const existingKey = 'ad'.repeat(32)
+  const overflowKey = 'de'.repeat(32)
+  await page.addInitScript(({ current, target, existingKey }) => {
     const encoder = new TextEncoder()
     const decode = new TextDecoder()
     const bytes = (hex) => Uint8Array.from(hex.match(/../g), (pair) => parseInt(pair, 16))
     const commands = []
     const contacts = new Map()
+    const existing = new Uint8Array(148)
+    existing.set([3, ...bytes(existingKey), 2, 0, 255])
+    existing.set(encoder.encode('Existing relay'), 100)
+    contacts.set(existingKey, existing)
     const slots = [{ name: 'Public', key: new Uint8Array(16).fill(0x15) }, null, null]
     let identity = current
     let storedName = 'Backup fixture'
     let region = null
     window.backupCommands = commands
+    window.savedContactKeys = () => [...contacts.keys()]
     function openPort() {
       let controller
       const send = (frame) => controller.enqueue(Uint8Array.of(0x3e, frame.length, 0, ...frame))
@@ -52,7 +59,7 @@ test('backs up selected settings, restores data and identity, and guards mainten
           const data = packet.slice(3)
           const [code, slot] = data
           commands.push(code)
-          if (code === 22) send([13, 14, 40, slots.length, ...new Uint8Array(78)])
+          if (code === 22) send([13, 14, 1, slots.length, ...new Uint8Array(78)])
           else if (code === 1) {
             const self = Uint8Array.of(5, 1, 7, 20, ...bytes(identity.publicKey), ...new Uint8Array(22), ...encoder.encode(storedName))
             const view = new DataView(self.buffer)
@@ -71,13 +78,15 @@ test('backs up selected settings, restores data and identity, and guards mainten
             const record = new Uint8Array(148)
             record.set(data)
             record[0] = 3
-            contacts.set([...data.slice(1, 33)].join(','), record)
+            const key = [...data.slice(1, 33)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+            if (!contacts.has(key) && contacts.size === 2) contacts.delete(contacts.keys().next().value)
+            contacts.set(key, record)
             send([0])
           } else if (code === 23) send([14, ...bytes(identity.secret)])
           else if (code === 24 && data.slice(1).every((byte, index) => byte === bytes(target.secret)[index])) {
             identity = target
             // Identity replacement reloads contacts and drops recent edits that have not reached flash.
-            contacts.clear()
+            for (const key of contacts.keys()) if (key !== existingKey) contacts.delete(key)
             send([0])
           } else if (code === 31) {
             const channel = slots[slot]
@@ -104,7 +113,7 @@ test('backs up selected settings, restores data and identity, and guards mainten
       })
     }
     Object.defineProperty(navigator, 'serial', { value: { async requestPort() { return openPort() } } })
-  }, { current, target })
+  }, { current, target, existingKey })
 
   await page.goto(server.resolvedUrls.local[0] + '#settings')
   await page.getByRole('button', { name: 'Connect USB' }).click()
@@ -123,19 +132,45 @@ test('backs up selected settings, restores data and identity, and guards mainten
   })
   assert.equal(await page.evaluate(() => window.backupCommands.includes(23)), false)
 
+  await exported.getByRole('button', { name: 'Deselect all export sections' }).click()
+  await exported.getByLabel('Channels and keys', { exact: true }).check()
+  const defaultDownload = page.waitForEvent('download')
+  page.once('dialog', (dialog) => dialog.accept())
+  await exported.getByRole('button', { name: 'Download configuration' }).click()
+  const defaults = await readFile(await (await defaultDownload).path())
+  assert.deepEqual(JSON.parse(defaults.toString()).channels, [{ name: 'Public', secret: '15'.repeat(16),
+    packet_pigeon_scope: 'default', message_retention_duration_seconds: null }])
+
+  await page.evaluate(async (key) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    try {
+      await storage.update(radioKeyFromPublicKey(key), { channelScope: { index: 0, channelName: 'Public', scope: { mode: 'unscoped' } },
+        channelRetention: { index: 0, channelName: 'Public', days: 1 } })
+    } finally { storage.close() }
+  }, current.publicKey)
+
   await panel.getByText('Restore configuration', { exact: true }).click()
   const input = panel.getByLabel('Configuration JSON file')
+  const preview = panel.getByRole('group', { name: 'Restore preview' })
+  const restore = preview.getByRole('button', { name: 'Restore selected sections' })
+  await input.setInputFiles({ name: 'defaults.json', mimeType: 'application/json', buffer: defaults })
+  await preview.getByLabel(/^Channels and keys/).check()
+  page.once('dialog', (dialog) => dialog.accept())
+  await restore.click()
+  await panel.getByText(/Public retention · Saved/).waitFor()
+  assert.equal(await page.evaluate(() => window.backupCommands.includes(32)), false)
+
   await input.setInputFiles({ name: 'fixture.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({
     public_key: target.publicKey, private_key: target.secret, name: 'Restored node',
     channels: [{ name: 'Lab channel', secret: channelKey, region_scope_name: '#Lab',
       region_scope_key: regionKey, message_retention_duration_seconds: 604800 }],
-    contacts: [{ public_key: contactKey, name: 'Lab relay', custom_name: 'Custom relay', type: 2, flags: 2, out_path_list: 'aabb' }],
+    contacts: [{ public_key: contactKey, name: 'Lab relay', custom_name: 'Custom relay', type: 2, flags: 2, out_path_list: 'aabb' },
+      { public_key: overflowKey, name: 'Overflow relay', type: 2 }],
     region_transport_keys: [{ name: '#Lab', key: regionKey }],
     packet_pigeon: { version: 1, default_region: { name: '#Lab', key: regionKey } },
   })) })
-  const preview = panel.getByRole('group', { name: 'Restore preview' })
   await preview.getByText(target.publicKey, { exact: true }).waitFor()
-  const restore = preview.getByRole('button', { name: 'Restore selected sections' })
   assert.equal(await restore.isDisabled(), true)
   assert.equal(await panel.getByText(target.secret, { exact: false }).count(), 0)
   assert.equal(await panel.getByText(channelKey, { exact: false }).count(), 0)
@@ -145,6 +180,8 @@ test('backs up selected settings, restores data and identity, and guards mainten
   await restore.click()
   await panel.getByText(/Lab channel retention · Saved/).waitFor()
   await panel.getByText(/Default flood region · Saved/).waitFor()
+  await panel.getByText(/Overflow relay · Skipped\. Radio contact storage is full/).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.savedContactKeys()), [existingKey, contactKey])
   const cache = await page.evaluate(async (key) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()
@@ -173,6 +210,7 @@ test('backs up selected settings, restores data and identity, and guards mainten
   assert.ok(await page.evaluate(() => window.backupCommands.lastIndexOf(9) > window.backupCommands.lastIndexOf(24)))
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await panel.getByText(/Restored identity verified/).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.savedContactKeys()), [existingKey, contactKey])
   const restoredName = await page.evaluate(async ({ publicKey, contactKey }) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()

@@ -38,6 +38,14 @@ export async function writeBackupIdentity(link: SerialLink, key: Uint8Array, exp
   }
 }
 
+export async function waitForPendingContactSave(signal: AbortSignal) {
+  // The firmware defers contact saves for five seconds and reloads them during identity import.
+  signal.throwIfAborted()
+  const settled = AbortSignal.any([signal, AbortSignal.timeout(5_100)])
+  await new Promise<void>((resolve) => settled.addEventListener('abort', () => resolve(), { once: true }))
+  signal.throwIfAborted()
+}
+
 export function maintenanceCommand(action: 'reboot' | 'reset') {
   const text = new TextEncoder().encode(action)
   return action === 'reboot' ? Uint8Array.of(19, ...text, 0) : Uint8Array.of(51, ...text)

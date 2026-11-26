@@ -101,6 +101,7 @@ function readChannel(raw: unknown): BackupChannel {
   parseChannelSecret(secret).fill(0)
   let scope: ChannelScope | undefined
   if (entry.packet_pigeon_scope === 'unscoped') scope = { mode: 'unscoped' }
+  else if (entry.packet_pigeon_scope === 'default') scope = { mode: 'default' }
   else if (entry.region_scope_name !== undefined && entry.region_scope_name !== null) {
     const region = string(entry.region_scope_name, 'channel region name', 120)
     const key = optional(entry.region_scope_key, (value) => hex(value, 16, 'channel region key'))
@@ -245,7 +246,7 @@ export function backupJson(data: BackupData) {
     channels: channels?.map(({ name, secret, scope, retentionSeconds }) => ({
       name, secret, region_scope_name: scope?.mode === 'region' ? scope.name : undefined,
       region_scope_key: scope?.mode === 'region' ? scope.key : undefined,
-      packet_pigeon_scope: scope?.mode === 'unscoped' ? 'unscoped' : undefined,
+      packet_pigeon_scope: scope?.mode === 'default' || scope?.mode === 'unscoped' ? scope.mode : undefined,
       message_retention_duration_seconds: retentionSeconds,
     })),
     contacts: contacts?.map((contact) => ({

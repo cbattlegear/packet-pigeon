@@ -304,10 +304,11 @@ sections or preview a MeshCore v1.52 configuration JSON before restoring it.
 The default export excludes keys. Key exports require confirmation and store
 the selected keys in readable JSON. Keep those files somewhere private.
 
-Restore can update matching contacts and apply browser settings for imported
-channels. Channels with a matching key reuse their existing slot. New channels
-need a free slot. Imported channel retention supports indefinite retention and
-1, 7, 30, or 90 days. Results show skipped, failed, and unconfirmed changes.
+Restore can update matching contacts and skips new ones when the contact list
+is full. Channels with a matching key reuse their existing slot. New channels
+need a free slot. Backups preserve default sending scope and indefinite
+retention. Imported retention also supports 1, 7, 30, or 90 days. Results show
+skipped, failed, and unconfirmed changes.
 
 Replacing an identity requires typing the current radio's key prefix. Reconnect
 afterward to verify the recovered public key. Identity export and import depend

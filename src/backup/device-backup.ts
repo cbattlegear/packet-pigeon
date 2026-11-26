@@ -46,7 +46,7 @@ export async function exportBackup(session: BackupSession, key: RadioKey, sectio
   const failures: BackupResult[] = []
   const cached = await readCache(key).catch((error: unknown) => {
     failures.push({ label: 'Browser cache', status: 'failed', reason: message(error) })
-    return null
+    return undefined
   })
   async function read(section: BackupSection, label: string, operation: () => Promise<void> | void) {
     if (!sections.has(section)) return
@@ -96,16 +96,19 @@ export async function exportBackup(session: BackupSession, key: RadioKey, sectio
         }
         seen.add(secret)
         const scope = cached?.channelScopes?.find((entry) => entry.index === index && entry.channelName === name && !entry.paused)?.scope
+          ?? (cached === undefined ? undefined : { mode: 'default' })
         const retention = cached?.channelRetention?.find((entry) => entry.index === index && entry.channelName === name && !entry.paused)
-        entries.push(await includeScope({ name, secret, scope, retentionSeconds: retention ? retention.days * 86_400 : undefined }))
+        const retentionSeconds = retention ? retention.days * 86_400 : cached === undefined ? undefined : null
+        entries.push(await includeScope({ name, secret, scope, retentionSeconds }))
       }
       data.channels = entries
     })
     await read('regions', 'Default flood region', async () => {
-      data.regions = cached?.regionTransportKeys ?? []
+      if (cached !== undefined) data.regions = cached?.regionTransportKeys ?? []
       const current = session.getSnapshot()
       if (current.phase === 'ready' && current.device?.publicKey === key) {
         data.defaultRegion = await session.exportBackupDefaultRegion(key)
+        if (data.defaultRegion !== undefined) data.regions ??= []
       }
     })
     await read('identity', 'Private identity key', async () => {

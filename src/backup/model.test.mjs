@@ -49,6 +49,19 @@ test('reads the reference configuration units and round-trips routes, secrets, a
   assert.deepEqual(parseBackup(JSON.parse(backupJson(decoded))), decoded)
 })
 
+test('distinguishes explicit default channel settings from absent metadata', () => {
+  const channels = [
+    { name: 'Known defaults', secret: '12'.repeat(16), scope: { mode: 'default' }, retentionSeconds: null },
+    { name: 'Unknown', secret: '23'.repeat(16), scope: undefined, retentionSeconds: undefined },
+  ]
+  const encoded = JSON.parse(backupJson({ channels }))
+  assert.deepEqual(encoded.channels, [
+    { name: 'Known defaults', secret: '12'.repeat(16), packet_pigeon_scope: 'default', message_retention_duration_seconds: null },
+    { name: 'Unknown', secret: '23'.repeat(16) },
+  ])
+  assert.deepEqual(parseBackup(encoded).channels, channels)
+})
+
 test('rejects ambiguous or malformed backups before use', async () => {
   const identity = await makeIdentity()
   assert.throws(() => parseBackup({ ...identity, public_key: 'ab'.repeat(32) }), /does not match/)
