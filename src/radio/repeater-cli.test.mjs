@@ -115,6 +115,19 @@ test('flood hop limits accept exact whole values and require confirmation', () =
   }
 })
 
+test('flood loop detection accepts only supported modes and requires confirmation', () => {
+  assert.equal(repeaterCliCommand('get loop.detect').command, 'get loop.detect')
+  for (const mode of ['off', 'minimal', 'moderate', 'strict']) {
+    const command = repeaterCliCommand(`set loop.detect ${mode}`)
+    assert.equal(command.confirm, true)
+    assert.match(command.description, new RegExp(mode))
+  }
+  for (const command of ['set loop.detect', 'set loop.detect OFF', 'set loop.detect strict ',
+    'set loop.detect strict extra', 'set loop.detect minimal\nreboot', 'set loop.detect unknown']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('CLI confirmation failures distinguish rejection from uncertain dispatch', async () => {
   const link = (reply) => ({ async request(_bytes, receive) { return receive(Uint8Array.of(...reply)).value } })
   await assert.rejects(sendRepeaterCli(link([1, 2]), key, 'ver', 'AA'), { code: 'device-error' })

@@ -507,6 +507,12 @@ than a route. Unknown or ambiguous four-byte prefixes are not mapped.
 Administrators can also confirm a flood or zero-hop advertisement, or change
 advertisement intervals, owner information, repeater name, stored position,
 packet forwarding, and flood hop limits with confirmation.
+Administrators can also read and change flood loop detection mode. This setting
+checks forwarded flood packets for repeated occurrences of the repeater's
+ID/hash in their paths. Minimal, moderate, and strict modes use thresholds of
+4/2/1, 2/1/1, and 1/1/1 occurrences for 1-, 2-, and 3-byte path hashes;
+`off` disables the check. Stricter modes can drop flooded packets and reduce
+reachability. This CLI setting requires repeater firmware v1.14 or later.
 The confirmed `reboot` command may interrupt mesh traffic and normally sends no
 reply; acceptance by the radio does not prove execution. The app clears the
 reported access and status after an accepted or unconfirmed reboot. Log in again

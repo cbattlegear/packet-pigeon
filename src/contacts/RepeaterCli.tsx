@@ -51,6 +51,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [interval, setInterval] = useState('')
   const [floodLimitKind, setFloodLimitKind] = useState<'flood.max' | 'flood.max.unscoped' | 'flood.max.advert'>('flood.max')
   const [floodLimit, setFloodLimit] = useState('')
+  const [loopDetection, setLoopDetection] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [latitude, setLatitude] = useState('')
@@ -176,6 +177,20 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitLoopDetection(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set loop.detect ${loopDetection}`)
+      const warning = loopDetection === 'off'
+        ? 'This disables flood loop detection.'
+        : 'This can drop flooded packets when this repeater ID/hash repeats in the route. Stricter modes drop at lower repetition counts and may reduce reachability. Requires repeater firmware v1.14 or later.'
+      void send(command.command, command.description, true, warning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Choose a supported loop detection mode.')
+    }
+  }
+
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -261,6 +276,28 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             onChange={(event) => setFloodLimit(event.currentTarget.value)} />
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set flood hop limit</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change flood loop detection</summary>
+      <p>Loop detection only checks forwarded flood packets for repeated occurrences of this repeater's ID/hash in
+        their path. Thresholds for 1-, 2-, and 3-byte path hashes are: minimal (4/2/1), moderate (2/1/1), and strict
+        (1/1/1). Off disables the check. More restrictive modes can drop flooded packets and reduce reachability.
+        This CLI setting requires repeater firmware v1.14 or later.</p>
+      <form className="contact-actions" onSubmit={submitLoopDetection}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get loop.detect', 'Read flood loop detection mode', false)}>Read current mode</button>
+        <label>New flood loop detection mode
+          <select required value={loopDetection} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setLoopDetection(event.currentTarget.value)}>
+            <option value="">Choose a mode</option>
+            <option value="off">Off</option>
+            <option value="minimal">Minimal</option>
+            <option value="moderate">Moderate</option>
+            <option value="strict">Strict</option>
+          </select>
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set loop detection</button>
       </form>
     </details>
     <details>
