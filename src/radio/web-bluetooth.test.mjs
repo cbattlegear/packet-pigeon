@@ -39,7 +39,14 @@ function fixture({
   const state = {
     chooses: 0, connects: 0, closes: 0, subscriptions: 0, connected: false,
     identity: 0xab, missingService: false, rejectSubscription: false, rejectClose: false, rejectConnects: 0,
-    dequeued: 0,
+    dequeued: 0, pathLength: 0, pathBytes: [],
+  }
+  const contactFrame = () => {
+    const contact = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), directMessaging ? 1 : 2, 0,
+      activeDiscovery ? state.pathLength : 0xff, ...new Uint8Array(112))
+    contact.set(state.pathBytes, 36)
+    contact.set(encode('Fixture repeater'), 100)
+    return contact
   }
   const notify = (frame) => {
     // Bluetooth characteristic values may be views into a larger backing buffer.
@@ -63,11 +70,11 @@ function fixture({
       notify(Uint8Array.of(5, 1, 0, 0, ...new Uint8Array(32).fill(state.identity),
         ...new Uint8Array(22), ...encode('Bluetooth fixture')))
     } else if (command[0] === 4) {
-      const contact = Uint8Array.of(3, ...new Uint8Array(32).fill(0xbc), directMessaging ? 1 : 2, 0, activeDiscovery ? 0 : 0xff, ...new Uint8Array(112))
-      contact.set(encode('Fixture repeater'), 100)
       notify(Uint8Array.of(2, 1, 0, 0, 0))
-      notify(contact)
+      notify(contactFrame())
       notify(Uint8Array.of(4, 0, 0, 0, 0))
+    } else if (command[0] === 30 && activeDiscovery) {
+      notify(command[1] === 0xbc ? contactFrame() : Uint8Array.of(1, 2))
     } else if (command[0] === 55 && activeDiscovery) {
       notify(Uint8Array.of(0x8e, 0xf8, 0x9c, 0, 0x92, 0xec, ...command.slice(3, 7), ...new Uint8Array(8).fill(0xbc)))
       notify(Uint8Array.of(0x8e, 0xf8, 0x9c, 0, 0x92, 0xec, ...command.slice(3, 7), ...new Uint8Array(32).fill(0xbc)))
@@ -216,7 +223,16 @@ test('active discovery uses Bluetooth only on request and ignores short discover
     { kind: 'regions', regions: ['*', 'local'] })
   assert.deepEqual(await session.discoverRepeaterDetails(key, 'bc'.repeat(32), 'owner', signal, () => {}),
     { kind: 'owner', name: 'Relay', owner: 'Operator' })
-  assert.deepEqual(radio.writes.map(({ bytes }) => bytes[0]), [22, 1, 4, 55, 4, 57, 4, 57])
+  radio.state.pathLength = 0x42
+  radio.state.pathBytes = [0x12, 0x34, 0x56, 0x78]
+  assert.deepEqual(await session.discoverRepeaterDetails(key, 'bc'.repeat(32), 'regions', signal, () => {}, {
+    expectedRoute: { pathLength: 0x42, pathHex: '12345678' }, replyPath: { width: 2, text: '5678 1234' },
+  }), { kind: 'regions', regions: ['*', 'local'] })
+  assert.deepEqual(radio.writes.at(-1).bytes.slice(33), [1, 0x42, 0x56, 0x78, 0x12, 0x34])
+  assert.deepEqual(await session.discoverRepeaterDetails(key, 'cd'.repeat(32), 'regions', signal, () => {}, {
+    expectedRoute: null, replyPath: { width: 1, text: '' },
+  }), { kind: 'regions', regions: ['*', 'local'] })
+  assert.deepEqual(radio.writes.map(({ bytes }) => bytes[0]), [22, 1, 4, 55, 30, 57, 30, 57, 30, 57, 30, 57])
   await session.disconnect()
 })
 

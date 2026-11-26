@@ -19,3 +19,20 @@
 .nearby-owner {
   white-space: pre-wrap;
 }
+
+.discovery-field {
+  display: grid;
+  gap: 4px;
+  max-width: 32rem;
+  margin: 12px 0;
+}
+
+.discovery-field :is(input, select) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.discovery-details-only {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 56rem;
+}

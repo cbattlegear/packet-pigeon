@@ -481,23 +481,35 @@ further reads; a read already in flight must finish or time out.
 
 **Send nearby discovery** explicitly transmits one zero-hop discovery broadcast
 and listens for 20 seconds. It requires companion protocol v8 or newer.
-Some nodes do not respond, and discovery replies are unsigned; names are local
-contact or advert matches, not verified identities. Results are temporary and
-do not add contacts. Stop waiting or leave Discovery to stop listening; a
-transmission already sent cannot be recalled.
+The companion does not support a multi-hop discovery broadcast. Some nodes do
+not respond, and discovery replies are unsigned; names are local contact or
+advert matches, not verified identities. Scan results are temporary and the
+scan does not add contacts. Stop waiting or leave Discovery to stop listening;
+a transmission already sent cannot be recalled.
 Bluetooth may split or drop replies, and truncated region or owner information
-can appear complete; use USB for more reliable results.
+can appear complete; larger writes may also be rejected. Use USB for more
+reliable results.
 
-Select a discovered repeater to explicitly request its regions or owner details.
-Each button sends a separate direct mesh request. To avoid changing radio state
-or flooding a request, the repeater must already be saved on the radio with a
-zero-hop path. Requests are checked against the current radio contact list;
-Packet Pigeon does not request contact or path changes. On newer companion
-firmware, a contact removed between the check and the send may be re-added by
-the radio. Other radio actions, including noise-floor polling, are unavailable
-while waiting for a repeater reply. Some companion protocol v8 firmware and
-older repeater firmware do not support these requests, and replies may time
-out or omit regions that did not fit in a packet.
+Select a saved repeater, even without scanning, or a nearby repeater to explicitly
+request its regions or owner details. Each button sends a separate direct mesh
+request. Saved repeaters can use their zero-hop or multi-hop direct route; unknown
+or flood routes are not sent. For a routed request, check the reply path: the
+reversed outgoing route is only a starting point and may not work in an
+asymmetric network. The radio's actual contact and route are checked immediately
+before sending; Packet Pigeon does not request contact or path changes. If a
+hidden temporary contact shadows a saved repeater, the request is stopped;
+restart the radio or clear the temporary entry, then refresh Contacts.
+
+Unsaved nearby repeaters require companion protocol v13 or newer. After explicit
+confirmation, the radio may create or replace a temporary contact with a
+zero-hop route; some firmware exposes it in the normal contact list. An unsaved
+multi-hop route cannot be supplied by this companion command: save the repeater
+with a direct route first. A saved contact removed between the check and send
+may likewise be re-added by newer firmware. Other radio actions, including
+noise-floor polling, are unavailable while waiting for a repeater reply. Stop
+waiting or leave Discovery to cancel listening. Some companion protocol v8
+firmware and older repeater firmware do not support these requests, and replies
+may time out or omit regions that did not fit in a packet.
 
 ## Static hosting and offline browsing
 

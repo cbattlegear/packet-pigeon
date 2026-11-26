@@ -7,10 +7,10 @@ import { expectResponse, SerialLink } from './serial-link.ts'
 import type { CompanionLinkPort } from './serial-link.ts'
 import { browserSerialEnvironment, choosePort } from './web-serial.ts'
 import type { CompanionSerialPort, WebSerialEnvironment } from './web-serial.ts'
-import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contactPublicKey,
+import { addContactCommand, contactPathUpdate, contactPermissionsUpdate, contactPublicKey, findContactFrame,
   readContactForEdit, readContactFrame, removeContactCommand, writeContactCommand } from './contact-commands.ts'
 import type { ContactPermissions, NewContact } from './contact-commands.ts'
-import { decodeContactPath } from './contact-path.ts'
+import { decodeContactPath, parseContactPath } from './contact-path.ts'
 import type { ContactPathWidth } from './contact-path.ts'
 import { contactPingWidth, parseTracePath, sendContactPing, sendPathTrace } from './contact-ping.ts'
 import type { PingHashWidth, TraceHashWidth } from './contact-ping.ts'
@@ -21,7 +21,7 @@ import type { CompanionBluetoothDevice, WebBluetoothEnvironment } from './web-bl
 import {
   readAdvertPath, readAutoAddPolicy, readNoiseFloor, requestRepeaterDetails, scanNearby, sendNearbyRequest, writeAutoAddPolicy,
 } from './discovery-commands.ts'
-import type { AutoAddPolicy, NearbyNode, RepeaterDetails } from './discovery-commands.ts'
+import type { AutoAddPolicy, NearbyNode, RepeaterDetails, RepeaterRequestOptions } from './discovery-commands.ts'
 import { channelName, makeChannelSecret, readChannelSlot, secretHex, writeChannelSlot } from './channel-commands.ts'
 import { channelMessageCommand } from './channel-message.ts'
 import { writeSetupPathWidth, writeSetupRadioSettings } from './setup-commands.ts'
@@ -484,18 +484,40 @@ export class CompanionSession {
 
   readonly discoverRepeaterDetails = async (
     radioKey: string, contactKey: string, kind: RepeaterDetails['kind'], signal: AbortSignal, onWaiting: () => void,
+    options?: RepeaterRequestOptions,
   ) => {
     const key = contactPublicKey(contactKey)
+    if (key === radioKey) throw new Error('Choose a different repeater from the connected radio.')
     if (kind !== 'regions' && kind !== 'owner') throw new Error('Choose a supported discovery request.')
     return this.watchDiscovery(radioKey, signal, (request) => this.runRadioCommand(radioKey, async (link) => {
-      const contacts = await this.readContacts(link)
-      request.throwIfAborted()
-      const contact = contacts.find(({ publicKey }) => publicKey === key)
-      const path = contact && decodeContactPath(contact.pathLength, contact.pathHex)
-      if (!contact || contact.type !== 2 || !path || path.hops.length !== 0) {
-        throw new Error('Region and owner requests require a saved repeater with a zero-hop radio path.')
+      const version = this.snapshot.device!.capabilities.firmwareProtocolVersion
+      const expected = options === undefined ? { pathLength: 0, pathHex: '' } : options.expectedRoute
+      const replyPath = parseContactPath(options?.replyPath.text ?? '', options?.replyPath.width ?? 1)
+      if (replyPath.width > 1 && version < 10) throw new Error('This firmware does not support that reply path hash width.')
+      if (expected === null && version < 13) {
+        throw new CompanionError('unsupported-firmware', 'Unsaved repeater requests require companion protocol v13 or newer.')
       }
-      return requestRepeaterDetails(link, key, kind, this.subscribeToPushes, request, onWaiting)
+      const frame = await findContactFrame(link, key)
+      request.throwIfAborted()
+      const contact = frame && decodeContact(frame)
+      const path = contact && decodeContactPath(contact.pathLength, contact.pathHex)
+      const expectedPath = expected && decodeContactPath(expected.pathLength, expected.pathHex)
+      if (expected === null) {
+        if (contact && (contact.type !== 0 || !path || path.hops.length !== 0)) {
+          throw new Error('The repeater changed on the radio. Refresh contacts before retrying.')
+        }
+      } else {
+        if (contact?.type === 0) {
+          throw new Error('The radio is using a temporary contact instead of the saved repeater. Restart the radio or clear that entry, then refresh Contacts.')
+        }
+        if (!expectedPath || !contact || contact.type !== 2 || !path
+          || expectedPath.width !== path.width || expectedPath.hops.join('') !== path.hops.join('')) {
+          throw new Error('The saved repeater or its route changed. Refresh Contacts and select it again before retrying.')
+        }
+        if (path.width > 1 && version < 10) throw new Error('This firmware does not support that saved path hash width.')
+      }
+      return requestRepeaterDetails(link, key, kind, this.subscribeToPushes, request, onWaiting, replyPath,
+        Boolean(path?.hops.length || replyPath.count))
     }))
   }
 

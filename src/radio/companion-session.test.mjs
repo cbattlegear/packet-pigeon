@@ -277,12 +277,13 @@ test('nearby discovery waits for an in-flight acknowledgement and stops on disco
   await session.disconnect()
 })
 
-test('repeater details use only a freshly verified saved zero-hop repeater', async () => {
+test('repeater details verify the current contact and direct route before sending', async () => {
   const contact = contactInfo()
   contact[33] = 2
   contact[35] = 0
   let holdRead = false
   let rejectDetails = false
+  let lookupError = false
   let finishRead
   const port = new FixturePort((command, serial) => {
     switch (command[0]) {
@@ -291,9 +292,18 @@ test('repeater details use only a freshly verified saved zero-hop repeater', asy
       case 4:
         serial.emit(2, 1, 0, 0, 0)
         serial.emit(...contact)
-        if (holdRead) finishRead = () => serial.emit(4, 0, 0, 0, 0)
-        else serial.emit(4, 0, 0, 0, 0)
+        serial.emit(4, 0, 0, 0, 0)
         break
+      case 30: {
+        const reply = () => {
+          if (lookupError) serial.emit(1, 1)
+          else if (command[1] !== 0xbc) serial.emit(1, 2)
+          else serial.emit(...contact)
+        }
+        if (holdRead) finishRead = reply
+        else reply()
+        break
+      }
       case 57: {
         if (rejectDetails) {
           serial.emit(1, 1)
@@ -323,13 +333,13 @@ test('repeater details use only a freshly verified saved zero-hop repeater', asy
     { code: 'unsupported-firmware' })
   assert.equal(session.getSnapshot().phase, 'ready')
   rejectDetails = false
-  const sent = port.commands.filter(([code]) => code === 57).length
+  let sent = port.commands.filter(([code]) => code === 57).length
   contact[35] = 0xff
   await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
-    /zero-hop/)
+    /saved repeater or its route changed/)
   contact[35] = 1
   await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
-    /zero-hop/)
+    /saved repeater or its route changed/)
   contact[35] = 0
   contact[33] = 1
   await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
@@ -337,6 +347,34 @@ test('repeater details use only a freshly verified saved zero-hop repeater', asy
   contact[33] = 2
   await assert.rejects(session.discoverRepeaterDetails(key, 'cd'.repeat(32), 'regions', new AbortController().signal, () => {}),
     /saved repeater/)
+  contact[33] = 0
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
+    /temporary contact instead of the saved repeater/)
+  contact[33] = 2
+  lookupError = true
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}),
+    /could not read this contact/)
+  lookupError = false
+  assert.equal(port.commands.filter(([code]) => code === 57).length, sent)
+
+  contact[35] = 0x42
+  contact.set([0x12, 0x34, 0x56, 0x78], 36)
+  const options = { expectedRoute: { pathLength: 0x42, pathHex: '12345678' }, replyPath: { width: 2, text: '5678 1234' } }
+  assert.deepEqual(await session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}, options),
+    { kind: 'regions', regions: ['*', 'local'] })
+  assert.deepEqual(port.commands.at(-1), [57, ...new Uint8Array(32).fill(0xbc), 1, 0x42, 0x56, 0x78, 0x12, 0x34])
+  sent++
+  contact[36] = 0xaa
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}, options),
+    /saved repeater or its route changed/)
+  contact[36] = 0x12
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {},
+    { ...options, replyPath: { width: 2, text: '123' } }), /complete 2-byte hex hashes/)
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {},
+    { ...options, expectedRoute: { pathLength: 0xff, pathHex: '' } }), /saved repeater or its route changed/)
+  assert.equal(port.commands.filter(([code]) => code === 57).length, sent)
+
+  contact[35] = 0
   holdRead = true
   const controller = new AbortController()
   const cancelled = session.discoverRepeaterDetails(key, target, 'regions', controller.signal, () => {})
@@ -345,6 +383,100 @@ test('repeater details use only a freshly verified saved zero-hop repeater', asy
   finishRead()
   await assert.rejects(cancelled, /Cancelled before transmission/)
   assert.equal(port.commands.filter(([code]) => code === 57).length, sent)
+  await session.disconnect()
+})
+
+test('unsaved repeater requests require v13 and verify any temporary contact route', async () => {
+  let version = 14
+  let temporary = false
+  let holdReply = false
+  const contact = contactInfo()
+  contact.fill(0xcd, 1, 33)
+  contact[33] = 0
+  contact[35] = 0
+  const port = new FixturePort((command, serial) => {
+    switch (command[0]) {
+      case 22: { const info = deviceInfo(); info[1] = version; serial.emit(...info); break }
+      case 1: serial.emit(...selfInfo()); break
+      case 4: serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0); break
+      case 30: if (temporary) serial.emit(...contact); else serial.emit(1, 2); break
+      case 57:
+        temporary = true
+        if (!holdReply) serial.emit(0x8c, 0, 1, 2, 3, 4, 9, 0, 0, 0, ...encode('*,local'))
+        serial.emit(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0)
+        break
+      default: assert.fail(`Unexpected command ${command[0]}`)
+    }
+  })
+  const session = sessionWith(port)
+  const key = 'ab'.repeat(32)
+  const target = 'cd'.repeat(32)
+  const options = { expectedRoute: null, replyPath: { width: 1, text: '' } }
+  await session.connect()
+  assert.deepEqual(await session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}, options),
+    { kind: 'regions', regions: ['*', 'local'] })
+  assert.deepEqual(port.commands.at(-1), [57, ...new Uint8Array(32).fill(0xcd), 1, 0])
+  assert.deepEqual(await session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}, options),
+    { kind: 'regions', regions: ['*', 'local'] })
+  let sent = port.commands.filter(([code]) => code === 57).length
+  contact[35] = 1
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}, options),
+    /repeater changed on the radio/)
+  contact[35] = 0
+  contact[33] = 2
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}, options),
+    /repeater changed on the radio/)
+  assert.equal(port.commands.filter(([code]) => code === 57).length, sent)
+  contact[33] = 0
+  holdReply = true
+  const controller = new AbortController()
+  let waiting = false
+  const pending = session.discoverRepeaterDetails(key, target, 'regions', controller.signal, () => { waiting = true }, options)
+  await waitFor(() => waiting)
+  controller.abort(new Error('Stopped waiting'))
+  await assert.rejects(pending, /Stopped waiting/)
+  sent++
+  assert.equal(port.commands.filter(([code]) => code === 57).length, sent)
+  assert.equal(port.commands.some(([code]) => code === 9), false)
+  await session.disconnect()
+
+  version = 12
+  const oldPort = new FixturePort((command, serial) => {
+    if (command[0] === 22) { const info = deviceInfo(); info[1] = version; serial.emit(...info) }
+    else if (command[0] === 1) serial.emit(...selfInfo())
+    else if (command[0] === 4) { serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0) }
+    else assert.fail(`Unexpected command ${command[0]}`)
+  })
+  const oldSession = sessionWith(oldPort)
+  await oldSession.connect()
+  await assert.rejects(oldSession.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}, options),
+    { code: 'unsupported-firmware' })
+  assert.equal(oldPort.commands.some(([code]) => code === 57), false)
+  await oldSession.disconnect()
+})
+
+test('older firmware rejects unsupported saved and reply path widths before transmission', async () => {
+  const contact = contactInfo()
+  contact[33] = 2
+  contact[35] = 0x41
+  contact.set([0x12, 0x34], 36)
+  const port = new FixturePort((command, serial) => {
+    if (command[0] === 22) { const info = deviceInfo(); info[1] = 9; serial.emit(...info) }
+    else if (command[0] === 1) serial.emit(...selfInfo())
+    else if (command[0] === 4) { serial.emit(2, 1, 0, 0, 0); serial.emit(...contact); serial.emit(4, 0, 0, 0, 0) }
+    else if (command[0] === 30) serial.emit(...contact)
+    else assert.fail(`Unexpected command ${command[0]}`)
+  })
+  const session = sessionWith(port)
+  const key = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const options = { expectedRoute: { pathLength: 0x41, pathHex: '1234' }, replyPath: { width: 1, text: '' } }
+  await session.connect()
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {}, options),
+    /does not support that saved path hash width/)
+  await assert.rejects(session.discoverRepeaterDetails(key, target, 'regions', new AbortController().signal, () => {},
+    { ...options, replyPath: { width: 2, text: '1234' } }), /does not support that reply path hash width/)
+  assert.equal(port.commands.some(([code]) => code === 57), false)
   await session.disconnect()
 })
 

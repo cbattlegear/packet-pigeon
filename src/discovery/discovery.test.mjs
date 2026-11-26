@@ -142,13 +142,19 @@ test('direct repeater requests correlate early replies and parse regions and own
     kind: 'owner', name: 'Ridge relay', owner: 'Contact the local operator',
   })
   assert.deepEqual(writes[1], [57, ...contactBytes, 2, 0])
+  body = new TextEncoder().encode('north')
+  assert.deepEqual(await requestRepeaterDetails(link, contact, 'regions', subscribe,
+    new AbortController().signal, () => {}, { encoded: 0x81, hex: 'aabbcc' }), {
+    kind: 'regions', regions: ['north'],
+  })
+  assert.deepEqual(writes[2], [57, ...contactBytes, 1, 0x81, 0xaa, 0xbb, 0xcc])
   body = new TextEncoder().encode('north,,south')
   await assert.rejects(requestRepeaterDetails(link, contact, 'regions', subscribe,
     new AbortController().signal, () => {}), { code: 'protocol' })
   body = new TextEncoder().encode('north,\u0085')
   await assert.rejects(requestRepeaterDetails(link, contact, 'regions', subscribe,
     new AbortController().signal, () => {}), { code: 'protocol' })
-  assert.equal(removed, 4)
+  assert.equal(removed, 5)
 })
 
 test('repeater requests time out and unsubscribe without retrying', async (t) => {
@@ -162,6 +168,29 @@ test('repeater requests time out and unsubscribe without retrying', async (t) =>
   await assert.rejects(pending, /timeout/)
   assert.equal(removed, true)
   assert.equal(link.writes.length, 1)
+})
+
+test('routed requests use a bounded longer timeout and reject invalid return paths before sending', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let removed = false
+  let settled = false
+  const link = radioFixture([[6, 0, 1, 2, 3, 4, 0, 0, 0, 0]])
+  const pending = requestRepeaterDetails(link, contact, 'regions', () => () => { removed = true },
+    new AbortController().signal, () => {}, { encoded: 1, hex: 'aa' }, true)
+  pending.then(() => { settled = true }, () => { settled = true })
+  await setImmediate()
+  t.mock.timers.tick(119_999)
+  await setImmediate()
+  assert.equal(settled, false)
+  t.mock.timers.tick(1)
+  await assert.rejects(pending, /timeout/)
+  assert.equal(removed, true)
+  assert.deepEqual(link.writes[0], [57, ...contactBytes, 1, 1, 0xaa])
+
+  const invalid = radioFixture([])
+  await assert.rejects(requestRepeaterDetails(invalid, contact, 'regions', () => () => {},
+    new AbortController().signal, () => {}, { encoded: 0x42, hex: '1234' }), /reply path is invalid/)
+  assert.deepEqual(invalid.writes, [])
 })
 
 test('a flooded repeater request is reported as already sent', async () => {
