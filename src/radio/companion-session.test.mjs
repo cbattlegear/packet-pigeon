@@ -756,6 +756,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('get adc.multiplier'), /administrator/)
   await assert.rejects(send('set adc.multiplier 1.234', true), /administrator/)
   await assert.rejects(send('set tx 12', true), /administrator/)
+  await assert.rejects(send('set radio 910.525,62.5,7,5', true), /administrator/)
   await assert.rejects(send('get radio.rxgain'), /administrator/)
   await assert.rejects(send('set radio.rxgain on', true), /administrator/)
   await assert.rejects(send('set agc.reset.interval 4', true), /administrator/)
@@ -828,6 +829,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('get adc.multiplier'), /administrator/)
   await assert.rejects(send('set adc.multiplier 1.234', true), /administrator/)
   await assert.rejects(send('set tx 12', true), /administrator/)
+  await assert.rejects(send('set radio 910.525,62.5,7,5', true), /administrator/)
   await assert.rejects(send('get radio.rxgain'), /administrator/)
   await assert.rejects(send('set radio.rxgain off', true), /administrator/)
   await assert.rejects(send('get agc.reset.interval'), /administrator/)
@@ -907,6 +909,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set adc.multiplier 1.234'), /Confirm/)
   await assert.rejects(send('set adc.multiplier 10.001', true), /battery ADC multiplier/)
   await assert.rejects(send('set tx 12'), /Confirm/)
+  await assert.rejects(send('set radio 910.525,62.5,7,5'), /Confirm/)
+  await assert.rejects(send('set radio 399,62.5,7,5', true), /Enter frequency 400/)
   await assert.rejects(send('set radio.rxgain on'), /Confirm/)
   await assert.rejects(send('set radio.rxgain off'), /Confirm/)
   await assert.rejects(send('set agc.reset.interval 4'), /Confirm/)
@@ -961,6 +965,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   contact[36] = 0x46
   await assert.rejects(send('ver'), /route changed/)
   await assert.rejects(send('get bridge.type'), /route changed/)
+  await assert.rejects(send('set radio 910.525,62.5,7,5', true), /route changed/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /route changed/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /route changed/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 1`, true), /route changed/)
@@ -1032,6 +1037,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const txPower = await send('set tx 14', true)
   const txPowerFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(txPowerFrame.slice(13))), `${txPower.tag}|set tx 14`)
+  const radioSettings = await send('set radio 910.525,62.5,7,5', true)
+  const radioSettingsFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(radioSettingsFrame.slice(13))),
+    `${radioSettings.tag}|set radio 910.525,62.5,7,5`)
   for (const command of ['set txdelay 0.5', 'set direct.txdelay 0.25']) {
     const receipt = await send(command, true)
     const frame = port.commands.filter(([code]) => code === 2).at(-1)
