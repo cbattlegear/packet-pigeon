@@ -195,6 +195,38 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await sync.click()
   await floodHistory.getByText('Flood disabled', { exact: true }).waitFor()
 
+  await page.getByText('Change repeater power-saving mode', { exact: true }).click()
+  await page.getByText(/sleeps between radio transmissions and may be less responsive/).waitFor()
+  const beforePowerSave = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  await page.getByRole('button', { name: 'Read power-saving mode' }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'powersaving')
+  const powerSavingHistory = page.locator('.repeater-cli-history li').filter({ hasText: 'powersaving' })
+  await page.evaluate(() => window.queueRepeaterReply('on'))
+  await sync.click()
+  await powerSavingHistory.getByText('on', { exact: true }).waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforePowerSave + 1)
+
+  const powerOff = page.getByRole('button', { name: 'Disable repeater power saving', exact: true })
+  page.once('dialog', (dialog) => {
+    assert.match(dialog.message(), /may increase repeater power consumption/)
+    assert.match(dialog.message(), /verify the reply and status/)
+    void dialog.dismiss()
+  })
+  await powerOff.click()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforePowerSave + 1)
+  page.once('dialog', (dialog) => dialog.accept())
+  await powerOff.click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'powersaving off')
+  await page.evaluate(() => window.queueRepeaterReply('ok'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'powersaving off' }).getByText('ok', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Read power-saving mode' }).click()
+  await page.evaluate(() => window.queueRepeaterReply('off'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'powersaving' }).first().getByText('off', { exact: true }).waitFor()
+
   await page.evaluate(() => { window.fixtureUnconfirmed = false })
   const beforeRegion = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
   await page.getByText('Inspect repeater regions', { exact: true }).click()

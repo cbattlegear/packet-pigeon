@@ -99,6 +99,17 @@ test('GPS advert policy changes accept only exact supported values and require c
   }
 })
 
+test('power-saving query is read-only and mutations require confirmation', () => {
+  assert.equal(repeaterCliCommand('powersaving').command, 'powersaving')
+  for (const command of ['powersaving on', 'powersaving off']) {
+    assert.equal(repeaterCliCommand(command).confirm, true)
+  }
+  for (const command of ['powersaving maybe', 'powersaving on ', 'powersaving off extra',
+    'powersaving off\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('advertisement interval changes accept only supported exact values', () => {
   for (const command of ['set advert.interval 0', 'set advert.interval 60', 'set advert.interval 240',
     'set flood.advert.interval 0', 'set flood.advert.interval 3', 'set flood.advert.interval 168']) {

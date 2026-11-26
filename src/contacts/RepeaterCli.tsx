@@ -57,6 +57,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [advertPolicy, setAdvertPolicy] = useState('')
+  const powerSavingCommands = repeaterCliCommands.filter((item) =>
+    item.command === 'powersaving on' || item.command === 'powersaving off')
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -404,6 +406,20 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set advert hash size</button>
       </form>
+    </details>
+    <details>
+      <summary>Change repeater power-saving mode</summary>
+      <p>When enabled, the repeater sleeps between radio transmissions and may be less responsive. Firmware support varies.
+        Read the current mode explicitly; sync each reply and check the reported state after changing it. Radio acceptance
+        alone does not confirm the command succeeded.</p>
+      <div className="contact-actions">
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('powersaving', 'Read repeater power-saving mode', false)}>Read power-saving mode</button>
+        {powerSavingCommands.map((item) => (
+          <button key={item.command} type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+            onClick={() => sendChoice(item)}>{item.description}</button>
+        ))}
+      </div>
     </details>
     <details>
       <summary>Change advertisement interval</summary>
