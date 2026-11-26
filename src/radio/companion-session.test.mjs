@@ -716,6 +716,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
+  await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 0`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 1`, true), /administrator/)
@@ -755,6 +756,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
+  await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 0`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /administrator/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 2`, true), /administrator/)
@@ -811,6 +813,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   }
   await assert.rejects(send('advert'), /Confirm/)
   await assert.rejects(send('discover.neighbors'), /Confirm/)
+  await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`), /Confirm/)
+  await assert.rejects(send('neighbor.remove dddddddd', true), /supported repeater CLI command/)
   await assert.rejects(send('discover.neighbors extra', true), /supported repeater CLI command/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 0`), /Confirm/)
   await assert.rejects(send(`setperm ${key} 0`, true), /connected radio or repeater/)
@@ -884,6 +888,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
   await assert.rejects(send('ver'), /route changed/)
+  await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /route changed/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 3`, true), /route changed/)
   await assert.rejects(send(`setperm ${'dd'.repeat(32)} 1`, true), /route changed/)
   contact[36] = 0x45
@@ -999,6 +1004,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const discovery = await send('discover.neighbors', true)
   const discoveryFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(discoveryFrame.slice(13))), `${discovery.tag}|discover.neighbors`)
+  const neighborRemoval = await send(`neighbor.remove ${'dd'.repeat(32)}`, true)
+  const neighborRemovalFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(neighborRemovalFrame.slice(13))), `${neighborRemoval.tag}|neighbor.remove ${'dd'.repeat(32)}`)
   const removal = await send(`setperm ${'dd'.repeat(32)} 0`, true)
   const removalFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(removalFrame.slice(13))), `${removal.tag}|setperm ${'dd'.repeat(32)} 0`)
