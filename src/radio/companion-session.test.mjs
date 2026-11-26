@@ -566,6 +566,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   let duplicate = false
   let malformed = false
   let delayed = false
+  let holdAccess = false
+  let badAccess = false
+  let accessTag = 0
+  let lateAccess
   const port = new FixturePort((command, serial) => {
     switch (command[0]) {
       case 22: serial.emit(...deviceInfo()); break
@@ -589,6 +593,17 @@ test('repeater CLI requires current admin access, a verified route, and confirme
         if (malformed) serial.emit(6, 0)
         else serial.emit(6, 0, 0, 0, 0, 0, 0xe8, 3, 0, 0)
         break
+      case 50: {
+        const tag = [++accessTag, 2, 3, 4]
+        serial.emit(6, 0, ...tag, 0xe8, 3, 0, 0)
+        const reply = () => serial.emit(0x8c, 0, ...tag, ...new Uint8Array(6).fill(0xdd), ...(badAccess ? [] : [3]))
+        if (holdAccess) lateAccess = reply
+        else {
+          if (lateAccess) { lateAccess(); lateAccess = undefined }
+          reply()
+        }
+        break
+      }
       default: assert.fail(`Unexpected command ${command[0]}`)
     }
   })
@@ -600,6 +615,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const route = { pathLength: 1, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
   const signal = () => new AbortController().signal
   const send = (command, confirmed = false) => session.sendRepeaterCommand(key, target, route, command, confirmed, signal())
+  const readAccess = () => session.readRepeaterAccessList(key, target, route, signal())
+  await assert.rejects(readAccess(), /administrator/)
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
@@ -627,6 +644,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('powersaving on', true), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
+  await assert.rejects(readAccess(), /administrator/)
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
@@ -650,6 +668,23 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('powersaving off', true), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
+  assert.deepEqual(await readAccess(), [{ prefix: 'dd'.repeat(6), permissions: 3, role: 'admin' }])
+  assert.deepEqual(port.commands.filter(([code]) => code === 50).at(-1), [50, ...contact.slice(1, 33), 5, 0, 0])
+  badAccess = true
+  await assert.rejects(readAccess(), /incomplete access list/)
+  badAccess = false
+  holdAccess = true
+  const cancelAccess = new AbortController()
+  const pendingAccess = session.readRepeaterAccessList(key, target, route, cancelAccess.signal)
+  await waitFor(() => lateAccess !== undefined)
+  cancelAccess.abort(new Error('Stopped waiting'))
+  await assert.rejects(pendingAccess, /Stopped waiting/)
+  holdAccess = false
+  assert.deepEqual(await readAccess(), [{ prefix: 'dd'.repeat(6), permissions: 3, role: 'admin' }])
+  contact[36] = 0x46
+  const changedRoute = { pathLength: 1, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+  await assert.rejects(session.readRepeaterAccessList(key, target, changedRoute, signal()), /route changed/)
+  contact[36] = 0x45
   for (const command of ['get guest.password', 'password secret', 'reboot now',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
     await assert.rejects(send(command, true), /supported repeater CLI command/)

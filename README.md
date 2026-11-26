@@ -500,6 +500,15 @@ firmware does not tag these replies, so even after
 reconnecting a delayed reply cannot be conclusively distinguished from a new
 one. The reported role is not a guarantee of current authorization.
 
+Administrators can explicitly request the repeater access list. Entries carry
+six-byte public-key prefixes and permission bits, not full identities; prefixes
+can collide. Guest entries may be omitted and the reply can be truncated
+without notice, so absence does not prove a client lacks access. Firmware
+support varies; some companions do not surface an empty reply, causing a
+timeout. The browser receipt time is shown, but the reply can be delayed and
+the snapshot can become stale. Request tags correlate replies, but reuse after
+a radio restart may still make a delayed response ambiguous.
+
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 which can map unique matches with saved positions as separate points rather

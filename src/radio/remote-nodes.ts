@@ -32,7 +32,7 @@ export function nodeRole(permissions: number): RemoteNodeRole {
 
 async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscribe: PushSubscription,
   signal: AbortSignal, match: (push: CompanionPush, sent: DirectSendReceipt) => T | undefined,
-  unconfirmed?: (cause: unknown) => Error) {
+  unconfirmed?: (cause: unknown) => Error, timeout?: { minimumMs: number; marginMs: number }) {
   signal.throwIfAborted()
   let sent: DirectSendReceipt | undefined
   let settle!: (reply: Reply<T>) => void
@@ -62,7 +62,8 @@ async function requestWithPush<T>(link: SerialLink, command: Uint8Array, subscri
     expectResponse(accepted, Response.sent)
     if (!sent) throw new Error('The radio did not confirm the request.')
     signal.throwIfAborted()
-    timer = setTimeout(stop, Math.min(120_000, Math.max(1_000, sent.timeoutMs)))
+    timer = setTimeout(stop, Math.min(120_000,
+      Math.max(timeout?.minimumMs ?? 1_000, sent.timeoutMs + (timeout?.marginMs ?? 0))))
     const result = await reply
     signal.throwIfAborted()
     if (!result) throw new Error('No reply arrived before the deadline. Check the node’s range, route, and access settings.')
@@ -107,10 +108,10 @@ export async function loginRemoteNode(link: SerialLink, publicKey: string, passw
 }
 
 export function requestRemoteNodeData(link: SerialLink, publicKey: string, payload: Uint8Array,
-  subscribe: PushSubscription, signal: AbortSignal) {
+  subscribe: PushSubscription, signal: AbortSignal, timeout?: { minimumMs: number; marginMs: number }) {
   return requestWithPush(link, Uint8Array.of(50, ...keyBytes(publicKey), ...payload), subscribe, signal,
     ({ code, payload }, { expectedAck }) => code === 0x8c && payload[0] === 0 && hex(payload.subarray(1, 5)) === expectedAck
-      ? payload.slice(5) : undefined)
+      ? payload.slice(5) : undefined, undefined, timeout)
 }
 
 export function parseRemoteNodeClients(payload: Uint8Array): RemoteNodeClient[] {

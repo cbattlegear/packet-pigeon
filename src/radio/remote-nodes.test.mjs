@@ -43,6 +43,30 @@ test('matches a binary reply by request tag and ignores unsolicited telemetry', 
   assert.throws(() => parseRemoteNodeClients(acl.slice(1)), /incomplete/)
 })
 
+test('binary request timeout can include a minimum and route margin', async (t) => {
+  const original = globalThis.setTimeout
+  const delays = []
+  t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+    delays.push(delay)
+    return original(callback, delay, ...args)
+  })
+  for (const [estimate, expected] of [[1000, 10000], [20000, 25000], [120000, 120000]]) {
+    let push
+    const link = { async request(command, receive) {
+      const frame = Uint8Array.of(6, 0, 11, 22, 33, 44, 0, 0, 0, 0)
+      new DataView(frame.buffer).setUint32(6, estimate, true)
+      const accepted = receive(frame).value
+      push({ code: 0x8c, payload: Uint8Array.of(0, 11, 22, 33, 44, ...keyPrefix, 3) })
+      return accepted
+    } }
+    await requestRemoteNodeData(link, publicKey, Uint8Array.of(5, 0, 0), (receive) => {
+      push = receive
+      return () => {}
+    }, new AbortController().signal, { minimumMs: 10000, marginMs: 5000 })
+    assert.equal(delays.at(-1), expected)
+  }
+})
+
 test('clears encoded credentials after login and validates room and sensor configuration', async () => {
   let sent
   let push
