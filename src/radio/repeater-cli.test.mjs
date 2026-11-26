@@ -249,7 +249,19 @@ test('GPS activity is explicit and receiver changes require confirmation', () =>
     assert.match(action.warning, /does not prove a fix, hardware state, or persistence/)
   }
   for (const command of ['gps', 'gps ', 'gps status', 'sensor get gps ', 'gps on ', 'gps off extra',
-    'gps on\nreboot', 'gps setloc', 'gps sync']) {
+    'gps on\nreboot', 'gps sync']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('copying sensor coordinates requires confirmation and only accepts the exact command', () => {
+  const action = repeaterCliCommand('gps setloc')
+  assert.equal(action.confirm, true)
+  assert.match(action.warning, /stale or zero even without a GPS fix or receiver/)
+  assert.match(action.warning, /does not send an advertisement/)
+  assert.match(action.warning, /local advert interval below 60 minutes/)
+  assert.match(action.warning, /does not prove a valid fix or persistence/)
+  for (const command of ['gps setloc ', 'gps setloc extra', 'gps setloc\nreboot']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
   }
 })

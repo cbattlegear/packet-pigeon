@@ -769,6 +769,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('sensor get gps'), /administrator/)
   await assert.rejects(send('gps on', true), /administrator/)
+  await assert.rejects(send('gps setloc', true), /administrator/)
   await assert.rejects(send('gps advert prefs', true), /administrator/)
   await assert.rejects(send('powersaving'), /administrator/)
   await assert.rejects(send('powersaving on', true), /administrator/)
@@ -831,6 +832,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('sensor get gps'), /administrator/)
   await assert.rejects(send('gps off', true), /administrator/)
+  await assert.rejects(send('gps setloc', true), /administrator/)
   await assert.rejects(send('gps advert share', true), /administrator/)
   await assert.rejects(send('powersaving'), /administrator/)
   await assert.rejects(send('powersaving off', true), /administrator/)
@@ -910,6 +912,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   }
   await assert.rejects(send('gps on'), /Confirm/)
   await assert.rejects(send('gps off'), /Confirm/)
+  await assert.rejects(send('gps setloc'), /Confirm/)
   for (const command of ['powersaving on', 'powersaving off']) {
     await assert.rejects(send(command), /Confirm/)
   }

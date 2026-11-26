@@ -75,6 +75,8 @@ export const repeaterCliCommands = [
   { command: 'sensor get gps', description: 'Read GPS activity setting' },
   { command: 'gps on', description: 'Enable GPS receiver', confirm: true, warning: gpsWarning },
   { command: 'gps off', description: 'Disable GPS receiver', confirm: true, warning: gpsWarning },
+  { command: 'gps setloc', description: 'Copy sensor coordinates to stored position', confirm: true,
+    warning: 'This replaces both stored coordinates with the sensor values, which may be stale or zero even without a GPS fix or receiver. New advertisements can publish them when the policy is prefs. This does not send an advertisement or recall queued or sent locations. In v1.14.1, saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An ok reply does not prove a valid fix or persistence. Sync replies and read both stored coordinates separately.' },
   { command: 'gps advert', description: 'Read GPS advert policy' },
   { command: 'gps advert none', description: 'Set GPS advert policy to none', confirm: true,
     warning: 'If applied, new advertisements omit location, but already queued or transmitted locations cannot be recalled. This does not send an advertisement. Some firmware builds do not support this command; check the reply and read the policy.' },
