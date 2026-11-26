@@ -1,0 +1,9 @@
+services:
+  packet-pigeon:
+    build: .
+    ports:
+      - "127.0.0.1:${PACKET_PIGEON_PORT:-4175}:4175"
+    environment:
+      PACKET_PIGEON_PORT: "${PACKET_PIGEON_PORT:-4175}"
+      MESHCORE_RADIO_IP: "${MESHCORE_RADIO_IP:-}"
+      MESHCORE_RADIO_PORT: "${MESHCORE_RADIO_PORT:-5000}"

@@ -14,6 +14,35 @@ loaded data for that radio.
 
 ## Getting started
 
+### Run with Docker
+
+With Docker running and Docker Compose installed, start Packet Pigeon from the
+repository root.
+
+```sh
+docker compose up --build -d
+```
+
+Open [http://127.0.0.1:4175](http://127.0.0.1:4175) on the Docker host. Chrome or
+Edge can use the host's USB and Bluetooth devices through their normal browser
+permission prompts. The browser keeps its local cache when the container stops.
+
+To test a Wi-Fi or Ethernet companion, create a `.env` file beside
+`compose.yaml` with the radio's private IPv4 address.
+
+```dotenv
+MESHCORE_RADIO_IP=192.168.1.40
+```
+
+Run `docker compose up -d` again and choose **Connect local network** in the
+app. The container must be able to reach the radio on your LAN. The radio
+defaults to TCP port `5000`. Set `MESHCORE_RADIO_PORT` if it uses a different
+port. If the browser port is taken, set `PACKET_PIGEON_PORT` and open
+`http://127.0.0.1` on that port. The web app is published on the host's
+loopback interface. Run `docker compose down` to stop it.
+
+### Run from source
+
 Use Node.js 24 LTS and npm. From the repository root:
 
 ```sh
