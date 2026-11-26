@@ -25,6 +25,7 @@ export const repeaterCliCommands = [
   { command: 'get radio', description: 'Read radio parameters' },
   { command: 'get radio.rxgain', description: 'Read receiver boosted-gain preference' },
   { command: 'get agc.reset.interval', description: 'Read AGC reset interval' },
+  { command: 'get int.thresh', description: 'Read interference threshold' },
   { command: 'get multi.acks', description: 'Read extra direct ACK preference' },
   { command: 'set multi.acks 1', description: 'Enable extra direct ACKs', confirm: true, warning: multiAckWarning },
   { command: 'set multi.acks 0', description: 'Disable extra direct ACKs', confirm: true, warning: multiAckWarning },
@@ -292,6 +293,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter an AGC reset interval from 0 to 1020 seconds in multiples of 4.')
     }
     return { command, description: 'Set AGC reset interval', confirm: true as const }
+  }
+  const interferencePrefix = 'set int.thresh '
+  if (command.startsWith(interferencePrefix)) {
+    const value = command.slice(interferencePrefix.length)
+    const match = /^(0|[1-9][0-9]*)$/.exec(value)
+    if (!match || match[0] !== value || Number(value) > 255) {
+      throw new Error('Enter a whole interference threshold from 0 to 255.')
+    }
+    return { command, description: 'Set interference threshold', confirm: true as const }
   }
   const guestPasswordPrefix = 'set guest.password '
   if (command.startsWith(guestPasswordPrefix)) {

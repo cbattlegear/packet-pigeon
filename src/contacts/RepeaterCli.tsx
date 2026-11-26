@@ -54,6 +54,10 @@ const agcResetWarning = 'Zero disables scheduled resets. Radio and firmware supp
   'In repeater firmware v1.14.1, the timer restarts after a send completes or times out. RadioLib skips a reset during packet reception or when a packet is pending, then schedules the next attempt. An applied reset briefly interrupts reception and restarts noise-floor sampling. An existing timer can carry over after a change. ' +
   'Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. ' +
   'An OK reply or matching read-back does not prove a reset occurred or the preference was saved.'
+const interferenceWarning = 'Changing this can affect collisions, transmission delays and remote access. ' +
+  'In repeater v1.14.1 RadioLib, zero disables the extra noise-floor-based interference check, not the packet-reception busy check. A nonzero value is a dB offset above the sampled noise floor, compared with current signal strength; a low value can delay sends, while a high value can miss interference. The noise floor can be inaccurate. ' +
+  'Changes reach the radio check periodically, not necessarily immediately. After about four seconds of busy detection, v1.14.1 may transmit anyway. Radio and firmware support varies. ' +
+  'Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove detection worked or the preference was saved.'
 
 export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
@@ -68,6 +72,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [retransmitDelay, setRetransmitDelay] = useState('')
   const [receiveDelay, setReceiveDelay] = useState('')
   const [agcResetInterval, setAgcResetInterval] = useState('')
+  const [interferenceThreshold, setInterferenceThreshold] = useState('')
   const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
@@ -266,6 +271,17 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       void send(command.command, `${command.description} to ${agcResetInterval} seconds`, true, agcResetWarning)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid AGC reset interval.')
+    }
+  }
+
+  function submitInterferenceThreshold(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set int.thresh ${interferenceThreshold}`)
+      void send(command.command, `${command.description} to ${interferenceThreshold}`, true, interferenceWarning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid interference threshold.')
     }
   }
 
@@ -754,6 +770,22 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
+      <summary>Change interference threshold</summary>
+      <p>Enter a whole value from 0 to 255; this is the v1.14.1 storage range, not a recommended setting.
+        Choose a value appropriate for the device and environment. {interferenceWarning} Read the preference first,
+        then sync the reply and read it again.</p>
+      <form className="contact-actions" onSubmit={submitInterferenceThreshold}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get int.thresh', 'Read interference threshold', false)}>Read interference threshold</button>
+        <label>New interference threshold (0–255)
+          <input type="text" inputMode="numeric" required value={interferenceThreshold}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setInterferenceThreshold(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set interference threshold</button>
+      </form>
+    </details>
+    <details>
       <summary>Change extra direct ACK preference</summary>
       <p>In repeater firmware v1.14.1, enabling this attempts to queue one extra multipart acknowledgement (ACK)
         when forwarding an eligible direct ACK, and can delay the normal ACK. It can use more airtime; other nodes
@@ -950,6 +982,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">A read-back reports the preference, not measured delay or successful persistence.</p>}
           {item.command === 'get agc.reset.interval' && item.reply !== null &&
             <p className="contact-status">A numeric read-back reports the preference, not whether a reset occurred or the preference was saved.</p>}
+          {item.command === 'get int.thresh' && item.reply !== null &&
+            <p className="contact-status">A numeric read-back reports the preference, not whether interference detection worked or the preference was saved.</p>}
           {item.command === 'get multi.acks' && item.reply !== null &&
             <p className="contact-status">A numeric read-back reports the preference, not whether ACKs were sent or the preference was saved.</p>}
           {item.command === 'discover.neighbors' && item.reply !== null &&

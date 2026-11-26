@@ -731,6 +731,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set radio.rxgain on', true), /administrator/)
   await assert.rejects(send('set agc.reset.interval 4', true), /administrator/)
   await assert.rejects(send('set multi.acks 1', true), /administrator/)
+  await assert.rejects(send('set int.thresh 8', true), /administrator/)
   await assert.rejects(send('set guest.password Guest-123', true), /administrator/)
   await assert.rejects(send('set flood.max 0', true), /administrator/)
   await assert.rejects(send('set loop.detect strict', true), /administrator/)
@@ -767,6 +768,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set radio.rxgain off', true), /administrator/)
   await assert.rejects(send('get agc.reset.interval'), /administrator/)
   await assert.rejects(send('get multi.acks'), /administrator/)
+  await assert.rejects(send('get int.thresh'), /administrator/)
+  await assert.rejects(send('set int.thresh 0', true), /administrator/)
   await assert.rejects(send('set multi.acks 0', true), /administrator/)
   await assert.rejects(send('set flood.max.unscoped 0', true), /administrator/)
   await assert.rejects(send('get loop.detect'), /administrator/)
@@ -832,6 +835,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set multi.acks 1'), /Confirm/)
   await assert.rejects(send('set multi.acks 0'), /Confirm/)
   await assert.rejects(send('set multi.acks 2', true), /supported repeater CLI command/)
+  await assert.rejects(send('set int.thresh 8'), /Confirm/)
+  await assert.rejects(send('set int.thresh 256', true), /interference threshold/)
   await assert.rejects(send('set radio.rxgain on extra', true), /supported repeater CLI command/)
   await assert.rejects(send('set guest.password Guest-123'), /Confirm/)
   await assert.rejects(send('set flood.max.advert 0'), /Confirm/)
@@ -974,6 +979,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
   }
   for (const [command, confirmed] of [['get multi.acks', false], ['set multi.acks 1', true], ['set multi.acks 0', true]]) {
+    const receipt = await send(command, confirmed)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
+  for (const [command, confirmed] of [['get int.thresh', false], ['set int.thresh 8', true], ['set int.thresh 0', true]]) {
     const receipt = await send(command, confirmed)
     const frame = port.commands.filter(([code]) => code === 2).at(-1)
     assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)

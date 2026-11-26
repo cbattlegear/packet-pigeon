@@ -226,6 +226,17 @@ test('extra direct ACK preference accepts only exact supported commands', () => 
   }
 })
 
+test('interference threshold requires exact bounded integers and confirmation', () => {
+  assert.equal(repeaterCliCommand('get int.thresh').command, 'get int.thresh')
+  for (const value of ['0', '1', '16', '255']) {
+    assert.equal(repeaterCliCommand(`set int.thresh ${value}`).confirm, true)
+  }
+  for (const value of ['', '-1', '256', '00', '01', '1.0', '1e2', ' 1', '1 ',
+    '1\n', '1\nreboot', '999999999999999999999']) {
+    assert.throws(() => repeaterCliCommand(`set int.thresh ${value}`), /interference threshold/)
+  }
+})
+
 test('advertisement interval changes accept only supported exact values', () => {
   for (const command of ['set advert.interval 0', 'set advert.interval 60', 'set advert.interval 240',
     'set flood.advert.interval 0', 'set flood.advert.interval 3', 'set flood.advert.interval 168']) {
