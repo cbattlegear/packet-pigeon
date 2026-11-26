@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  allocateRepeaterCliTag, repeaterCliCommand, sendRepeaterCli, UncertainRepeaterCliError,
+  allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -17,6 +17,18 @@ test('CLI queries use the repeater text type and a tagged command', async () => 
     tag: 'A7', route: 'flood', timeoutMs: 10_000,
   })
   assert.deepEqual([...command], [2, 1, 0, 0, 0, 0, 0, ...new Uint8Array(6).fill(0xbc), ...encoder.encode('A7|get name')])
+})
+
+test('owner information is bounded, supports line breaks and rejects unsafe text', () => {
+  assert.equal(repeaterOwnerInfoCommand('Line one\nLine two').command, 'set owner.info Line one|Line two')
+  assert.equal(repeaterOwnerInfoCommand('').command, 'set owner.info ')
+  assert.equal(repeaterOwnerInfoCommand('é'.repeat(59) + 'x').confirm, true)
+  for (const value of ['x'.repeat(120), 'é'.repeat(60), 'one|two', 'one\ttwo', 'one\0two', '\ud800']) {
+    assert.throws(() => repeaterOwnerInfoCommand(value), /Owner information/)
+  }
+  for (const command of ['set owner.info x\nreboot', `set owner.info ${'é'.repeat(60)}`, 'set owner.info \0']) {
+    assert.throws(() => repeaterCliCommand(command), /Owner information/)
+  }
 })
 
 test('CLI rejects unsafe and unsupported text before dispatch', async () => {
