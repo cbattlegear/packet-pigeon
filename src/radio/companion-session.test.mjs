@@ -619,7 +619,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('gps advert'), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
-  for (const command of ['get guest.password', 'set guest.password test', 'reboot',
+  for (const command of ['get guest.password', 'set guest.password test', 'reboot now',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
     await assert.rejects(send(command, true), /supported repeater CLI command/)
   }
@@ -695,6 +695,57 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     const frame = port.commands.filter(([code]) => code === 2).at(-1)
     assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
   }
+})
+
+test('confirmed reboot invalidates repeater access after acceptance or uncertain dispatch', async (t) => {
+  const contact = contactInfo()
+  contact[33] = 2
+  contact[35] = 0
+  let admin = false
+  let confirmation = [6, 0, ...new Uint8Array(8)]
+  const port = new FixturePort((command, serial) => {
+    if (command[0] === 22) serial.emit(...deviceInfo())
+    else if (command[0] === 1) serial.emit(...selfInfo())
+    else if (command[0] === 4) {
+      serial.emit(2, 1, 0, 0, 0)
+      serial.emit(...contact)
+      serial.emit(4, 0, 0, 0, 0)
+    } else if (command[0] === 26) {
+      serial.emit(6, 0, ...new Uint8Array(8))
+      serial.emit(0x85, Number(admin), ...contact.slice(1, 7), 1, 0, 0, 0, 1, 2)
+    } else if (command[0] === 2) serial.emit(...confirmation)
+    else assert.fail(`Unexpected command ${command[0]}`)
+  })
+  const session = sessionWith(port)
+  await session.connect()
+  t.after(() => session.disconnect())
+  const radio = 'ab'.repeat(32)
+  const target = 'bc'.repeat(32)
+  const route = { pathLength: 0, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
+  const signal = () => new AbortController().signal
+  const send = (command, confirmed = false) => session.sendRepeaterCommand(radio, target, route, command, confirmed, signal())
+  await assert.rejects(send('reboot'), /Confirm/)
+  await assert.rejects(send('reboot', true), /administrator/)
+  await session.manageRepeater(radio, target, route, 'login', '', signal())
+  await assert.rejects(send('reboot', true), /administrator/)
+  assert.equal(port.commands.some(([code]) => code === 2), false)
+  admin = true
+  await session.manageRepeater(radio, target, route, 'login', '', signal())
+  confirmation = [1, 2]
+  await assert.rejects(send('reboot', true), { code: 'device-error' })
+  confirmation = [6, 0, ...new Uint8Array(8)]
+  await send('ver')
+  confirmation = [6, 0]
+  await assert.rejects(send('reboot', true), /may have sent/)
+  await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(session.manageRepeater(radio, target, route, 'status', '', signal()), /Log in/)
+  await session.manageRepeater(radio, target, route, 'login', '', signal())
+  confirmation = [6, 0, ...new Uint8Array(8)]
+  const receipt = await send('reboot', true)
+  const frame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|reboot`)
+  await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(session.manageRepeater(radio, target, route, 'status', '', signal()), /Log in/)
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {

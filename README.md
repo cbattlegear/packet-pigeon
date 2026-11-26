@@ -475,6 +475,10 @@ Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 confirm a flood or zero-hop advertisement, or change advertisement intervals,
 owner information, repeater name, stored position, and packet forwarding with confirmation.
+The confirmed `reboot` command may interrupt mesh traffic and normally sends no
+reply; acceptance by the radio does not prove execution. The app clears the
+reported access and status after an accepted or unconfirmed reboot. Log in again
+when the repeater is available; a delayed reboot may still arrive over the mesh.
 Use `get repeat` to check forwarding before changing it. Disabling forwarding
 can disrupt mesh routes and some firmware also stops responding to discovery
 requests. Position edits change one coordinate at a time; current values can be

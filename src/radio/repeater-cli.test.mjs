@@ -60,7 +60,7 @@ test('advertised position updates enforce coordinate ranges and decimal precisio
 test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   let writes = 0
   const link = { async request() { writes++; throw new Error('unexpected write') } }
-  for (const command of ['get guest.password', 'set guest.password secret', 'get prv.key', 'reboot', 'ver\nadvert',
+  for (const command of ['get guest.password', 'set guest.password secret', 'get prv.key', 'reboot now', 'reboot\n', 'ver\nadvert',
     'set repeat', 'set repeat true', 'set repeat off\n', 'set repeat off extra',
     'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off',
     'set allow.read.only', 'set allow.read.only true', 'set allow.read.only off extra',
@@ -70,6 +70,7 @@ test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   assert.equal(writes, 0)
   assert.equal(repeaterCliCommand('advert').confirm, true)
   assert.equal(repeaterCliCommand('clock sync').confirm, true)
+  assert.equal(repeaterCliCommand('reboot').confirm, true)
   assert.equal(repeaterCliCommand('set repeat on').confirm, true)
   assert.equal(repeaterCliCommand('set repeat off').confirm, true)
   assert.equal(repeaterCliCommand('gps advert').command, 'gps advert')
