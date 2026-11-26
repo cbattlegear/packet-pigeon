@@ -27,6 +27,8 @@ test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   }
   assert.equal(writes, 0)
   assert.equal(repeaterCliCommand('advert').confirm, true)
+  assert.equal(repeaterCliCommand('clock sync').confirm, true)
+  assert.throws(() => repeaterCliCommand('time 9999999999'), /supported/)
 })
 
 test('advertisement interval changes accept only supported exact values', () => {

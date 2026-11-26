@@ -466,10 +466,14 @@ one. The reported role is not a guarantee of current authorization.
 
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, confirm a flood or zero-hop advertisement, or change its
-advertisement intervals with confirmation. Local intervals are 0 (disabled) or
-even minutes from 60 to 240; flood intervals are 0 or 3 to 168 hours. Changes
-affect future transmissions. Password, identity, and arbitrary commands are not
-supported. The radio's acceptance is not proof that the repeater executed a
+advertisement intervals with confirmation. The confirmed **clock sync** action
+uses the connected radio's clock, not the browser clock. Check the radio's clock
+in Settings first: the repeater cannot move backwards, and setting it too far
+ahead can disrupt later commands. Companion firmware v1.11 and earlier may
+forward a zero timestamp for CLI commands, which the repeater may ignore.
+Local intervals are 0 (disabled) or even minutes from 60 to 240; flood intervals
+are 0 or 3 to 168 hours. Changes affect future transmissions. Password, identity,
+and arbitrary commands are not supported. The radio's acceptance is not proof that the repeater executed a
 command. **Sync messages for replies**
 explicitly drains and saves the ordinary message queue, including unrelated
 messages; nothing is synced automatically. CLI replies are saved in Chats; replies

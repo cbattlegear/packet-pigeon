@@ -66,9 +66,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
 
   useEffect(() => () => request.current?.abort(new Error('Stopped waiting for the radio.')), [])
 
-  async function send(command: string, description: string, confirmed: boolean) {
+  async function send(command: string, description: string, confirmed: boolean, warning = '') {
     if (!ready || busy || pending || syncStatus.syncing) return
-    if (confirmed && !window.confirm(`${description} on ${name}? This will transmit over the mesh.`)) return
+    if (confirmed && !window.confirm(`${description} on ${name}? This will transmit over the mesh.${warning ? ` ${warning}` : ''}`)) return
     if (term && !`${command} ${description}`.toLowerCase().includes(term)) setQuery('')
     const controller = new AbortController()
     request.current = controller
@@ -116,8 +116,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
 
   return <details>
     <summary>Administrator CLI</summary>
-    <p>Choose a supported query, advertisement, or interval change. Commands are never retried automatically.
+    <p>Choose a supported query or confirmed management action. Commands are never retried automatically.
       Replies are saved with other messages when you sync; history here lasts while this repeater stays selected.</p>
+    <p>Companion firmware v1.11 and earlier may cause CLI commands to be ignored. Upgrade the companion firmware if commands do not receive replies.</p>
     <p>Reply tags help match responses, but a delayed reply from an earlier browser session can still be mistaken for a new one.</p>
     <label>Search CLI commands and history
       <input type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} />
@@ -131,7 +132,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {!choices.length && <p>No commands match.</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
-        if (action) void send(action.command, action.description, 'confirm' in action && action.confirm)
+        if (action) void send(action.command, action.description, 'confirm' in action && action.confirm,
+          'warning' in action ? action.warning : '')
       }}>
         {action ? `Send ${action.command}` : 'Select a command'}
       </button>
