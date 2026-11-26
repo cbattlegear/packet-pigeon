@@ -4,19 +4,23 @@ import type { CompanionSession } from '../radio/companion-session.ts'
 import type { RepeaterLogin, RepeaterStatus } from '../radio/repeater-management.ts'
 import { decodeContactPath, pathUnknown } from '../radio/contact-path.ts'
 import type { ContactEntry } from './model.ts'
+import { RepeaterCli } from './RepeaterCli.tsx'
+import type { RepeaterMessageSync } from './RepeaterCli.tsx'
 
 type Props = {
-  session: Pick<CompanionSession, 'manageRepeater'>
+  session: Pick<CompanionSession, 'manageRepeater' | 'sendRepeaterCommand'>
+  messageSync: RepeaterMessageSync
   contact: ContactEntry
   radioKey: string
   ready: boolean
   busy: boolean
 }
 
-export function RepeaterManagement({ session, contact, radioKey, ready, busy }: Props) {
+export function RepeaterManagement({ session, messageSync, contact, radioKey, ready, busy }: Props) {
   const [login, setLogin] = useState<RepeaterLogin | null>(null)
   const [status, setStatus] = useState<RepeaterStatus | null>(null)
   const [pending, setPending] = useState(false)
+  const [cliPending, setCliPending] = useState(false)
   const [error, setError] = useState('')
   const password = useRef<HTMLInputElement>(null)
   const request = useRef<AbortController | null>(null)
@@ -28,7 +32,7 @@ export function RepeaterManagement({ session, contact, radioKey, ready, busy }: 
   useEffect(() => () => request.current?.abort(new Error('Stopped waiting for the repeater.')), [])
 
   async function run(operation: 'login' | 'status', secret = '') {
-    if (!ready || busy || pending || (!path && details.pathLength !== pathUnknown)) return
+    if (!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)) return
     const controller = new AbortController()
     request.current = controller
     setPending(true)
@@ -49,7 +53,7 @@ export function RepeaterManagement({ session, contact, radioKey, ready, busy }: 
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!ready || busy || pending) return
+    if (!ready || busy || pending || cliPending) return
     const value = password.current?.value ?? ''
     if (password.current) password.current.value = ''
     void run('login', value)
@@ -63,13 +67,17 @@ export function RepeaterManagement({ session, contact, radioKey, ready, busy }: 
       Reconnecting cannot rule out a delayed over-the-air reply; the reported role is not proof of current authorization.</p>
     <form className="contact-actions" onSubmit={submit}>
       <label>Repeater password
-        <input ref={password} type="password" autoComplete="off" disabled={!ready || busy || pending} />
+        <input ref={password} type="password" autoComplete="off" disabled={!ready || busy || pending || cliPending} />
       </label>
-      <button type="submit" disabled={!ready || busy || pending || (!path && details.pathLength !== pathUnknown)}>Log in</button>
+      <button type="submit" disabled={!ready || busy || pending || cliPending || (!path && details.pathLength !== pathUnknown)}>Log in</button>
     </form>
     {login && <p role="status">Login reported {login.role === 'guest-or-legacy' ? 'guest or legacy (admin not confirmed)' : login.role} access;
       the request used {login.route} routing.</p>}
-    {login && <button type="button" disabled={!ready || busy || pending} onClick={() => void run('status')}>Request status</button>}
+    {login && <button type="button" disabled={!ready || busy || pending || cliPending} onClick={() => void run('status')}>Request status</button>}
+    {login?.role === 'admin' && <RepeaterCli session={session} messageSync={messageSync}
+      radioKey={radioKey} contactKey={contact.publicKey} name={contact.displayName}
+      route={{ pathLength: details.pathLength, pathHex: details.pathHex }}
+      ready={ready} busy={busy || pending} onPending={setCliPending} />}
     {pending && <p role="status">Waiting for the repeater…
       <button type="button" onClick={() => request.current?.abort(new Error('Stopped waiting. A sent request cannot be recalled.'))}>Stop waiting</button>
     </p>}

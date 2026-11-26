@@ -38,6 +38,7 @@ import type { RemoteNodeAdmin } from './remote-nodes.ts'
 import { decodeSensorSummary } from './cayenne-lpp.ts'
 import { repeaterRequest, UncertainRepeaterRequestError } from './repeater-management.ts'
 import type { RepeaterLogin, RepeaterStatus } from './repeater-management.ts'
+import { allocateRepeaterCliTag, repeaterCliCommand, sendRepeaterCli } from './repeater-cli.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { IdentityRecoveryPreparation } from './identity-backup.ts'
 
@@ -133,6 +134,7 @@ export class CompanionSession {
   private nearbyDiscoveryPending = false
   private repeaterLogin?: { attempt: Attempt; key: string; pathLength: number; pathHex: string; role: RepeaterLogin['role'] }
   private readonly uncertainRepeaterRequests = new WeakMap<Attempt, Set<string>>()
+  private readonly repeaterCliTags = new Map<string, Set<string>>()
   private readonly openScopeStorage: typeof openRadioStorage
   private scopeTail: Promise<void> = Promise.resolve()
 
@@ -461,6 +463,26 @@ export class CompanionSession {
 
   readonly refreshContacts = (radioKey: string) => this.changeContacts(radioKey, (link) => this.readContacts(link))
 
+  private async verifiedRepeater(
+    link: SerialLink, radioKey: string, key: string, expectedRoute: { pathLength: number; pathHex: string },
+    signal: AbortSignal,
+  ) {
+    const contacts = await this.readContacts(link)
+    signal.throwIfAborted()
+    const target = contacts.find((contact) => contact.publicKey === key)
+    if (!target || target.type !== 2 || target.pathLength !== expectedRoute.pathLength || target.pathHex !== expectedRoute.pathHex) {
+      throw new Error('The saved repeater or its route changed. Refresh Contacts before retrying.')
+    }
+    if (target.pathLength !== pathUnknown && !decodeContactPath(target.pathLength, target.pathHex)) {
+      throw new Error('The saved repeater route is invalid. Refresh Contacts before retrying.')
+    }
+    if (radioKey.startsWith(key.slice(0, 8)) || contacts.some((contact) =>
+      contact.publicKey !== key && contact.publicKey.startsWith(key.slice(0, 8)))) {
+      throw new Error('This repeater shares a response prefix with another known radio.')
+    }
+    return target
+  }
+
   readonly getRemoteNodeAccess = (radioKey: string, nodeKey: string) =>
     this.snapshot.phase === 'ready' && this.snapshot.device?.publicKey === radioKey
       ? this.attempt?.remoteAccess?.get(nodeKey) : undefined
@@ -574,19 +596,7 @@ export class CompanionSession {
       })
       const request = AbortSignal.any([signal, disconnected.signal])
       try {
-        const contacts = await this.readContacts(link)
-        request.throwIfAborted()
-        const target = contacts.find((contact) => contact.publicKey === key)
-        if (!target || target.type !== 2 || target.pathLength !== expectedRoute.pathLength || target.pathHex !== expectedRoute.pathHex) {
-          throw new Error('The saved repeater or its route changed. Refresh Contacts before retrying.')
-        }
-        if (target.pathLength !== pathUnknown && !decodeContactPath(target.pathLength, target.pathHex)) {
-          throw new Error('The saved repeater route is invalid. Refresh Contacts before retrying.')
-        }
-        if (radioKey.startsWith(key.slice(0, 8)) || contacts.some((contact) =>
-          contact.publicKey !== key && contact.publicKey.startsWith(key.slice(0, 8)))) {
-          throw new Error('This repeater shares a response prefix with another known radio.')
-        }
+        const target = await this.verifiedRepeater(link, radioKey, key, expectedRoute, request)
         if (operation === 'status' && (!this.repeaterLogin || this.repeaterLogin.attempt !== attempt ||
           this.repeaterLogin.key !== key || this.repeaterLogin.pathLength !== target.pathLength ||
           this.repeaterLogin.pathHex !== target.pathHex)) {
@@ -605,6 +615,50 @@ export class CompanionSession {
           }
           throw error
         }
+      } finally {
+        stop()
+      }
+    })
+  }
+
+  readonly sendRepeaterCommand = async (
+    radioKey: string, contactKey: string, expectedRoute: { pathLength: number; pathHex: string },
+    command: string, confirmed: boolean, signal: AbortSignal,
+  ) => {
+    const key = contactPublicKey(contactKey)
+    if (key === radioKey) throw new Error('Choose a different repeater from the connected radio.')
+    const action = repeaterCliCommand(command)
+    if ('confirm' in action && action.confirm && !confirmed) {
+      throw new Error('Confirm the advertisement before sending it.')
+    }
+    signal.throwIfAborted()
+    return this.runRadioCommand(radioKey, async (link) => {
+      const attempt = this.attempt!
+      if (this.uncertainRepeaterRequests.get(attempt)?.has(key)) {
+        throw new Error('A previous reply may arrive late. Reconnect before requesting this operation again.')
+      }
+      const login = this.repeaterLogin
+      if (!login || login.attempt !== attempt || login.key !== key || login.role !== 'admin') {
+        throw new Error('Log in to this repeater as an administrator before using its CLI.')
+      }
+      const disconnected = new AbortController()
+      const stop = this.subscribe(() => {
+        if (this.attempt !== attempt || this.snapshot.phase !== 'ready') {
+          disconnected.abort(new Error('The radio disconnected before the repeater command completed.'))
+        }
+      })
+      const request = AbortSignal.any([signal, disconnected.signal])
+      try {
+        const target = await this.verifiedRepeater(link, radioKey, key, expectedRoute, request)
+        if (login.pathLength !== target.pathLength || login.pathHex !== target.pathHex) {
+          throw new Error('The repeater route changed after login. Log in again before using its CLI.')
+        }
+        request.throwIfAborted()
+        const tagKey = `${radioKey}:${key}`
+        const tags = this.repeaterCliTags.get(tagKey) ?? new Set<string>()
+        this.repeaterCliTags.set(tagKey, tags)
+        const tag = allocateRepeaterCliTag(tags)
+        return await sendRepeaterCli(link, key, action.command, tag)
       } finally {
         stop()
       }

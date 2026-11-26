@@ -13,12 +13,15 @@ import { PathDetails } from '../paths/PathDetails.tsx'
 import { resolvePath } from '../paths/model.ts'
 import type { MapPath, PathNode } from '../paths/model.ts'
 import { RepeaterManagement } from './RepeaterManagement.tsx'
+import type { RepeaterMessageSync } from './RepeaterCli.tsx'
 
 export type ContactRadioSession = Pick<CompanionSession,
-  'addContact' | 'removeContact' | 'saveContactPath' | 'resetContactPath' | 'saveContactPermissions' | 'pingContact' | 'manageRepeater'>
+  'addContact' | 'removeContact' | 'saveContactPath' | 'resetContactPath' | 'saveContactPermissions' | 'pingContact' |
+  'manageRepeater' | 'sendRepeaterCommand'>
 
 type Props = {
   session: ContactRadioSession
+  messageSync: RepeaterMessageSync
   contact: ContactEntry
   contacts: readonly ContactEntry[]
   radioKey: string
@@ -41,7 +44,7 @@ function radioError(error: unknown) {
   return error instanceof Error ? error.message : 'The radio action failed.'
 }
 
-export function ContactRadioActions({ session, contact, contacts, radioKey, ready, framed, firmware, busy, onMap,
+export function ContactRadioActions({ session, messageSync, contact, contacts, radioKey, ready, framed, firmware, busy, onMap,
   additionalPathNodes = [] }: Props) {
   const key = contact.publicKey
   const details = contact.details
@@ -144,7 +147,7 @@ export function ContactRadioActions({ session, contact, contacts, radioKey, read
 
   return <div className="contact-radio-actions">
     {details?.type === 2 && <RepeaterManagement key={`${radioKey}:${ready}:${details.pathLength}:${details.pathHex}`}
-      session={session} contact={contact} radioKey={radioKey}
+      session={session} messageSync={messageSync} contact={contact} radioKey={radioKey}
       ready={ready} busy={busy} />}
     <details>
       <summary>Saved route and repeater hops</summary>
