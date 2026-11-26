@@ -21,6 +21,7 @@ import { conversations, correlateChannelObservations, matchingChannelReceipts, m
 import type { Conversation } from './model.ts'
 import { ChatSearch } from './ChatSearch.tsx'
 import type { NamedRegion } from '../radio/channel-scope.ts'
+import { framedTransport } from '../radio/transport.ts'
 import { channelMentionNames, channelMessageBody, channelReply, channelTextParts, insertChannelMention, isSelfMention, mentionableName } from './mentions.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
@@ -218,8 +219,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
           <p>Receipts are saved before requesting the next. Interruptions can still lose a message.</p>
           {snapshot.transport === 'bluetooth' && (
             <p>Bluetooth may truncate or drop messages; incomplete text can look complete. The radio removes each
-              message from its queue before replying, so missing content cannot be recovered from the radio. Use USB
-              for safer sync.</p>
+              message from its queue before replying, so missing content cannot be recovered from the radio. Use USB or
+              the local network for safer sync.</p>
           )}
         </div>
         {radioKey && data && <>
@@ -268,7 +269,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
               active, preferences, read, formatTime, formatDate, mapPosition, ownContact,
               contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
               readChannelKey: canSync && live && readChannelKey ? (channel) => readChannelKey(live, channel) : undefined,
-              observationSource, canObserve: Boolean(live && canSync && snapshot.transport === 'usb'), regionNames,
+              observationSource, canObserve: Boolean(live && canSync && framedTransport(snapshot.transport)), regionNames,
               pathNodes: live && live === radioKey && pathNodes ? pathNodes : [
                 ...data.contacts.map(({ publicKey, name, details }) => ({ publicKey, name, position: contactPosition(details) })),
                 ...mapPathNodes,
@@ -690,7 +691,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                 if (conversation.channel && regionNames) void observer.start(radioKey, conversation.channel, regionNames)
               }}>Observe channel packets</button>}
           <details><summary>About observation</summary>
-            <p>USB only. Reads this channel key temporarily and captures up to 500 packets in this tab until stopped,
+            <p>Available over USB or the local network. Reads this channel key temporarily and captures up to 500 packets in this tab until stopped,
               disconnected or the conversation changes. Captures can miss packets; matches and region names are best effort.
               Region candidates use named sending scopes saved when observation starts. Restart after changing scopes;
               16-bit codes can collide and unknown regions cannot be identified.</p>

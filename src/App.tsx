@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { CompanionSession, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
+import { CompanionSession, detectLanBridge, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
+import { framedTransport } from './radio/transport.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import { MessageSync } from './integration/message-sync.ts'
 import { DirectMessages } from './integration/direct-messages.ts'
@@ -160,6 +161,7 @@ function App() {
   const knownPathNodes = useMemo(() => [...pathNodes, ...mapPathNodes], [pathNodes, mapPathNodes])
   const usbSupport = getWebSerialSupport()
   const bluetoothSupport = getWebBluetoothSupport()
+  const [lanAvailable, setLanAvailable] = useState(false)
   const busy = snapshot.phase === 'choosing' || snapshot.phase === 'closing'
   const canDisconnect = ['opening', 'handshake', 'syncing', 'ready', 'reconnecting'].includes(snapshot.phase)
   const controlsDisabled = busy || snapshot.error?.code === 'cleanup-failed'
@@ -169,7 +171,7 @@ function App() {
     opening: 'Opening connection',
     handshake: 'Identifying radio',
     syncing: 'Connected',
-    ready: 'Connected',
+    ready: snapshot.transport === 'lan' ? 'Connected over local network' : 'Connected',
     reconnecting: 'Reconnecting',
     closing: 'Disconnecting',
     error: 'Error',
@@ -182,6 +184,15 @@ function App() {
     : messageStatus.pending || messageStatus.error ? 'Needs attention' : null
   const syncStatus = [radioSyncStatus, receiptSyncStatus].filter(Boolean).join(' · ')
     || (snapshot.phase === 'ready' ? 'Idle' : 'Not syncing')
+
+  useEffect(() => {
+    if (!import.meta.env.PROD) return
+    const probe = new AbortController()
+    void detectLanBridge(probe.signal).then((available) => {
+      if (!probe.signal.aborted) setLanAvailable(available)
+    })
+    return () => probe.abort()
+  }, [])
 
   useEffect(() => {
     const refresh = () => setNotificationPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
@@ -348,6 +359,12 @@ function App() {
               <button type="button" disabled={controlsDisabled || !bluetoothSupport.supported}
                 aria-describedby="connection-warning" onClick={() => void session.connectBluetooth()}>
                 Connect Bluetooth
+              </button>
+            )}
+            {!canDisconnect && lanAvailable && (
+              <button type="button" disabled={controlsDisabled} aria-describedby="connection-warning"
+                onClick={() => void session.connectLan()}>
+                Connect local network
               </button>
             )}
           </div>
@@ -520,7 +537,7 @@ function App() {
             <div className="section-pane">
               <div className="pane-heading"><h1>Discovery</h1></div>
               <DiscoveryPanel view={discovery} entries={adverts} radioContacts={radioContacts}
-                connected={discoveryConnected} ready={snapshot.phase === 'ready'} usb={snapshot.transport === 'usb'}
+                connected={discoveryConnected} ready={snapshot.phase === 'ready'} framed={framedTransport(snapshot.transport)}
                 active={activeSection === 'Discovery'} firmware={snapshot.device?.capabilities.firmwareProtocolVersion ?? 0}
                 mapPathNodes={mapPathNodes} onPathMap={showPathOnMap}
                 pending={cacheStatus.pending}

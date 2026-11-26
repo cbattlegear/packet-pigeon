@@ -3,6 +3,7 @@ import { decodeAdvert } from '../radio/discovery-commands.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioKey, RadioUpdate, StoredDiscovery, StoredMessage } from '../storage/index.ts'
 import { storedContact } from './contact-record.ts'
+import { framedTransport } from '../radio/transport.ts'
 
 type SessionSource = {
   getSnapshot(): CompanionSnapshot
@@ -53,7 +54,7 @@ export class SessionCache {
     session.subscribeToPushes?.((push) => {
       const { device, phase, contacts, transport } = session.getSnapshot()
       // BLE notifications do not provide reliable advert frame boundaries.
-      if (transport !== 'usb' || !device || (phase !== 'ready' && phase !== 'syncing')) return
+      if (!framedTransport(transport) || !device || (phase !== 'ready' && phase !== 'syncing')) return
       const advert = decodeAdvert(push.code, push.payload)
       if (!advert) return
       const { publicKey, added } = advert

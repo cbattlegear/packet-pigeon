@@ -1,14 +1,14 @@
 # Packet Pigeon
 
-Open source MeshCore web UI. This is an incremental, desktop-first starter built
+MIT-licensed MeshCore web UI. This is an incremental, desktop-first starter built
 with React, TypeScript, Vite, and npm.
 
-The current app is a client-only shell with keyboard-accessible navigation and
-user-initiated USB or Bluetooth companion connections. It syncs contacts and channels into a
-per-radio local cache. Contacts supports offline browsing, and the map can
+The app provides keyboard-accessible navigation and user-initiated USB,
+Bluetooth, and local network companion connections. It syncs contacts and
+channels into a per-radio local cache. Contacts supports offline browsing, and the map can
 show synced contacts from the current session. Chats supports direct messages,
-drafts, delivery tracking, and manually syncing received queue entries over USB
-or Bluetooth. Channel chats also support sending and local message actions.
+drafts, delivery tracking, and manually syncing received queue entries. Channel
+chats also support sending and local message actions.
 If a cached chat load fails, Chats offers a retry and retains any previously
 loaded data for that radio.
 
@@ -122,8 +122,37 @@ does not expose. Queued text responses have no total length, so incomplete text
 can appear complete and cannot be reliably detected; fragments can also be
 mistaken for other frames. Responses recognized as malformed or unsupported are
 saved as raw bytes and stop sync; a dropped response can time out. The radio has
-already dequeued the receipt, so missing bytes cannot be recovered. Use USB for
-safer message sync; interruptions can still lose a USB receipt.
+already dequeued the receipt, so missing bytes cannot be recovered. USB and
+local network connections use frames with explicit lengths. Interruptions can
+still lose a receipt.
+
+## Wi-Fi and Ethernet companion session
+
+Use a companion radio running MeshCore Wi-Fi or Ethernet firmware with its
+network connection configured. Obtain the radio's IPv4 address from its display
+or your router's DHCP list. From the project directory on the computer that
+will run Packet Pigeon, start the local bridge using the radio's address.
+
+```sh
+npm ci
+npm run build
+npm run companion:lan -- 192.168.1.40
+```
+
+Open the printed URL in Chrome or Edge and choose **Connect local network**.
+The defaults are TCP port `5000` on the radio and `http://127.0.0.1:4175` in
+the browser. Supply the radio port and then the browser port after the address
+to change them. The bridge accepts a private, link-local, or loopback IPv4
+address and serves the built app on the same computer. The loopback origin has
+its own browser cache, separate from your hosted installation.
+
+The bridge relays MeshCore's framed protocol between the browser and the
+configured radio. It accepts the local app's WebSocket origin and one radio
+session at a time. After an unexpected disconnect, the app retries the same
+bridge and checks the radio's full public key before syncing. Use the radio
+on a trusted LAN because MeshCore's TCP link is unencrypted.
+[MeshCore Wi-Fi transport](https://github.com/meshcore-dev/MeshCore/blob/main/src/helpers/wifi/SerialWifiInterface.cpp) ·
+[MeshCore Ethernet transport](https://github.com/meshcore-dev/MeshCore/blob/main/src/helpers/ethernet/SerialEthernetInterface.cpp)
 
 ## Direct messages
 
@@ -300,7 +329,7 @@ The save results show the outcome for each radio command.
 Open **Advanced radio settings** and choose **Read advanced settings** to see
 the radio's clock, storage use, default flood region, and available GPS and
 Wi-Fi controls. Bluetooth PIN and Wi-Fi changes take effect after restarting
-the radio. Packet Pigeon connects through USB or Bluetooth.
+the radio. Packet Pigeon connects through USB, Bluetooth, or the local network.
 
 ## Backup and recovery
 
@@ -371,7 +400,8 @@ match more than one queued receipt.
 From **Diagnostics → Path tracing**, enter a route or append known repeaters.
 From **Map**, select repeaters, add them in order, and choose **Review map
 trace**. The final repeater must be audible directly. Confirm that before
-sending. Tracing requires USB and uses 1-, 2-, or 4-byte hashes, depending on
+sending. Tracing requires USB or a local network connection and uses 1-, 2-, or
+4-byte hashes, depending on
 firmware. A reply shows SNR per hop, return SNR, and the elapsed time. Stop
 waiting or reset the trace locally. The app never retransmits automatically.
 
@@ -400,7 +430,7 @@ route sends directly with zero hops. Clearing the saved route allows the
 firmware to use flood routing. Newer firmware supports two- and three-byte
 contact hashes. The app warns when a route hash matches multiple saved nodes.
 
-Use **Contact permissions** over USB to set base, location, and environment
+Use **Contact permissions** over USB or the local network to set base, location, and environment
 telemetry for a contact where the global radio policy uses contact flags.
 Supported firmware also offers remote CLI access, which lets that contact
 run commands on your radio. Enabling it requires confirmation.
@@ -503,7 +533,8 @@ available when supported by firmware. Browsing adverts and path lookup use
 passive adverts and local cache lookups, not active mesh requests.
 
 The live noise-floor monitor starts only when requested and polls local radio
-statistics every two seconds over USB or Bluetooth on companion protocol v8 or
+statistics every two seconds over USB, Bluetooth, or the local network on
+companion protocol v8 or
 newer. It does not transmit a mesh request. Bluetooth notifications can be
 split or dropped; malformed or missing replies stop polling. Stop polling or
 leave Discovery to prevent further reads; a read already in flight must finish
@@ -607,7 +638,14 @@ Keep work small and split by behavior, rather than creating empty layers up fron
 
 Add a router or other dependencies only when a concrete feature needs them.
 Agree on ownership before parallel changes to shared shell files, global styles,
-or package manifests. CI and license selection are outside this starter's scope.
+or package manifests.
+
+## License
+
+Packet Pigeon is available under the [MIT License](LICENSE). The production
+build includes `LICENSE` and Vite's generated `third-party-licenses.md` for
+bundled dependencies. The local bridge uses `ws` under its own MIT license,
+included at `node_modules/ws/LICENSE` after installation.
 
 ## Map and terrain planning
 

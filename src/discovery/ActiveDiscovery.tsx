@@ -13,7 +13,7 @@ type Props = {
   radioKey: string
   active: boolean
   ready: boolean
-  usb: boolean
+  framed: boolean
   firmware: number
   session: Pick<CompanionSession, 'discoverNearby' | 'discoverRepeaterDetails'>
   entries: readonly DiscoveryEntry[]
@@ -23,7 +23,7 @@ type Props = {
 type Activity = { kind: 'nearby' | RepeaterDetails['kind']; phase: 'sending' | 'waiting' | 'stopping' }
 type Details = { regions?: string[]; owner?: { name: string; owner: string } }
 
-export function ActiveDiscovery({ radioKey, active, ready, usb, firmware, session, entries, radioContacts }: Props) {
+export function ActiveDiscovery({ radioKey, active, ready, framed, firmware, session, entries, radioContacts }: Props) {
   const [activity, setActivity] = useState<Activity | null>(null)
   const [nodes, setNodes] = useState<NearbyNode[]>([])
   const [selectedKey, setSelectedKey] = useState('')
@@ -53,7 +53,7 @@ export function ActiveDiscovery({ radioKey, active, ready, usb, firmware, sessio
       pending.current?.abort(new Error('Stopped discovery after leaving the workspace or disconnecting.'))
     }
     return () => pending.current?.abort(new Error('Stopped discovery after leaving the workspace or disconnecting.'))
-  }, [active, ready, usb, radioKey])
+  }, [active, ready, framed, radioKey])
 
   function displayName(node: Pick<NearbyNode, 'publicKey'>) {
     const saved = radioContacts.find(({ publicKey }) => publicKey === node.publicKey)
@@ -149,7 +149,7 @@ export function ActiveDiscovery({ radioKey, active, ready, usb, firmware, sessio
       Nothing is sent until you choose an action.</p>
     {!ready ? <p>Connect a radio and finish syncing to discover nearby nodes.</p>
       : firmware < 8 ? <p>Active discovery requires companion protocol v8 or newer.</p> : null}
-    {ready && !usb && <p>Bluetooth may split or drop replies or reject longer writes.
+    {ready && !framed && <p>Bluetooth may split or drop replies or reject longer writes.
       Results may be missing or appear complete when truncated.</p>}
     <div className="contact-actions">
       <button type="button" disabled={!supported || Boolean(activity)} onClick={() => void startScan()}>

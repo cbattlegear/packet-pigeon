@@ -22,7 +22,7 @@ type Props = {
   contacts: readonly ContactEntry[]
   radioKey: string
   ready: boolean
-  usb: boolean
+  framed: boolean
   firmware: number
   busy: boolean
   onMap?: (path: MapPath) => void
@@ -40,7 +40,7 @@ function radioError(error: unknown) {
   return error instanceof Error ? error.message : 'The radio action failed.'
 }
 
-export function ContactRadioActions({ session, contact, contacts, radioKey, ready, usb, firmware, busy, onMap,
+export function ContactRadioActions({ session, contact, contacts, radioKey, ready, framed, firmware, busy, onMap,
   additionalPathNodes = [] }: Props) {
   const key = contact.publicKey
   const details = contact.details
@@ -66,7 +66,7 @@ export function ContactRadioActions({ session, contact, contacts, radioKey, read
   const matchingPing = contacts.filter(({ publicKey }) => publicKey !== key && publicKey.toLowerCase().startsWith(pingPrefix))
   const ambiguousPing = matchingPing.length > 0 || radioKey.startsWith(pingPrefix)
   const disabled = pending !== null || busy
-  const canEdit = ready && usb && !disabled
+  const canEdit = ready && framed && !disabled
   const supportedPermissions = (Object.keys(contactPermissions) as (keyof ContactPermissions)[])
     .filter((name) => name === 'remoteCli' ? firmware >= 14 : firmware >= 5)
 
@@ -145,7 +145,7 @@ export function ContactRadioActions({ session, contact, contacts, radioKey, read
     <details>
       <summary>Saved route and repeater hops</summary>
       {saved && <PathDetails title="Saved route" width={saved.width} hashes={saved.hops} nodes={pathNodes} onMap={onMap} />}
-      {!ready || !usb ? <p>Connect the selected radio over USB to edit its saved route.</p> :
+      {!ready || !framed ? <p>Connect the selected radio over USB or the local network to edit its saved route.</p> :
         <form className="contact-actions" onSubmit={saveRoute}>
           <label>Contact path hash width
             <select value={routeWidth} disabled={!canEdit} onChange={(event) => {
@@ -179,7 +179,7 @@ export function ContactRadioActions({ session, contact, contacts, radioKey, read
     </details>
     <details>
       <summary>Contact permissions</summary>
-      {!ready || !usb ? <p>Connect the selected radio over USB to edit permissions.</p>
+      {!ready || !framed ? <p>Connect the selected radio over USB or the local network to edit permissions.</p>
         : !supportedPermissions.length ? <p>This firmware does not report support for contact permissions.</p>
           : <form onSubmit={savePermissions}>
             <p>Contact telemetry permissions apply when the radio’s global telemetry policy uses contact flags.</p>
