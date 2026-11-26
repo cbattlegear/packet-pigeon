@@ -199,7 +199,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       const command = repeaterTransmitPowerCommand(transmitPower)
       void send(command.command, `Set repeater transmit power to ${transmitPower} dBm`,
         'confirm' in command && command.confirm,
-        'Firmware documents 1–22 dBm, but the appropriate value depends on the repeater board and any power amplifier. Check the device manual and local radio regulations; setting power too high may be illegal. This setting takes effect immediately and is saved by the repeater. Read get tx before and after, then sync replies to verify.')
+        'Firmware documents 1–22 dBm, but supported values vary by board. Check the device manual and local regulations; a power amplifier can increase output and excessive power may be illegal. Firmware saves the preference and attempts to apply it, but may report OK even if applying it fails. A matching get tx reply shows only the stored preference, not the applied or radiated RF power.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid repeater transmit power.')
     }
@@ -471,13 +471,14 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     </details>
     <details>
       <summary>Change repeater transmit power</summary>
-      <p>Read the current setting first. Firmware documents a range of 1–22 dBm, but the correct value depends on the
-        board and any external power amplifier. Check the repeater manual and local regulations; excessive power may be
-        unlawful. Changes take effect immediately and are saved by the repeater. Sync the reply and read the setting
-        again to verify.</p>
+      <p>Read the stored preference first. Firmware documents a range of 1–22 dBm, but supported values vary by board.
+        Check the repeater manual and local regulations; an external power amplifier can increase output, and excessive
+        power may be unlawful. Firmware saves the preference and attempts to apply it, but may report OK even if applying
+        it fails. Sync the reply and read the preference again; a matching read-back shows only the stored preference,
+        not the applied or radiated RF power.</p>
       <form className="contact-actions" onSubmit={submitTransmitPower}>
         <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
-          onClick={() => void send('get tx', 'Read repeater transmit power', false)}>Read current transmit power</button>
+          onClick={() => void send('get tx', 'Read stored transmit power preference', false)}>Read stored transmit power</button>
         <label>New transmit power (1–22 dBm)
           <input type="number" step="any" required value={transmitPower}
             disabled={!ready || busy || pending || syncStatus.syncing}

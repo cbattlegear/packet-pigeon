@@ -17,7 +17,7 @@ export const repeaterCliCommands = [
   { command: 'powersaving off', description: 'Disable repeater power-saving preference', confirm: true,
     warning: 'This may increase repeater power consumption on boards that support sleep. Firmware support varies; verify the reply and preference.' },
   { command: 'get radio', description: 'Read radio parameters' },
-  { command: 'get tx', description: 'Read transmit power' },
+  { command: 'get tx', description: 'Read stored transmit power preference' },
   { command: 'get repeat', description: 'Read forwarding mode' },
   { command: 'get flood.max', description: 'Read the overall flood hop limit' },
   { command: 'get flood.max.unscoped', description: 'Read the unscoped flood hop limit' },

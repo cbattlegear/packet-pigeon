@@ -587,10 +587,12 @@ reply reports the preference, not actual sleep: Pico W repeater firmware
 v1.14.1, for example, does not implement sleep. Read the preference explicitly
 and sync replies; radio acceptance alone does not confirm success.
 Administrators can also change transmit power to a whole value from 1 to 22 dBm.
-The appropriate setting depends on the board and any external power amplifier;
-check the device manual and local radio regulations, since excessive power may
-be unlawful. The setting takes effect immediately and is saved by the repeater.
-Read `get tx` before and after, and sync replies to verify the configured value.
+Supported values vary by board; check the device manual and local radio
+regulations. An external power amplifier can increase output, and excessive
+power may be unlawful. Firmware saves the preference and attempts to apply it,
+but may report `OK` even if applying it fails. Read `get tx` before and after
+and sync replies: a matching read-back shows only the stored preference, not
+the applied or radiated RF power.
 Owner information can be requested
 over the mesh; do not put passwords or private data in it. Editing it requires
 repeater firmware v1.12 or later and accepts up to 119 UTF-8 bytes, with line
