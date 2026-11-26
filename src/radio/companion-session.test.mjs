@@ -607,6 +607,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set repeat off', true), /administrator/)
+  await assert.rejects(send('set af 9', true), /administrator/)
   await assert.rejects(send('set txdelay 0.5', true), /administrator/)
   await assert.rejects(send('set tx 12', true), /administrator/)
   await assert.rejects(send('set flood.max 0', true), /administrator/)
@@ -629,6 +630,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set repeat on', true), /administrator/)
+  await assert.rejects(send('set af 0', true), /administrator/)
   await assert.rejects(send('set direct.txdelay 0.5', true), /administrator/)
   await assert.rejects(send('set tx 12', true), /administrator/)
   await assert.rejects(send('set flood.max.unscoped 0', true), /administrator/)
@@ -655,6 +657,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set lat 45'), /Confirm/)
   await assert.rejects(send('set repeat on'), /Confirm/)
   await assert.rejects(send('set repeat off'), /Confirm/)
+  await assert.rejects(send('set af 9'), /Confirm/)
   await assert.rejects(send('set txdelay 0'), /Confirm/)
   await assert.rejects(send('set direct.txdelay 2'), /Confirm/)
   await assert.rejects(send('set tx 12'), /Confirm/)
@@ -682,6 +685,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set flood.max 256', true), /flood hop limit/)
   await assert.rejects(send('set tx 23', true), /transmit power from 1 to 22/)
   await assert.rejects(send('set tx 12\nreboot', true), /transmit power from 1 to 22/)
+  await assert.rejects(send('set af 9.01', true), /airtime factor/)
+  await assert.rejects(send('set af 1\nreboot', true), /airtime factor/)
   await assert.rejects(send('set txdelay 2.01', true), /retransmission delay factor/)
   await assert.rejects(send('set direct.txdelay 1\nreboot', true), /retransmission delay factor/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
@@ -757,6 +762,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     const frame = port.commands.filter(([code]) => code === 2).at(-1)
     assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
   }
+  const airtime = await send('set af 9', true)
+  const airtimeFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(airtimeFrame.slice(13))), `${airtime.tag}|set af 9`)
 })
 
 test('confirmed reboot invalidates repeater access after acceptance or uncertain dispatch', async (t) => {

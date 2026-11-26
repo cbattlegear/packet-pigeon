@@ -136,6 +136,16 @@ test('flood hop limits accept exact whole values and require confirmation', () =
   }
 })
 
+test('airtime factor accepts bounded decimal values and requires confirmation', () => {
+  assert.equal(repeaterCliCommand('get af').command, 'get af')
+  for (const value of ['0', '0.01', '1', '8.99', '9', '9.00']) {
+    assert.equal(repeaterCliCommand(`set af ${value}`).confirm, true)
+  }
+  for (const value of ['', '-1', '9.01', '10', '00', '0.001', '.5', '1e0', ' 1', '1 ', '1\n', '1\nreboot']) {
+    assert.throws(() => repeaterCliCommand(`set af ${value}`), /airtime factor/)
+  }
+})
+
 test('retransmission delay factors accept bounded decimal values and require confirmation', () => {
   for (const kind of ['txdelay', 'direct.txdelay']) {
     assert.equal(repeaterCliCommand(`get ${kind}`).command, `get ${kind}`)

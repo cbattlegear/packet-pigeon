@@ -547,6 +547,15 @@ values may increase latency. Zero removes this random delay, not other delays.
 These changes can affect mesh routes and remote access. Values accepted here
 range from 0 to 2 with up to two decimal places. Sync and compare the selected
 factor before and after a change; radio acceptance does not prove execution.
+Administrators can also read and confirm changes to the airtime factor, from 0
+to 9 with up to two decimal places. Lower values permit more airtime and may
+violate local regulations; higher values can delay traffic and remote access.
+Repeater firmware v1.14.1 uses a budget that refills at approximately
+1 / (1 + factor) of elapsed time and permits bursts, rather than a fixed pause
+after every transmission. Existing budget and scheduled timing can carry over
+after a change. It does not guarantee regulatory compliance; check your
+jurisdiction and channel plan. Sync the reply and read the factor again;
+read-back is a preference, not a measurement of airtime.
 Administrators can also read and change the advert path hash size. This affects
 hashes used in the repeater's manual flood advertisements; it does not change
 the hash widths of packets it forwards. On repeater v1.14.0, scheduled flood

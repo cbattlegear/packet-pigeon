@@ -54,6 +54,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [floodLimit, setFloodLimit] = useState('')
   const [retransmitKind, setRetransmitKind] = useState<'txdelay' | 'direct.txdelay'>('txdelay')
   const [retransmitDelay, setRetransmitDelay] = useState('')
+  const [airtimeFactor, setAirtimeFactor] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
   const [pathHashMode, setPathHashMode] = useState('')
@@ -216,6 +217,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         'Changing retransmission delays can affect collisions, latency and remote access. Zero removes this random delay, not all other delays. Sync the reply and read the selected factor again.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid retransmission delay factor.')
+    }
+  }
+
+  function submitAirtimeFactor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set af ${airtimeFactor}`)
+      void send(command.command, `${command.description} to ${airtimeFactor}`, true,
+        'Lower factors permit more airtime and may violate local regulations; higher factors can delay traffic and remote access. The budget permits bursts and does not guarantee legal compliance. Check your jurisdiction and channel plan. Sync the reply and read the factor again.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid airtime factor.')
     }
   }
 
@@ -481,6 +494,26 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           </select>
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set advert hash size</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change airtime factor</summary>
+      <p>Lower factors permit more airtime and may violate local regulations; higher factors can delay traffic and
+        remote access. Repeater firmware v1.14.1 uses an airtime budget that refills at approximately
+        1 / (1 + factor) of elapsed time; it permits bursts, not a fixed pause after each transmission. Existing
+        budget and scheduled timing can carry over after a change. This is not a guarantee of regulatory compliance.
+        Check your jurisdiction and channel plan. Read the current factor first, then sync the reply and read it
+        again after changing it. Read-back is a preference, not a measurement of airtime. The input range is 0–9
+        with up to 2 decimal places.</p>
+      <form className="contact-actions" onSubmit={submitAirtimeFactor}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get af', 'Read airtime factor', false)}>Read airtime factor</button>
+        <label>New airtime factor (0–9)
+          <input type="text" inputMode="decimal" required value={airtimeFactor}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setAirtimeFactor(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set airtime factor</button>
       </form>
     </details>
     <details>
