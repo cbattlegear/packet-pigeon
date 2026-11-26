@@ -115,7 +115,7 @@ test('flood hop limits accept exact whole values and require confirmation', () =
   }
 })
 
-test('region inspection allows bounded names but rejects injected and mutating commands', () => {
+test('region inspection allows bounded names but rejects injected and unsupported commands', () => {
   for (const command of ['region', 'region home', 'region default']) {
     assert.equal(repeaterCliCommand(command).command, command)
   }
@@ -127,9 +127,13 @@ test('region inspection allows bounded names but rejects injected and mutating c
     'a\u0085b', '\ud800', '*x', 'bad/name']) {
     assert.throws(() => repeaterRegionQuery(name), /region name or prefix/)
   }
-  for (const command of ['region save', 'region load', 'region home North', 'region default North',
-    'region denyf *', 'region get North\nregion save']) {
+  for (const command of ['region load', 'region home North', 'region default North',
+    'region denyf North', 'region allowf #North', 'region denyf * extra',
+    'region save extra', 'region get North\nregion save']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command|region name or prefix/)
+  }
+  for (const command of ['region allowf *', 'region denyf *', 'region save']) {
+    assert.equal(repeaterCliCommand(command).confirm, true)
   }
 })
 

@@ -227,6 +227,59 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await regionReply.getByText('North F', { exact: true }).waitFor()
   await regionReply.getByText(/Firmware may match a prefix to a different region/).waitFor()
 
+  await page.getByText(/writes the entire current region map/).waitFor()
+  const denyWildcard = page.getByRole('button', { name: 'Deny unscoped flood forwarding', exact: true })
+  const afterQueries = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  page.once('dialog', (dialog) => {
+    assert.match(dialog.message(), /Deny unscoped flood forwarding/)
+    assert.match(dialog.message(), /disrupt mesh routes and remote access/)
+    assert.match(dialog.message(), /without being saved/)
+    void dialog.dismiss()
+  })
+  await denyWildcard.click()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), afterQueries)
+  page.once('dialog', (dialog) => dialog.accept())
+  await denyWildcard.click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'region denyf *')
+  await page.evaluate(() => window.queueRepeaterReply('OK'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'region denyf *' }).getByText('OK', { exact: true }).waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), afterQueries + 1)
+
+  await page.getByRole('button', { name: 'Read wildcard region' }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'region get *')
+  await page.evaluate(() => window.queueRepeaterReply(' * '))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'region get *' }).getByText('*', { exact: true }).waitFor()
+
+  const saveRegions = page.getByRole('button', { name: 'Save the entire region map', exact: true })
+  page.once('dialog', (dialog) => {
+    assert.match(dialog.message(), /all current region settings/)
+    assert.match(dialog.message(), /other administrators/)
+    void dialog.dismiss()
+  })
+  await saveRegions.click()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), afterQueries + 2)
+  page.once('dialog', (dialog) => dialog.accept())
+  await saveRegions.click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'region save')
+  await page.evaluate(() => window.queueRepeaterReply('Err - save failed'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'region save' }).getByText('Err - save failed', { exact: true }).waitFor()
+
+  page.once('dialog', (dialog) => {
+    assert.match(dialog.message(), /Other routing rules can still block forwarding/)
+    assert.match(dialog.message(), /does not save/)
+    void dialog.accept()
+  })
+  await page.getByRole('button', { name: 'Allow unscoped flood forwarding', exact: true }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'region allowf *')
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), afterQueries + 4)
+
   await page.getByText('Change flood hop limits', { exact: true }).click()
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   await page.getByText(/The lowest applicable limit wins/).waitFor()
