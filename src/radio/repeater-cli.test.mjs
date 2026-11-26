@@ -85,6 +85,23 @@ test('statistics reset requires confirmation and only accepts the exact command'
   }
 })
 
+test('packet log actions require confirmation and exclude remote log reading', () => {
+  for (const command of ['log start', 'log stop', 'log erase']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /delayed/)
+    for (const invalid of [`${command} `, `${command} extra`, `${command}\nreboot`]) {
+      assert.throws(() => repeaterCliCommand(invalid), /supported repeater CLI command/)
+    }
+  }
+  assert.match(repeaterCliCommand('log start').warning, /address prefixes/)
+  assert.match(repeaterCliCommand('log stop').warning, /does not erase/)
+  assert.match(repeaterCliCommand('log erase').warning, /does not stop logging/)
+  for (const command of ['log', 'log status', 'log read']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('power diagnostic queries accept only exact read-only commands', () => {
   for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
     const action = repeaterCliCommand(command)
