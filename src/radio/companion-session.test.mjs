@@ -534,6 +534,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
+  await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set repeat off', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
@@ -542,6 +543,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('set owner.info Public info', true), /administrator/)
+  await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set repeat on', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
@@ -553,6 +555,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('advert'), /Confirm/)
   await assert.rejects(send('clock sync'), /Confirm/)
   await assert.rejects(send('set owner.info Public info'), /Confirm/)
+  await assert.rejects(send('set name Relay'), /Confirm/)
   await assert.rejects(send('set lat 45'), /Confirm/)
   await assert.rejects(send('set repeat on'), /Confirm/)
   await assert.rejects(send('set repeat off'), /Confirm/)
@@ -603,6 +606,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const owner = await send('set owner.info Public|info', true)
   const ownerFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(ownerFrame.slice(13))), `${owner.tag}|set owner.info Public|info`)
+  const rename = await send('set name Relay 🛰', true)
+  const renameFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(renameFrame.slice(13))), `${rename.tag}|set name Relay 🛰`)
   for (const command of ['set lat 90.1', 'set lon -180.1', 'set lat 1.1234567', 'set lon 1e2']) {
     await assert.rejects(send(command, true), /latitude|longitude/)
   }

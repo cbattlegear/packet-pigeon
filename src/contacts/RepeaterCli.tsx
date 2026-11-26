@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
 import type { FormEvent } from 'react'
 import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
-import { repeaterCliCommand, repeaterCliCommands, repeaterOwnerInfoCommand, repeaterPositionCommand, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
+import { repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand, repeaterPositionCommand, UncertainRepeaterCliError } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 
 export type RepeaterMessageSync = Pick<MessageSync, 'subscribe' | 'getSnapshot' | 'subscribeToSavedReceipts' | 'sync'>
@@ -36,6 +36,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [intervalKind, setIntervalKind] = useState<'advert.interval' | 'flood.advert.interval'>('advert.interval')
   const [interval, setInterval] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
+  const [repeaterName, setRepeaterName] = useState('')
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -132,6 +133,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterNameCommand(repeaterName)
+      void send(command.command, `Set repeater name to "${repeaterName}"`, true,
+        'This changes the advertised name, not the public key. An advertisement is not sent automatically.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid repeater name.')
+    }
+  }
+
   function submitPosition(event: FormEvent<HTMLFormElement>, axis: 'lat' | 'lon', value: string) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -197,6 +210,21 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             onChange={(event) => setInterval(event.currentTarget.value)} />
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set interval</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change repeater name</summary>
+      <p>The field starts empty. Read the stored name first; this does not change the public key or send an advertisement.
+        Advertisements can show a shorter name when they include location. Names must be 1 to 31 UTF-8 bytes,
+        without leading or trailing spaces, control characters, or <code>[]/\:,?*</code>.</p>
+      <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+        onClick={() => void send('get name', 'Read the advertised name', false)}>Read repeater name</button>
+      <form className="contact-actions" onSubmit={submitName}>
+        <label>New repeater name
+          <input type="text" required value={repeaterName} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setRepeaterName(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set repeater name</button>
       </form>
     </details>
     <details>
