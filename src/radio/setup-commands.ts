@@ -13,7 +13,7 @@ export function setupRadioCommand(settings: RadioParameters, repeatEnabled: bool
     Math.abs(bandwidthKHz * 1_000 - bandwidth) > 1e-6 ||
     !Number.isInteger(spreadingFactor) || spreadingFactor < 5 || spreadingFactor > 12 ||
     !Number.isInteger(codingRate) || codingRate < 5 || codingRate > 8) {
-    throw new Error('The setup link contains radio settings outside the companion firmware limits.')
+    throw new Error('The radio settings are outside the companion firmware limits.')
   }
   const command = new Uint8Array(repeatEnabled === null ? 11 : 12)
   command[0] = 11
@@ -26,7 +26,7 @@ export function setupRadioCommand(settings: RadioParameters, repeatEnabled: bool
   return command
 }
 
-async function writeSetupCommand(link: SerialLink, command: Uint8Array) {
+export async function writeSettingsCommand(link: SerialLink, command: Uint8Array) {
   const result = await link.request(command, (frame) => {
     if (frame[0] !== Response.error && frame[0] !== Response.disabled) expectResponse(frame, Response.ok)
     return { value: frame }
@@ -35,12 +35,16 @@ async function writeSetupCommand(link: SerialLink, command: Uint8Array) {
 }
 
 export async function writeSetupRadioSettings(link: SerialLink, settings: RadioParameters, repeatEnabled: boolean | null) {
-  await writeSetupCommand(link, setupRadioCommand(settings, repeatEnabled))
+  await writeSettingsCommand(link, setupRadioCommand(settings, repeatEnabled))
 }
 
-export async function writeSetupPathWidth(link: SerialLink, width: number) {
+export function setupPathWidthCommand(width: number) {
   if (!Number.isInteger(width) || width < 1 || width > 3) {
     throw new CompanionError('protocol', 'Choose a 1-, 2- or 3-byte path hash.')
   }
-  await writeSetupCommand(link, Uint8Array.of(61, 0, width - 1))
+  return Uint8Array.of(61, 0, width - 1)
+}
+
+export async function writeSetupPathWidth(link: SerialLink, width: number) {
+  await writeSettingsCommand(link, setupPathWidthCommand(width))
 }
