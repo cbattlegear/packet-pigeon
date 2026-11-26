@@ -4,7 +4,8 @@ import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
-  repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, UncertainRepeaterCliError,
+  repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
+  repeaterTransmitPowerCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
 import { mapPosition } from '../map/nodes.ts'
@@ -51,6 +52,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [interval, setInterval] = useState('')
   const [floodLimitKind, setFloodLimitKind] = useState<'flood.max' | 'flood.max.unscoped' | 'flood.max.advert'>('flood.max')
   const [floodLimit, setFloodLimit] = useState('')
+  const [transmitPower, setTransmitPower] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
   const [pathHashMode, setPathHashMode] = useState('')
   const [regionName, setRegionName] = useState('')
@@ -187,6 +189,19 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         'Lower limits can disrupt mesh routes and remote access. Zero stops forwarding matching floods. Other applicable limits can be more restrictive.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid flood hop limit.')
+    }
+  }
+
+  function submitTransmitPower(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterTransmitPowerCommand(transmitPower)
+      void send(command.command, `Set repeater transmit power to ${transmitPower} dBm`,
+        'confirm' in command && command.confirm,
+        'Firmware documents 1–22 dBm, but supported values vary by board. Check the device manual and local regulations; a power amplifier can increase output and excessive power may be illegal. Firmware saves the preference and attempts to apply it, but may report OK even if applying it fails. A matching get tx reply shows only the stored preference, not the applied or radiated RF power.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid repeater transmit power.')
     }
   }
 
@@ -452,6 +467,24 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           </select>
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set advert hash size</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change repeater transmit power</summary>
+      <p>Read the stored preference first. Firmware documents a range of 1–22 dBm, but supported values vary by board.
+        Check the repeater manual and local regulations; an external power amplifier can increase output, and excessive
+        power may be unlawful. Firmware saves the preference and attempts to apply it, but may report OK even if applying
+        it fails. Sync the reply and read the preference again; a matching read-back shows only the stored preference,
+        not the applied or radiated RF power.</p>
+      <form className="contact-actions" onSubmit={submitTransmitPower}>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('get tx', 'Read stored transmit power preference', false)}>Read stored transmit power</button>
+        <label>New transmit power (1–22 dBm)
+          <input type="number" step="any" required value={transmitPower}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setTransmitPower(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set transmit power</button>
       </form>
     </details>
     <details>
