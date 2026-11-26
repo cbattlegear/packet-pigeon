@@ -126,6 +126,7 @@ export function RepeaterManagement({ session, messageSync, contact, radioKey, re
       route={{ pathLength: details.pathLength, pathHex: details.pathHex }}
       ready={ready} busy={busy || pending} neighborNodes={neighborNodes} repeaterPosition={contactPosition(details)}
       onMap={onMap} onPending={setCliPending}
+      onAccessChange={() => setClients(null)}
       onReboot={(notice) => { setLogin(null); setStatus(null); setClients(null); setRebootNotice(notice) }} />}
     {rebootNotice && <p role="status">{rebootNotice}</p>}
     {pending && <p role="status">Waiting for the repeater…

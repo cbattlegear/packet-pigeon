@@ -182,6 +182,10 @@
   overflow-wrap: anywhere;
 }
 
+.repeater-cli-history code {
+  overflow-wrap: anywhere;
+}
+
 .repeater-owner-form {
   display: grid;
   gap: 8px;

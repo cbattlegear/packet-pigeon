@@ -3,7 +3,7 @@ import test from 'node:test'
 import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
-  repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand,
+  repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand, repeaterRemoveAccessCommand,
   parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
@@ -45,6 +45,26 @@ test('neighbor discovery requires confirmation and only accepts the exact comman
   assert.match(action.warning, /old entries may remain and the list can be incomplete/)
   for (const command of ['discover.neighbors ', 'discover.neighbors extra', 'discover.neighbors\nreboot']) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
+test('access removal requires an exact full public key and confirmation', () => {
+  const key = 'ab'.repeat(32)
+  const action = repeaterRemoveAccessCommand(key.toUpperCase())
+  assert.equal(action.command, `setperm ${key} 0`)
+  assert.equal(action.accessTarget, key)
+  assert.equal(action.confirm, true)
+  assert.match(action.warning, /does not change passwords|not its passwords/)
+  assert.match(action.warning, /blank guest password may allow guest access/)
+  assert.match(action.warning, /may misdirect the reply/)
+  assert.match(action.warning, /saving is delayed and can fail/i)
+  assert.equal(repeaterCliCommand(`setperm ${key} 0`).confirm, true)
+  for (const command of [`setperm ${key.slice(0, 12)} 0`, `setperm ${key} 1`, `setperm ${key} 00`,
+    `setperm ${key} 0 extra`, `setperm ${key} 0\nreboot`, `setperm ${key} 0\n`]) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+  for (const value of ['ab'.repeat(6), 'gg'.repeat(32), 'ab'.repeat(33)]) {
+    assert.throws(() => repeaterRemoveAccessCommand(value), /64-character hex public key/)
   }
 })
 
