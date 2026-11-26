@@ -136,6 +136,18 @@ test('flood hop limits accept exact whole values and require confirmation', () =
   }
 })
 
+test('retransmission delay factors accept bounded decimal values and require confirmation', () => {
+  for (const kind of ['txdelay', 'direct.txdelay']) {
+    assert.equal(repeaterCliCommand(`get ${kind}`).command, `get ${kind}`)
+    for (const value of ['0', '0.01', '0.5', '1', '1.99', '2', '2.00']) {
+      assert.equal(repeaterCliCommand(`set ${kind} ${value}`).confirm, true)
+    }
+    for (const value of ['', '-1', '2.01', '3', '00', '0.001', '.5', '1e0', ' 1', '1 ', '1\n', '2\r', '1\u2028', '1\nreboot']) {
+      assert.throws(() => repeaterCliCommand(`set ${kind} ${value}`), /retransmission delay factor/)
+    }
+  }
+})
+
 test('transmit power uses the documented whole dBm range and requires confirmation', () => {
   assert.equal(repeaterCliCommand('get tx').command, 'get tx')
   for (const value of ['1', '9', '10', '21', '22']) {

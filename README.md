@@ -541,6 +541,12 @@ ID/hash in their paths. Minimal, moderate, and strict modes use thresholds of
 4/2/1, 2/1/1, and 1/1/1 occurrences for 1-, 2-, and 3-byte path hashes;
 `off` disables the check. Stricter modes can drop flooded packets and reduce
 reachability. This CLI setting requires repeater firmware v1.14 or later.
+Administrators can read and confirm changes to the separate flood and direct
+retransmission delay factors. Lower values may increase collisions; higher
+values may increase latency. Zero removes this random delay, not other delays.
+These changes can affect mesh routes and remote access. Values accepted here
+range from 0 to 2 with up to two decimal places. Sync and compare the selected
+factor before and after a change; radio acceptance does not prove execution.
 Administrators can also read and change the advert path hash size. This affects
 hashes used in the repeater's manual flood advertisements; it does not change
 the hash widths of packets it forwards. On repeater v1.14.0, scheduled flood
