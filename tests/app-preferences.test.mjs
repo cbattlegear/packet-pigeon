@@ -17,7 +17,10 @@ test('restores explicitly selected preferences', () => {
     saveDrafts: false, oldestUnread: true, keepScreenOn: true, composerAutofocus: true,
     chatPreviews: false, pathMetadata: false, regionMetadata: false,
   }
-  assert.deepEqual(parseAppPreferences(JSON.stringify(preferences)), preferences)
+  assert.deepEqual(parseAppPreferences(JSON.stringify(preferences)), {
+    ...preferences,
+    syncedMessageAlerts: false, discoveredContactAlerts: false, fullStorageAlerts: false,
+  })
 })
 
 test('uses a supported browser language or falls back to English', () => {
