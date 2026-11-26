@@ -285,6 +285,18 @@ also opens your editable quick messages. Location and channel key sharing
 require explicit confirmation. The composer keeps the original draft if the
 combined text exceeds the radio's message length limit.
 
+## Radio device settings
+
+Open **Settings → Radio device settings** with a connected companion to change
+its name, advert position, radio parameters, transmit power, repeat mode, path
+hash width, and telemetry policies. Presets fill the radio fields for review.
+The save results show the outcome for each radio command.
+
+Open **Advanced radio settings** and choose **Read advanced settings** to see
+the radio's clock, storage use, default flood region, and available GPS and
+Wi-Fi controls. Bluetooth PIN and Wi-Fi changes take effect after restarting
+the radio. Packet Pigeon connects through USB or Bluetooth.
+
 ## Telemetry
 
 Open **Diagnostics → Radio telemetry** for the connected radio's readings, or
