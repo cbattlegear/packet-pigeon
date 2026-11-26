@@ -4,7 +4,7 @@ import {
   allocateRepeaterCliTag, repeaterCliCommand, repeaterOwnerInfoCommand, sendRepeaterCli, UncertainRepeaterCliError,
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
   repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand, repeaterRemoveAccessCommand,
-  repeaterGrantAdminCommand,
+  repeaterGrantAdminCommand, repeaterLimitedAccessCommand,
   parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
@@ -72,7 +72,7 @@ test('access removal requires an exact full public key and confirmation', () => 
   assert.match(action.warning, /may misdirect the reply/)
   assert.match(action.warning, /saving is delayed and can fail/i)
   assert.equal(repeaterCliCommand(`setperm ${key} 0`).confirm, true)
-  for (const command of [`setperm ${key.slice(0, 12)} 0`, `setperm ${key} 1`, `setperm ${key} 00`,
+  for (const command of [`setperm ${key.slice(0, 12)} 0`, `setperm ${key} 00`,
     `setperm ${key} 0 extra`, `setperm ${key} 0\nreboot`, `setperm ${key} 0\n`]) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
   }
@@ -95,12 +95,40 @@ test('administrator grants require a full key and confirmation and explain evict
   assert.match(action.warning, /reported login role may then be stale/)
   assert.match(action.warning, /OK reply does not verify persistence/)
   assert.equal(repeaterCliCommand(`setperm ${key} 3`).confirm, true)
-  for (const command of [`setperm ${key.slice(0, 12)} 3`, `setperm ${key} 2`, `setperm ${key} 03`,
+  for (const command of [`setperm ${key.slice(0, 12)} 3`, `setperm ${key} 03`,
     `setperm ${key} 3 extra`, `setperm ${key} 3\nreboot`, `setperm ${key} 3\n`]) {
     assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
   }
   for (const value of ['dd'.repeat(6), 'gg'.repeat(32), 'dd'.repeat(33)]) {
     assert.throws(() => repeaterGrantAdminCommand(value), /64-character hex public key/)
+  }
+})
+
+test('non-admin role changes require full keys and explain permissions and eviction risks', () => {
+  const key = 'dd'.repeat(32)
+  for (const [role, number] of [['read-only', 1], ['read-write', 2]]) {
+    const action = repeaterLimitedAccessCommand(key.toUpperCase(), role)
+    assert.equal(action.command, `setperm ${key} ${number}`)
+    assert.equal(action.accessTarget, key)
+    assert.equal(action.confirm, true)
+    assert.equal(repeaterCliCommand(`setperm ${key} ${number}`).confirm, true)
+    assert.match(action.warning, /do not imply distinct repeater capabilities/)
+    assert.match(action.warning, /may allow more telemetry than guest access/)
+    assert.match(action.warning, /log in without the password/)
+    assert.match(action.warning, /replaces all permission bits and can demote an administrator/)
+    assert.match(action.warning, /administrator password may regain admin access/)
+    assert.match(action.warning, /full table can evict another client/)
+    assert.match(action.warning, /may misdirect the reply/)
+    assert.match(action.warning, /reported login role may then be stale/)
+    assert.match(action.warning, /OK reply does not verify persistence/)
+  }
+  for (const value of ['dd'.repeat(6), 'gg'.repeat(32), 'dd'.repeat(33)]) {
+    assert.throws(() => repeaterLimitedAccessCommand(value, 'read-only'), /64-character hex public key/)
+  }
+  assert.throws(() => repeaterLimitedAccessCommand(key, 'admin'), /supported non-admin role/)
+  for (const command of [`setperm ${key.slice(0, 12)} 1`, `setperm ${key} 4`, `setperm ${key} 01`,
+    `setperm ${key} 1 extra`, `setperm ${key} 2\nreboot`, `setperm ${key} 1\n`]) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
   }
 })
 
