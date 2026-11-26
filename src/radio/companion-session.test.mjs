@@ -327,7 +327,7 @@ test('repeater login and explicit status use verified routes and distinguish rep
   const signal = () => new AbortController().signal
   await assert.rejects(session.manageRepeater(key, target, route, 'status', '', signal()), /Log in/)
   assert.equal(port.commands.some(([code]) => code === 27), false)
-  assert.deepEqual(await session.manageRepeater(key, target, route, 'login', 'test', signal()), { role: 'admin', route: 'direct' })
+  assert.deepEqual(await session.manageRepeater(key, target, route, 'login', 'test', signal(), true), { role: 'admin', route: 'direct' })
   assert.deepEqual(port.commands.find(([code]) => code === 26), [26, ...contact.slice(1, 33), ...encode('test'), 0])
   const status = await session.manageRepeater(key, target, route, 'status', '', signal())
   assert.equal(status.batteryMv, 4050)
@@ -335,6 +335,21 @@ test('repeater login and explicit status use verified routes and distinguish rep
   assert.equal(status.rssi, -80)
   assert.equal(status.snr, -2)
   assert.equal(status.received, 42)
+  let commandCount = port.commands.length
+  session.clearRepeaterAccess('cd'.repeat(32), target)
+  session.clearRepeaterAccess(key, 'dd'.repeat(32))
+  assert.equal(port.commands.length, commandCount)
+  await session.manageRepeater(key, target, route, 'status', '', signal())
+  commandCount = port.commands.length
+  session.clearRepeaterAccess(key, target)
+  assert.equal(port.commands.length, commandCount)
+  assert.equal(session.hasRememberedRepeaterPassword(key, target), true)
+  await assert.rejects(session.manageRepeater(key, target, route, 'status', '', signal()), /Log in/)
+  await assert.rejects(session.readRepeaterAccessList(key, target, route, signal()), /Log in/)
+  await assert.rejects(session.readRepeaterNeighbors(key, target, route, 0, signal()), /Log in/)
+  await assert.rejects(session.sendRepeaterCommand(key, target, route, 'ver', false, signal()), /Log in/)
+  assert.equal(port.commands.filter(([code]) => [2, 26, 27, 50].includes(code)).length, 3)
+  assert.deepEqual(await session.resumeRepeater(key, target, route, signal()), { role: 'admin', route: 'direct' })
   contact[36] = 0x46
   await assert.rejects(session.manageRepeater(key, target, route, 'status', '', signal()), /route changed/)
   contact[36] = 0x45
@@ -344,7 +359,7 @@ test('repeater login and explicit status use verified routes and distinguish rep
   reply = false
   const controller = new AbortController()
   const pending = session.manageRepeater(key, target, route, 'login', 'test', controller.signal)
-  await waitFor(() => port.commands.filter(([code]) => code === 26).length === 2)
+  await waitFor(() => port.commands.filter(([code]) => code === 26).length === 3)
   controller.abort(new Error('Stopped waiting'))
   await assert.rejects(pending, /Stopped waiting/)
   await assert.rejects(session.manageRepeater(key, target, route, 'status', '', signal()), /Reconnect/)
@@ -420,9 +435,11 @@ test('remembered repeater passwords are opt-in, scoped, forgettable and used onl
   const controller = new AbortController()
   const resumed = session.resumeRepeater(radio, target, route, controller.signal)
   await waitFor(() => release)
+  assert.throws(() => session.clearRepeaterAccess(radio, target), /Wait for the current radio action/)
   controller.abort(new Error('Stopped waiting'))
   await assert.rejects(resumed, /Stopped waiting/)
   release()
+  session.clearRepeaterAccess(radio, target)
   const beforeRetry = port.commands.filter(([code]) => code === 26).length
   await assert.rejects(session.resumeRepeater(radio, target, route, signal()), /Reconnect/)
   await assert.rejects(session.manageRepeater(radio, target, route, 'status', '', signal()), /Reconnect/)
@@ -441,10 +458,13 @@ test('remembered repeater passwords are opt-in, scoped, forgettable and used onl
   release = undefined
   const login = session.manageRepeater(radio, target, route, 'login', 'fixture-secret', signal(), true)
   await waitFor(() => release)
+  assert.throws(() => session.clearRepeaterAccess(radio, target), /Wait for the current radio action/)
   session.forgetRepeaterPassword(radio, target)
   release()
   await login
   assert.equal(session.hasRememberedRepeaterPassword(radio, target), false)
+  session.clearRepeaterAccess(radio, target)
+  await assert.rejects(session.manageRepeater(radio, target, route, 'status', '', signal()), /Log in/)
 })
 
 test('uncertain repeater logins reject retries and cannot regain a role from a late admin reply', async (t) => {

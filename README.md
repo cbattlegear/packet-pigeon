@@ -526,6 +526,12 @@ reply cannot remove that block. Reconnect and log in again to retry. The
 firmware does not tag these replies, so even after
 reconnecting a delayed reply cannot be conclusively distinguished from a new
 one. The reported role is not a guarantee of current authorization.
+**End local repeater access** clears this tab's reported role, management-panel
+status, access and neighbor snapshots, and CLI history without transmitting. It does not revoke
+the repeater's access-list entry, clear remembered or encrypted passwords,
+affect other tabs, delete synced replies, clear map views already opened, or
+recall already-sent commands.
+Log in again explicitly to use management controls.
 The status snapshot includes optional **Detailed packet statistics**: flood and
 direct counts, duplicates, the raw error/event field, receive airtime and
 receive errors. These values can be delayed, reset or wrap; their meaning and
