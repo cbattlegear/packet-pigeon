@@ -19,6 +19,8 @@ export const repeaterCliCommands = [
   { command: 'get radio', description: 'Read radio parameters' },
   { command: 'get tx', description: 'Read stored transmit power preference' },
   { command: 'get repeat', description: 'Read forwarding mode' },
+  { command: 'get txdelay', description: 'Read flood retransmission delay factor' },
+  { command: 'get direct.txdelay', description: 'Read direct retransmission delay factor' },
   { command: 'get flood.max', description: 'Read the overall flood hop limit' },
   { command: 'get flood.max.unscoped', description: 'Read the unscoped flood hop limit' },
   { command: 'get flood.max.advert', description: 'Read the flood advertisement hop limit' },
@@ -224,6 +226,15 @@ export function repeaterCliCommand(command: string) {
       throw new Error('Enter a whole flood hop limit from 0 to 64.')
     }
     return { command, description: `Set ${floodLimit[1]} hop limit`, confirm: true as const }
+  }
+  const retransmitDelay = /^set (txdelay|direct\.txdelay) ([\s\S]*)$/.exec(command)
+  if (retransmitDelay) {
+    const value = retransmitDelay[2]
+    const match = /^(?:0|1|2)(?:\.[0-9]{1,2})?$/.exec(value)
+    if (!match || match[0] !== value || Number(value) > 2) {
+      throw new Error('Enter a retransmission delay factor from 0 to 2 with up to 2 decimal places.')
+    }
+    return { command, description: `Set ${retransmitDelay[1] === 'txdelay' ? 'flood' : 'direct'} retransmission delay factor`, confirm: true as const }
   }
   const loopDetection = /^set loop\.detect (off|minimal|moderate|strict)$/.exec(command)
   if (loopDetection && loopDetection[0] === command) {

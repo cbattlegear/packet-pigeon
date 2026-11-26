@@ -52,6 +52,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [interval, setInterval] = useState('')
   const [floodLimitKind, setFloodLimitKind] = useState<'flood.max' | 'flood.max.unscoped' | 'flood.max.advert'>('flood.max')
   const [floodLimit, setFloodLimit] = useState('')
+  const [retransmitKind, setRetransmitKind] = useState<'txdelay' | 'direct.txdelay'>('txdelay')
+  const [retransmitDelay, setRetransmitDelay] = useState('')
   const [transmitPower, setTransmitPower] = useState('')
   const [loopDetection, setLoopDetection] = useState('')
   const [pathHashMode, setPathHashMode] = useState('')
@@ -202,6 +204,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         'Firmware documents 1–22 dBm, but supported values vary by board. Check the device manual and local regulations; a power amplifier can increase output and excessive power may be illegal. Firmware saves the preference and attempts to apply it, but may report OK even if applying it fails. A matching get tx reply shows only the stored preference, not the applied or radiated RF power.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid repeater transmit power.')
+    }
+  }
+
+  function submitRetransmitDelay(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set ${retransmitKind} ${retransmitDelay}`)
+      void send(command.command, `${command.description} to ${retransmitDelay}`, true,
+        'Changing retransmission delays can affect collisions, latency and remote access. Zero removes this random delay, not all other delays. Sync the reply and read the selected factor again.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid retransmission delay factor.')
     }
   }
 
@@ -467,6 +481,33 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           </select>
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set advert hash size</button>
+      </form>
+    </details>
+    <details>
+      <summary>Change retransmission delays</summary>
+      <p>These factors control randomized retransmission delays for flood and direct traffic separately. Lower values
+        can increase collisions; higher values can increase latency. Zero removes this random delay, not other delays.
+        Changing either can affect mesh routes and remote access. Read the selected factor before changing it, then
+        sync the reply and read it again. The supported input range is 0–2 with up to 2 decimal places.</p>
+      <form className="contact-actions" onSubmit={submitRetransmitDelay}>
+        <label>Retransmission delay type
+          <select value={retransmitKind} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => {
+              const value = event.currentTarget.value
+              if (value === 'txdelay' || value === 'direct.txdelay') setRetransmitKind(value)
+            }}>
+            <option value="txdelay">Flood</option>
+            <option value="direct.txdelay">Direct</option>
+          </select>
+        </label>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send(`get ${retransmitKind}`, `Read ${retransmitKind === 'txdelay' ? 'flood' : 'direct'} retransmission delay factor`, false)}>Read selected delay</button>
+        <label>New delay factor (0–2)
+          <input type="text" inputMode="decimal" required value={retransmitDelay}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setRetransmitDelay(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set retransmission delay</button>
       </form>
     </details>
     <details>
