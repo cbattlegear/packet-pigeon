@@ -191,6 +191,22 @@
   justify-self: start;
 }
 
+.repeater-position-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.repeater-position-form label {
+  grid-column: 1 / -1;
+}
+
+.repeater-position-form input {
+  width: 100%;
+}
+
 @media (max-width: 780px) {
   .contact-layout {
     grid-template-columns: minmax(0, 1fr);
