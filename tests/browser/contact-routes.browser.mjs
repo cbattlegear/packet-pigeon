@@ -63,6 +63,15 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
           const tag = data.slice(1, 5)
           emit([6, 0, ...tag, 150, 0, 0, 0])
           emit([0x89, 0, 2, 1, ...tag, 0, 0, 0, 0, ...data.slice(10), 36, 248])
+        } else if (data[0] === 26 || data[0] === 27) {
+          changes.push([...data])
+          emit([6, 1, 0, 0, 0, 0, 100, 0, 0, 0])
+          if (data[0] === 26) emit([0x85, 0, ...data.slice(1, 7), 1, 0, 0, 0, 1, 2])
+          else {
+            const stats = new Uint8Array(48)
+            new DataView(stats.buffer).setUint16(0, 3900, true)
+            emit([0x87, 0, ...data.slice(1, 7), ...stats])
+          }
         } else throw Error('Unexpected command')
       } }),
       async open() {}, async close() {},
@@ -135,4 +144,16 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
   await page.getByText('Cleared the saved route.').waitFor()
   assert.deepEqual(await page.evaluate(() => window.radioChanges.map(([code]) => code)), [9, 9, 36, 9])
   assert.equal(await page.evaluate(() => window.radioChanges[3][35]), 255)
+  await page.getByText('Repeater login and status', { exact: true }).click()
+  await page.getByText(/Current route: Flood/).waitFor()
+  assert.equal(await page.evaluate(() => window.radioChanges.length), 4)
+  const password = page.getByLabel('Repeater password')
+  await password.fill('fixture')
+  await page.getByRole('button', { name: 'Log in', exact: true }).click()
+  await page.getByText(/Login reported guest access/).waitFor()
+  assert.equal(await password.inputValue(), '')
+  assert.equal(await page.evaluate(() => window.radioChanges.length), 5)
+  await page.getByRole('button', { name: 'Request status' }).click()
+  await page.getByText('3900 mV').waitFor()
+  assert.deepEqual(await page.evaluate(() => window.radioChanges.slice(-2).map(([code]) => code)), [26, 27])
 })

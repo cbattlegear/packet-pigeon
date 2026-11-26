@@ -12,9 +12,10 @@ import { contactPosition } from './model.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
 import { resolvePath } from '../paths/model.ts'
 import type { MapPath, PathNode } from '../paths/model.ts'
+import { RepeaterManagement } from './RepeaterManagement.tsx'
 
 export type ContactRadioSession = Pick<CompanionSession,
-  'addContact' | 'removeContact' | 'saveContactPath' | 'resetContactPath' | 'saveContactPermissions' | 'pingContact'>
+  'addContact' | 'removeContact' | 'saveContactPath' | 'resetContactPath' | 'saveContactPermissions' | 'pingContact' | 'manageRepeater'>
 
 type Props = {
   session: ContactRadioSession
@@ -142,6 +143,9 @@ export function ContactRadioActions({ session, contact, contacts, radioKey, read
   }
 
   return <div className="contact-radio-actions">
+    {details?.type === 2 && <RepeaterManagement key={`${radioKey}:${ready}:${details.pathLength}:${details.pathHex}`}
+      session={session} contact={contact} radioKey={radioKey}
+      ready={ready} busy={busy} />}
     <details>
       <summary>Saved route and repeater hops</summary>
       {saved && <PathDetails title="Saved route" width={saved.width} hashes={saved.hops} nodes={pathNodes} onMap={onMap} />}
