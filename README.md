@@ -528,6 +528,17 @@ the reply; saving is delayed and can fail, so `OK` does not verify persistence.
 Inspect the access list again, but absence does not prove removal because entries
 may be omitted.
 
+Administrators can confirm a grant of full administrator access to another
+client using its complete public key. Verify the key independently: access-list
+prefixes can collide. The client can log in without a password while the entry
+remains. Existing permission bits are replaced, and on repeater firmware
+v1.14.1 a new entry in a full table can evict another client, including an
+administrator or the connected radio, and may misdirect the reply. The reported
+login role may then be stale; logging in again can also evict an entry if the
+table is full. Saving is delayed and can fail; `OK` does not verify persistence,
+and the access list can omit entries. Granting access to the connected radio
+or repeater is not offered.
+
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 which can map unique matches with saved positions as separate points rather
