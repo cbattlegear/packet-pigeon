@@ -285,6 +285,18 @@ also opens your editable quick messages. Location and channel key sharing
 require explicit confirmation. The composer keeps the original draft if the
 combined text exceeds the radio's message length limit.
 
+## Telemetry
+
+Open **Diagnostics → Radio telemetry** for the connected radio's readings, or
+**Contact telemetry** in a contact's details for remote readings. Expand
+either view to see the latest saved sample and when it arrived. Refresh
+explicitly or enable polling once a minute. Polling stops when the view
+closes, the tab becomes hidden, or a request fails.
+
+Remote refresh sends a mesh request. The contact's firmware and access
+settings determine which measurements it shares. Samples are kept in this
+browser's per-radio cache and can be viewed offline.
+
 ## Received packet diagnostics
 
 Open **Diagnostics** and start capture with a connected companion radio.

@@ -12,6 +12,8 @@ import type { ContactEntry, ContactSort } from './model.ts'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { ContactRadioActions } from './ContactRadioActions.tsx'
 import type { ContactRadioSession } from './ContactRadioActions.tsx'
+import { ContactTelemetry } from '../telemetry/TelemetryPanel.tsx'
+import type { TelemetrySession } from '../telemetry/TelemetryPanel.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
 import { discoveryEntries, discoveryPathNodes } from '../discovery/model.ts'
 import { conversations, unreadReceipts } from '../chats/model.ts'
@@ -20,7 +22,7 @@ import './contacts.css'
 
 type ContactsProps = {
   snapshot: CompanionSnapshot
-  session: ContactRadioSession
+  session: ContactRadioSession & TelemetrySession
   cacheSaving: boolean
   messageSyncing: boolean
   messageSending: boolean
@@ -169,6 +171,7 @@ export function ContactsPanel({ snapshot, session, cacheSaving, messageSyncing, 
           firmware={lastSessionKey === radioKey ? snapshot.device?.capabilities.firmwareProtocolVersion ?? 0 : 0}
           usb={snapshot.transport === 'usb'}
           radioBusy={messageSyncing || messageSending}
+          active={active}
           savePreference={savePreference}
           onMap={onMap}
           onShare={onShare}
@@ -190,6 +193,7 @@ type BrowserProps = {
   firmware: number
   usb: boolean
   radioBusy: boolean
+  active: boolean
   savePreference: (radioKey: RadioKey, change: ContactPreferenceEdit) => Promise<void>
   onMap: ContactsProps['onMap']
   onShare?: ContactsProps['onShare']
@@ -197,7 +201,7 @@ type BrowserProps = {
   additionalPathNodes: readonly PathNode[]
 }
 
-function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite, firmware, usb, radioBusy, savePreference, onMap, onShare,
+function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite, firmware, usb, radioBusy, active, savePreference, onMap, onShare,
   onPathMap, additionalPathNodes }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
@@ -355,9 +359,13 @@ function ContactBrowser({ radioKey, entries, unreadByContact, session, canWrite,
         {detail ? (
           <ContactDetails contact={detail} busy={busy} canWrite={canWrite} location={location} locate={locate}
             onMap={onMap} onShare={onShare} copyKey={copyKey} edit={edit} remove={() => void remove([detail])}
-            radioControls={detail.details && <ContactRadioActions key={detail.publicKey} session={session}
-              contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} usb={usb}
-              firmware={firmware} busy={busy || radioBusy} onMap={onPathMap} additionalPathNodes={additionalPathNodes} />} />
+            radioControls={<>
+              {detail.publicKey !== radioKey && <ContactTelemetry key={`telemetry:${detail.publicKey}`} active={active} session={session}
+                radioKey={radioKey} contactKey={detail.publicKey} ready={canWrite} firmware={firmware} radioBusy={busy || radioBusy} />}
+              {detail.details && <ContactRadioActions key={detail.publicKey} session={session}
+                contact={detail} contacts={entries} radioKey={radioKey} ready={canWrite} usb={usb}
+                firmware={firmware} busy={busy || radioBusy} onMap={onPathMap} additionalPathNodes={additionalPathNodes} />}
+            </>} />
         ) : <p className="contact-note">{visited.length ? 'Select a contact to see details.' : 'No contacts match.'}</p>}
       </div>
       {canWrite ? (
