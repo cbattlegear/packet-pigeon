@@ -697,8 +697,12 @@ prove identity. An `OK` reply does not prove a broadcast occurred or that any
 neighbors replied. Wait up to 60 seconds, then request `neighbors` separately.
 Old entries may remain, and the reported list can be incomplete.
 Logged-in guests and administrators can also explicitly request pages of up to
-three full neighbor public keys, ordered by most recently heard. Repeater
-firmware v1.14.1 supports this binary request; other builds may not. Entries can
+three full neighbor public keys, ordered by newest or oldest heard, or highest
+or lowest reported SNR. Changing the order clears the current page and sends
+nothing until a page is requested. In repeater v1.14.1, SNR describes the last
+qualifying advertisement or discovery response heard by the repeater, not
+necessarily the current link; ties may not have a stable order. That firmware
+supports these request orders; other builds may differ. Entries can
 change between pages, causing omissions or duplicates. Discovery responses are
 unauthenticated, so independently verify a full key before using it. Request
 tags can repeat after a radio restart, making delayed replies ambiguous. A page
