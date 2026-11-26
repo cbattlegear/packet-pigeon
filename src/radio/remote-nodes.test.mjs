@@ -58,8 +58,14 @@ test('clears encoded credentials after login and validates room and sensor confi
   assert.ok(sent.every((byte) => byte === 0))
   await assert.rejects(loginRemoteNode(link, publicKey, 'å'.repeat(8), () => () => {}, signal), /15 UTF-8/)
   assert.equal(remoteNodeAdminText({ kind: 'client-permissions', publicKey, permissions: 129 }, 4), `setperm ${publicKey} 129`)
-  assert.equal(remoteNodeAdminText({ kind: 'allow-read-only', enabled: false }, 3), 'set allow.read.only off')
-  assert.throws(() => remoteNodeAdminText({ kind: 'allow-read-only', enabled: true }, 4), /room server/)
+  for (const [action, expected] of [
+    [{ kind: 'read-allow-read-only' }, 'get allow.read.only'],
+    [{ kind: 'allow-read-only', enabled: true }, 'set allow.read.only on'],
+    [{ kind: 'allow-read-only', enabled: false }, 'set allow.read.only off'],
+  ]) {
+    assert.equal(remoteNodeAdminText(action, 3), expected)
+    assert.throws(() => remoteNodeAdminText(action, 4), /room server/)
+  }
   const status = new Uint8Array(52)
   const view = new DataView(status.buffer)
   view.setUint16(0, 3800, true)

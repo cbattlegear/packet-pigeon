@@ -62,6 +62,7 @@ test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   const link = { async request() { writes++; throw new Error('unexpected write') } }
   for (const command of ['get guest.password', 'set guest.password secret', 'get prv.key', 'reboot', 'ver\nadvert',
     'set repeat', 'set repeat true', 'set repeat off\n', 'set repeat off extra',
+    'get allow.read.only', 'set allow.read.only on', 'set allow.read.only off',
     'set allow.read.only', 'set allow.read.only true', 'set allow.read.only off extra',
     'set name Bad\nreboot', 'set name Bad/Name', `set name ${'x'.repeat(32)}`]) {
     await assert.rejects(sendRepeaterCli(link, key, command, 'AA'), /supported repeater CLI command|name/)
@@ -71,8 +72,6 @@ test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   assert.equal(repeaterCliCommand('clock sync').confirm, true)
   assert.equal(repeaterCliCommand('set repeat on').confirm, true)
   assert.equal(repeaterCliCommand('set repeat off').confirm, true)
-  assert.equal(repeaterCliCommand('set allow.read.only on').confirm, true)
-  assert.equal(repeaterCliCommand('set allow.read.only off').confirm, true)
   assert.equal(repeaterCliCommand('gps advert').command, 'gps advert')
   assert.throws(() => repeaterCliCommand('gps advert prefs'), /supported/)
   assert.throws(() => repeaterCliCommand('time 9999999999'), /supported/)

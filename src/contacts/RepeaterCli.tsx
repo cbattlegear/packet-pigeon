@@ -213,21 +213,6 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
-      <summary>Guest read-only room access</summary>
-      <p>This setting applies only when the repeater firmware runs a room server. Read the current policy before changing it;
-        enabling it allows read-only visitors, while disabling it requires room access.</p>
-      <div className="contact-actions">
-        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
-          onClick={() => void send('get allow.read.only', 'Read room guest-access policy', false)}>Read access policy</button>
-        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
-          onClick={() => void send('set allow.read.only on', 'Allow read-only room visitors', true,
-            'This affects only repeater firmware that runs a room server.')}>Allow read-only visitors</button>
-        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
-          onClick={() => void send('set allow.read.only off', 'Require room access', true,
-            'This affects only repeater firmware that runs a room server.')}>Require room access</button>
-      </div>
-    </details>
-    <details>
       <summary>Change repeater name</summary>
       <p>The field starts empty. Read the stored name first; this does not change the public key or send an advertisement.
         Advertisements can show a shorter name when they include location. Names must be 1 to 31 UTF-8 bytes,
