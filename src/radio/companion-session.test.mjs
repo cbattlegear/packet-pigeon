@@ -732,6 +732,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set loop.detect strict', true), /administrator/)
   await assert.rejects(send('set path.hash.mode 2', true), /administrator/)
   await assert.rejects(send('region'), /administrator/)
+  await assert.rejects(send('region list allowed'), /administrator/)
   await assert.rejects(send('region home #North', true), /administrator/)
   await assert.rejects(send('region put #North', true), /administrator/)
   await assert.rejects(send('region remove #North', true), /administrator/)
@@ -762,6 +763,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('get loop.detect'), /administrator/)
   await assert.rejects(send('get path.hash.mode'), /administrator/)
   await assert.rejects(send('region get *'), /administrator/)
+  await assert.rejects(send('region list denied'), /administrator/)
   await assert.rejects(send('region home *', true), /administrator/)
   await assert.rejects(send('region remove #North', true), /administrator/)
   await assert.rejects(send('region allowf #North', true), /administrator/)
@@ -933,6 +935,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const regionRemove = await send('region remove #North', true)
   const regionRemoveFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(regionRemoveFrame.slice(13))), `${regionRemove.tag}|region remove #North`)
+  for (const command of ['region list allowed', 'region list denied']) {
+    const receipt = await send(command)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
   const receiverGain = await send('set radio.rxgain on', true)
   const receiverGainFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(receiverGainFrame.slice(13))), `${receiverGain.tag}|set radio.rxgain on`)

@@ -438,6 +438,10 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       <p>Individual queries use firmware prefix matching: an exact match is preferred, but an incomplete or ambiguous
         prefix can return a different region. Compare the returned name. Region-tree replies require repeater firmware
         v1.12 or later; other query support varies by firmware.</p>
+      <p>Filtered lists report region flood flags, not actual forwarding; other rules can block floods. Replies may omit
+        names without warning, can become stale, and omit a leading <code>#</code>. The v1.14.1 firmware source handles
+        remote administrator requests, but its documentation labels these lists serial-only; other builds may reject
+        them or not reply.</p>
       <div className="contact-actions">
         <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
           onClick={() => void send('region', 'Read the region tree', false)}>Read region tree</button>
@@ -445,6 +449,10 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           onClick={() => void send('region home', 'Read the home region', false)}>Read home region</button>
         <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
           onClick={() => void send('region default', 'Read the default scope region', false)}>Read default scope region</button>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('region list allowed', 'List regions with flood permission', false)}>List flood-allowed regions</button>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send('region list denied', 'List regions without flood permission', false)}>List flood-denied regions</button>
       </div>
       <form className="contact-actions" onSubmit={submitRegionQuery}>
         <label>Region name or prefix
@@ -816,6 +824,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
               F marks flood permission, ^ marks the home region, and * is the unscoped wildcard.</p>}
           {item.command.startsWith('region get ') && item.reply !== null &&
             <p className="contact-status">Firmware may match a prefix to a different region. Compare the returned name.</p>}
+          {(item.command === 'region list allowed' || item.command === 'region list denied') && item.reply !== null &&
+            <p className="contact-status">This flag snapshot may omit names without warning and can become stale.
+              A leading # is omitted; flood permission does not guarantee forwarding.</p>}
           {item.command === 'powersaving' && item.reply !== null &&
             <p className="contact-status">An on reply reports the preference, not actual sleep; behavior depends on the board and firmware.</p>}
           {item.command === 'get radio.rxgain' && item.reply !== null &&

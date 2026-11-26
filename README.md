@@ -547,7 +547,12 @@ region, and `*` the unscoped wildcard; other routing rules may still block
 forwarding. Individual lookups prefer an exact name but may return a different
 region when a prefix is ambiguous; compare the returned name. Remote tree
 replies require repeater firmware v1.12 or later; support for other queries
-varies by firmware. Administrators can separately allow or deny unscoped flood
+varies by firmware. Filtered lists show names with the flood flag allowed or
+denied, but can omit names without warning, omit a leading `#`, and become
+stale. These flags do not guarantee actual forwarding. Repeater firmware
+v1.14.1 source handles the list commands over administrator CLI, although its
+documentation labels them serial-only; support on other builds is uncertain.
+Administrators can separately allow or deny unscoped flood
 forwarding for the wildcard region with confirmation. Denying it can disrupt
 mesh routes and remote access; allowing it does not override other routing
 rules. These changes apply to the live region map but are not saved by the

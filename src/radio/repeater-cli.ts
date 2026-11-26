@@ -40,6 +40,8 @@ export const repeaterCliCommands = [
   { command: 'region', description: 'Read the region tree' },
   { command: 'region home', description: 'Read the home region' },
   { command: 'region default', description: 'Read the default scope region' },
+  { command: 'region list allowed', description: 'List regions with flood permission' },
+  { command: 'region list denied', description: 'List regions without flood permission' },
   { command: 'region home *', description: 'Set the home region to the wildcard', confirm: true,
     warning: 'This changes the active home-region setting. Firmware may resolve a prefix to a different region; check the reply and tree. The change is not saved until region save, which writes the entire region map.' },
   { command: 'region allowf *', description: 'Allow unscoped flood forwarding', confirm: true,
