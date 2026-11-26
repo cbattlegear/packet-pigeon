@@ -6,7 +6,7 @@ import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
   repeaterRegionRemoveCommand,
-  repeaterGuestPasswordCommand,
+  repeaterGuestPasswordCommand, repeaterRemoveAccessCommand,
   repeaterTransmitPowerCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
 import type { RepeaterCliReceipt } from '../radio/repeater-cli.ts'
@@ -27,6 +27,7 @@ type Props = {
   ready: boolean
   busy: boolean
   onPending: (pending: boolean) => void
+  onAccessChange: () => void
   onReboot: (notice: string) => void
   neighborNodes: readonly PathNode[]
   repeaterPosition: Coordinates | null
@@ -45,7 +46,7 @@ type HistoryEntry = {
 
 const neighborTiming = 'Ages are seconds since heard when the repeater generated the reply; the reply may have been delayed before syncing.'
 
-export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onReboot,
+export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, route, ready, busy, onPending, onAccessChange, onReboot,
   neighborNodes, repeaterPosition, onMap }: Props) {
   const ownerInfoId = useId()
   const [query, setQuery] = useState('')
@@ -65,6 +66,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [guestPassword, setGuestPassword] = useState('')
+  const [accessKey, setAccessKey] = useState('')
   const [advertPolicy, setAdvertPolicy] = useState('')
   const powerSavingCommands = repeaterCliCommands.filter((item) =>
     item.command === 'powersaving on' || item.command === 'powersaving off')
@@ -354,6 +356,21 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         'set guest.password [redacted]', () => setGuestPassword(''))
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Invalid guest password.')
+    }
+  }
+
+  function submitRemoveAccess(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterRemoveAccessCommand(accessKey)
+      if (command.accessTarget === radioKey || command.accessTarget === contactKey) {
+        throw new Error('Cannot remove the connected radio or repeater from its access list.')
+      }
+      void send(command.command, `${command.description} for ${command.accessTarget}`, command.confirm, command.warning,
+        command.command, () => { setAccessKey(''); onAccessChange() })
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid client public key.')
     }
   }
 
@@ -683,6 +700,22 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </form>
     </details>
     <details>
+      <summary>Remove repeater access-list entry</summary>
+      <p>Enter the client's full 64-character hexadecimal public key, not the six-byte prefix shown by access-list inspection.
+        This removes the entire entry, but does not change passwords: the client can log in again with a valid password, and a
+        blank guest password may allow guest access. Removing the connected radio or repeater is not offered here.</p>
+      <p>In repeater firmware v1.14.1, removing an entry can misdirect the reply. Saving is delayed and can fail, so an
+        OK reply does not verify persistence. Inspect the access list again, but it can omit entries; absence does not prove removal.</p>
+      <form className="contact-actions" onSubmit={submitRemoveAccess}>
+        <label>Client full public key
+          <input type="text" required value={accessKey} autoComplete="off" spellCheck={false}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setAccessKey(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Remove access-list entry</button>
+      </form>
+    </details>
+    <details>
       <summary>Change guest login password</summary>
       <p>Changes the password used for guest repeater access, not the administrator password. Changing it does not
         revoke already-authorized guest identities; they may still access the repeater. Firmware stores a
@@ -792,6 +825,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
             <p className="contact-status">An OK reply does not prove a broadcast occurred or that any neighbors replied.
               Discovery responses are unauthenticated and do not prove identity. Wait up to 60 seconds, then request neighbors
               separately; old entries may remain and the list can be incomplete.</p>}
+          {item.command.startsWith('setperm ') && item.reply !== null &&
+            <p className="contact-status">An OK reply does not verify persistence. Firmware v1.14.1 may misdirect the reply,
+              and absence from the access list does not prove removal.</p>}
           {item.command === 'neighbors' && item.reply !== null &&
             <NeighborReport reply={item.reply.text} syncedAt={item.reply.syncedAt} name={name} repeaterPosition={repeaterPosition}
               nodes={neighborNodes} onMap={onMap} />}

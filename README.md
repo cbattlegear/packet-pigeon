@@ -509,6 +509,15 @@ timeout. The browser receipt time is shown, but the reply can be delayed and
 the snapshot can become stale. Request tags correlate replies, but reuse after
 a radio restart may still make a delayed response ambiguous.
 
+Administrators can confirm removal of another client's access-list entry using
+its full public key, not a reported prefix. This removes the entire entry but
+does not change passwords; the client may log in again with a valid password,
+and a blank guest password may allow guest access. Removing the connected radio
+or repeater is not offered. In repeater firmware v1.14.1, removal can misdirect
+the reply; saving is delayed and can fail, so `OK` does not verify persistence.
+Inspect the access list again, but absence does not prove removal because entries
+may be omitted.
+
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 which can map unique matches with saved positions as separate points rather

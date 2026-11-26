@@ -1,3 +1,4 @@
+import { contactPublicKey } from './contact-commands.ts'
 import { decodeDirectSent, directMessageCommand } from './direct-message.ts'
 import { CompanionError, Response } from './protocol.ts'
 import { expectResponse } from './serial-link.ts'
@@ -135,6 +136,17 @@ export function repeaterGuestPasswordCommand(value: string) {
   return repeaterCliCommand(`set guest.password ${value}`)
 }
 
+export function repeaterRemoveAccessCommand(value: string) {
+  const accessTarget = contactPublicKey(value)
+  return {
+    command: `setperm ${accessTarget} 0`,
+    description: 'Remove repeater access-list entry',
+    confirm: true as const,
+    accessTarget,
+    warning: 'This removes the entire entry, not its passwords. The client can log in again with a valid password; a blank guest password may allow guest access. The connected radio and repeater cannot be removed here. Repeater firmware v1.14.1 may misdirect the reply after removal. An OK reply does not verify persistence: saving is delayed and can fail. The access list can omit entries, so absence does not prove removal.',
+  }
+}
+
 export function repeaterNameCommand(value: string) {
   return repeaterCliCommand(`set name ${value}`)
 }
@@ -213,6 +225,8 @@ function validatePosition(axis: 'lat' | 'lon', value: string) {
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
   if (found) return found
+  const removeAccess = /^setperm ([0-9a-f]{64}) 0$/i.exec(command)
+  if (removeAccess && removeAccess[0] === command) return repeaterRemoveAccessCommand(removeAccess[1])
   const homeRegionPrefix = 'region home '
   if (command.startsWith(homeRegionPrefix)) return repeaterHomeRegionCommand(command.slice(homeRegionPrefix.length))
   const regionPrefix = 'region get '
