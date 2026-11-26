@@ -513,6 +513,15 @@ ID/hash in their paths. Minimal, moderate, and strict modes use thresholds of
 4/2/1, 2/1/1, and 1/1/1 occurrences for 1-, 2-, and 3-byte path hashes;
 `off` disables the check. Stricter modes can drop flooded packets and reduce
 reachability. This CLI setting requires repeater firmware v1.14 or later.
+Administrators can also read and change the advert path hash size. This affects
+hashes used in the repeater's manual flood advertisements; it does not change
+the hash widths of packets it forwards. On repeater v1.14.0, scheduled flood
+advertisements still use one-byte hashes; v1.14.1 and later also apply the
+setting to scheduled flood advertisements. Repeater firmware v1.14 and later
+forwards supported hash widths, but firmware v1.13 and earlier drops multi-byte
+path hashes, which can limit flood propagation across mixed-version meshes.
+Modes 0, 1, and 2 use 1-, 2-, and 3-byte hashes; their paths can encode at
+most 63, 32, and 21 hops respectively. Changing the mode requires confirmation.
 The confirmed `reboot` command may interrupt mesh traffic and normally sends no
 reply; acceptance by the radio does not prove execution. The app clears the
 reported access and status after an accepted or unconfirmed reboot. Log in again

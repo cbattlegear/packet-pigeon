@@ -239,7 +239,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
 
   await page.getByText('Change flood loop detection', { exact: true }).click()
   await page.getByText(/Thresholds for 1-, 2-, and 3-byte path hashes are/).waitFor()
-  await page.getByText(/requires repeater firmware v1.14 or later/).waitFor()
+  await page.getByText(/This CLI setting requires repeater firmware v1.14 or later/).waitFor()
   const loopMode = page.getByLabel('New flood loop detection mode')
   const setLoopMode = page.getByRole('button', { name: 'Set loop detection' })
   const beforeLoop = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
@@ -268,6 +268,46 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await page.evaluate(() => window.queueRepeaterReply('OK'))
   await sync.click()
   await loopHistory.getByText('OK', { exact: true }).waitFor()
+
+  await page.getByText('Change advert path hash size', { exact: true }).click()
+  await page.getByText(/Repeater firmware v1\.13 and earlier drops multi-byte path hashes/).waitFor()
+  await page.getByText(/This setting requires repeater firmware v1\.14 or later/).waitFor()
+  await page.getByText(/On repeater v1\.14\.0, scheduled flood advertisements still use one-byte hashes; v1\.14\.1 and later also apply the setting/).waitFor()
+  await page.getByText(/paths can encode at most 63, 32, and 21 hops/).waitFor()
+  const hashMode = page.getByLabel('New advert path hash size')
+  assert.deepEqual(await hashMode.locator('option').allTextContents(), [
+    'Choose a size', '1 byte — 256 IDs, up to 63 encoded hops',
+    '2 bytes — 65,536 IDs, up to 32 encoded hops', '3 bytes — 16,777,216 IDs, up to 21 encoded hops',
+  ])
+  const setHashMode = page.getByRole('button', { name: 'Set advert hash size' })
+  const beforeHash = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  await page.getByRole('button', { name: 'Read current size' }).click()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'get path.hash.mode')
+  await page.evaluate(() => window.queueRepeaterReply('> 0'))
+  await sync.click()
+  await page.locator('.repeater-cli-history li').filter({ hasText: 'get path.hash.mode' }).getByText('> 0', { exact: true }).waitFor()
+  await hashMode.selectOption('2')
+  await search.fill('path.hash.mode')
+  page.once('dialog', (dialog) => {
+    assert.match(dialog.message(), /Set advert path hash size to 2/)
+    assert.match(dialog.message(), /manual flood advertisements/)
+    assert.match(dialog.message(), /v1\.14\.0 scheduled flood advertisements still use one-byte hashes/)
+    assert.match(dialog.message(), /v1\.13 or earlier drops packets with multi-byte path hashes/)
+    assert.match(dialog.message(), /Confirm the mesh is sufficiently upgraded first/)
+    void dialog.dismiss()
+  })
+  await setHashMode.click()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeHash + 1)
+  page.once('dialog', (dialog) => dialog.accept())
+  await setHashMode.click()
+  const hashHistory = page.locator('.repeater-cli-history li').filter({ hasText: 'set path.hash.mode 2' })
+  await hashHistory.getByText(/Accepted by radio/).waitFor()
+  assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+    window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'set path.hash.mode 2')
+  await page.evaluate(() => window.queueRepeaterReply('OK'))
+  await sync.click()
+  await hashHistory.getByText('OK', { exact: true }).waitFor()
 
   await search.fill('clock sync')
   await page.getByRole('button', { name: /clock sync.*connected radio/ }).click()
