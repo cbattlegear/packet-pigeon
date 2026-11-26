@@ -1,6 +1,7 @@
 import { createChannelObserver } from '../radio/channel-observation.ts'
 import type { ChannelObservation } from '../radio/channel-observation.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
+import type { NamedRegion } from '../radio/channel-scope.ts'
 import { decodeRxPacket, rxPacketPush } from '../radio/rx-packet.ts'
 
 export type ChannelObservationSource = Pick<CompanionSession, 'getSnapshot' | 'subscribe' | 'subscribeToPushes' | 'readChannelObservationKey'>
@@ -42,7 +43,7 @@ export class ChannelObservations {
     this.update({ phase: error ? 'error' : 'idle', error, entries: [], dropped: 0, evicted: 0 })
   }
 
-  readonly start = async (radioKey: string, channel: { index: number; name: string }, regions: readonly string[]) => {
+  readonly start = async (radioKey: string, channel: { index: number; name: string }, regions: readonly (string | NamedRegion)[]) => {
     this.stop()
     const generation = this.generation
     const matches = () => {

@@ -148,6 +148,17 @@ export class SerialLink {
     })
   }
 
+  async sendWithoutReply(command: Uint8Array) {
+    if (this.stopped) throw new CompanionError('disconnected', 'The radio connection is closed.')
+    if (this.pending) throw new CompanionError('protocol', 'A companion command is already pending.')
+    const packet = this.transport === 'usb' ? encodeCommand(command) : command
+    try {
+      await this.writer.write(packet)
+    } catch (cause) {
+      throw new CompanionError('serial-io', 'Could not confirm delivery of the radio command.', { cause })
+    }
+  }
+
   close() {
     if (this.closing) return this.closing
     this.stopped = true

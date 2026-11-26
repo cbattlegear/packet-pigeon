@@ -4,7 +4,7 @@ import type { CompanionSession, CompanionSnapshot } from '../radio/index.ts'
 import type { SessionCache } from '../integration/session-cache.ts'
 import { makeChannelSecret, secretHex } from '../radio/channel-commands.ts'
 import { openRadioStorage, radioKeyFromPublicKey, validChannelRetentionSettings, validChannelScopeSettings } from '../storage/index.ts'
-import type { ChannelScopeSetting, RadioData, RadioKey, StoredChannel } from '../storage/index.ts'
+import type { ChannelScopeSetting, RadioData, RadioKey, StoredChannel, StoredRegionKey } from '../storage/index.ts'
 import { validateChannelScope } from '../radio/channel-scope.ts'
 import type { ChannelScope } from '../radio/channel-scope.ts'
 import { observedChannelSenders } from './senders.ts'
@@ -306,6 +306,7 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
       <ul className="channel-list">{visible.map((channel) => {
         const senders = observedChannelSenders(cachedData?.messages ?? [], channel.index)
         const retention = retentionSettings.find((entry) => entry.index === channel.index)
+        const scope = scopeSettings.find((entry) => entry.index === channel.index)
         const paused = retention && (retention.paused || retention.channelName !== channel.name)
         const retentionValue = paused ? 'paused' : retention ? String(retention.days) : 'forever'
         const channelCached = cachedData?.channels.some((entry) => entry.index === channel.index && entry.name === channel.name)
@@ -340,8 +341,8 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
             </select>
           </label>
           {paused && <p>Retention is paused because this slot changed names. Choose a setting for this channel.</p>}
-          <ScopeEditor key={`${key}:${channel.name}:${JSON.stringify(scopeSettings.find((entry) => entry.index === channel.index))}`}
-            channel={channel} setting={scopeSettings.find((entry) => entry.index === channel.index)}
+          <ScopeEditor key={`${key}:${channel.name}:${scope?.scope.mode}:${scope?.scope.mode === 'region' ? scope.scope.name : ''}:${scope?.paused}`}
+            channel={channel} setting={scope} regions={cachedData?.regionTransportKeys ?? []}
             disabled={!channelCached || !validScopes || busy}
             version={live?.capabilities.firmwareProtocolVersion}
             save={(scope) => void saveScope(channel, scope)} />
@@ -399,9 +400,10 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
   </div>
 }
 
-function ScopeEditor({ channel, setting, disabled, version, save }: {
+function ScopeEditor({ channel, setting, regions, disabled, version, save }: {
   channel: StoredChannel
   setting?: ChannelScopeSetting
+  regions: readonly StoredRegionKey[]
   disabled: boolean
   version?: number
   save: (scope: ChannelScope) => void
@@ -409,9 +411,16 @@ function ScopeEditor({ channel, setting, disabled, version, save }: {
   const [mode, setMode] = useState<ChannelScope['mode']>(setting?.scope.mode ?? 'default')
   const [name, setName] = useState(setting?.scope.mode === 'region' ? setting.scope.name : '')
   const paused = setting && (setting.paused || setting.channelName !== channel.name)
+  const regionList = `channel-regions-${channel.index}`
   return <form onSubmit={(event) => {
     event.preventDefault()
-    save(mode === 'region' ? { mode, name } : { mode })
+    if (mode === 'region') {
+      const raw = name.trim()
+      const canonical = raw.startsWith('#') ? raw : `#${raw}`
+      const savedKey = setting?.scope.mode === 'region' && setting.scope.name === canonical ? setting.scope.key : undefined
+      const key = savedKey ?? regions.find((entry) => entry.name === canonical)?.key
+      save({ mode, name, ...(key ? { key } : {}) })
+    } else save({ mode })
   }}>
     <label>Sending scope
       <select aria-label={`Sending scope for ${channel.name}`} value={mode} disabled={disabled}
@@ -426,7 +435,8 @@ function ScopeEditor({ channel, setting, disabled, version, save }: {
     </label>
     {mode === 'region' && <label>Region name
       <input aria-label={`Region name for ${channel.name}`} value={name} required disabled={disabled}
-        placeholder="#region" onChange={(event) => setName(event.currentTarget.value)} />
+        list={regions.length ? regionList : undefined} placeholder="#region" onChange={(event) => setName(event.currentTarget.value)} />
+      {regions.length > 0 && <datalist id={regionList}>{regions.map(({ name }) => <option key={name} value={name} />)}</datalist>}
     </label>}
     <button type="submit" disabled={disabled}>Save sending scope</button>
     {paused && <p role="alert">Sending scope is paused because this slot changed names. Save a scope before sending.</p>}

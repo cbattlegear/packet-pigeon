@@ -29,6 +29,36 @@ function sourceFor(frames) {
   }
 }
 
+test('maintenance sync rejects failed receipt saves and retries under the supplied identity', async () => {
+  const factory = new IDBFactory()
+  const source = sourceFor([direct, direct])
+  const destination = radioKeyFromPublicKey('cd'.repeat(32))
+  const reserve = () => source.reserveQueuedMessage(publicKey)
+  const { signal } = new AbortController()
+  let canSave = false
+  const sync = new MessageSync(source, async () => {
+    const storage = await openRadioStorage(factory)
+    return { ...storage, update: async (target, update) => {
+      if (!canSave) throw new Error('Receipt storage is unavailable')
+      await storage.update(target, update)
+    } }
+  })
+
+  await assert.rejects(sync.syncForMaintenance(destination, reserve, signal), /Receipt storage is unavailable/)
+  assert.equal(source.calls, 1)
+  assert.equal(sync.getSnapshot().pending, true)
+
+  canSave = true
+  await sync.syncForMaintenance(destination, reserve, signal)
+  assert.equal(source.calls, 3)
+  assert.equal(sync.getSnapshot().pending, false)
+  const storage = await openRadioStorage(factory)
+  try {
+    assert.equal((await storage.read(destination)).messages.length, 2)
+    assert.equal(await storage.read(key), null)
+  } finally { storage.close() }
+})
+
 test('reports only durably saved receipts during each manual sync', async () => {
   const factory = new IDBFactory()
   const source = sourceFor([direct, direct])

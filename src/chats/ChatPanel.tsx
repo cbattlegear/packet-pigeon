@@ -20,6 +20,7 @@ import { contactShareLink } from '../sharing/meshcoreLinks.ts'
 import { conversations, correlateChannelObservations, matchingChannelReceipts, messageDay, messageVisibility, oldestUnreadReceipt, receiptPathDescription, searchMessages, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import { ChatSearch } from './ChatSearch.tsx'
+import type { NamedRegion } from '../radio/channel-scope.ts'
 import { channelMentionNames, channelMessageBody, channelReply, channelTextParts, insertChannelMention, isSelfMention, mentionableName } from './mentions.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
@@ -64,7 +65,7 @@ type ChatDisplay = {
   readChannelKey?: (channel: StoredChannel) => Promise<string>
   observationSource?: ChannelObservationSource
   canObserve: boolean
-  regionNames: string[] | null
+  regionNames: NamedRegion[] | null
   pathNodes: readonly PathNode[]
   onPathMap?: (path: MapPath) => void
   mapPosition?: Coordinates | null
@@ -145,10 +146,11 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const preferred = radioSelection?.id ?? data?.preferences?.selectedConversationId
   const selected = items.find((item) => item.id === preferred) ?? items[0]
   const searchTarget = radioSelection?.id === selected?.id ? radioSelection?.searchTarget : undefined
-  const regionNames = data?.channelScopes === undefined ? []
-    : validChannelScopeSettings(data.channelScopes)
-      ? data.channelScopes.flatMap((setting) => !setting.paused && setting.scope.mode === 'region' ? [setting.scope.name] : [])
-      : null
+  const regionNames: NamedRegion[] | null = data?.channelScopes !== undefined && !validChannelScopeSettings(data.channelScopes)
+    ? null : [
+      ...(data?.channelScopes ?? []).flatMap((setting) => !setting.paused && setting.scope.mode === 'region' ? [setting.scope] : []),
+      ...(data?.regionTransportKeys ?? []).map(({ name, key }) => ({ mode: 'region' as const, name, key })),
+    ]
   const ownContact = snapshot.device && last === radioKey
     ? contactShareLink(snapshot.device.name, snapshot.device.publicKey, snapshot.device.type) : null
 
@@ -183,7 +185,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
     }
     void readKeys()
     return () => { active = false }
-  }, [live, cacheSaving, messageStatus.syncing])
+  }, [active, live, cacheSaving, messageStatus.syncing])
 
   useEffect(() => {
     if (radioKey) void direct.load(radioKey)

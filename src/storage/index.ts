@@ -31,6 +31,7 @@ export type StoredChannel = {
 export type ChannelRetentionDays = 1 | 7 | 30 | 90
 export type ChannelRetention = { index: number; channelName: string; days: ChannelRetentionDays; paused?: boolean }
 export type ChannelScopeSetting = { index: number; channelName: string; scope: ChannelScope; paused?: boolean }
+export type StoredRegionKey = { name: string; key: string }
 export type ChannelNotificationMode = 'all' | 'mentions' | 'muted'
 export type ChannelNotification = { index: number; channelName: string; mode: ChannelNotificationMode; paused?: boolean }
 
@@ -131,6 +132,7 @@ export type StoredTelemetry = {
 export type RadioData = {
   scopeRecovery?: boolean
   channelScopes?: ChannelScopeSetting[]
+  regionTransportKeys?: StoredRegionKey[]
   blockedChannelSenders?: string[]
   channelRetention?: ChannelRetention[]
   channelNotifications?: ChannelNotification[]
@@ -153,6 +155,7 @@ export type RadioData = {
 export type RadioUpdate = {
   scopeRecovery?: boolean
   channelScope?: ChannelScopeSetting
+  regionTransportKeys?: readonly StoredRegionKey[]
   resetChannelScopes?: true
   blockedChannelSender?: { name: string; blocked: boolean }
   channelRetention?: { index: number; channelName: string; days: ChannelRetentionDays | null }
@@ -266,6 +269,15 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
     const scope = validateChannelScope(update.channelScope.scope)
     next.channelScopes = (next.channelScopes ?? []).filter((entry) => entry.index !== index)
     if (scope.mode !== 'default') next.channelScopes.push({ index, channelName, scope })
+  }
+  if (update.regionTransportKeys) {
+    const keys = new Map((current.regionTransportKeys ?? []).map((entry) => [entry.name, entry]))
+    for (const { name, key } of update.regionTransportKeys) {
+      const scope = validateChannelScope({ mode: 'region', name, key })
+      if (scope.mode !== 'region' || !scope.key) throw new RadioStorageError('update', 'Invalid saved region key.')
+      keys.set(scope.name, { name: scope.name, key: scope.key })
+    }
+    next.regionTransportKeys = [...keys.values()]
   }
   if (update.channelRetention) {
     const { index, channelName, days } = update.channelRetention
@@ -770,6 +782,10 @@ export async function openRadioStorage(factory?: IDBFactory) {
     read: (key: RadioKey) => runTransaction<RadioData | null>(db, 'readonly', (store, finish) => {
       const request = store.get(radioKeyFromPublicKey(key))
       request.onsuccess = () => finish(request.result ?? null)
+    }),
+    purge: (key: RadioKey) => runTransaction<void>(db, 'readwrite', (store, finish) => {
+      const request = store.delete(radioKeyFromPublicKey(key))
+      request.onsuccess = () => finish(undefined)
     }),
     pruneChannelMessages: (now: number) => runTransaction<number>(db, 'readwrite', (store, finish, abort) => {
       if (!Number.isFinite(now) || now < 0) throw new RadioStorageError('update', 'Invalid retention cleanup time.')

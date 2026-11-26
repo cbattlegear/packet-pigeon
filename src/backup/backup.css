@@ -1,0 +1,48 @@
+.backup-panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.backup-panel fieldset {
+  margin-top: 10px;
+}
+
+.backup-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.backup-panel .backup-radio {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.backup-panel :is(select, input[type='file'], button) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+.backup-value {
+  display: block;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.backup-panel :is(p, li) {
+  overflow-wrap: anywhere;
+}
+
+.backup-names {
+  max-height: 15rem;
+  overflow-y: auto;
+}

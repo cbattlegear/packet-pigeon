@@ -194,6 +194,12 @@ export class DirectMessages {
       ? this.status.data?.drafts.find((entry) => entry.conversationId === conversationId)?.text : undefined) ?? ''
   }
 
+  readonly forgetSessionDrafts = (key: RadioKey) => {
+    for (const name of this.draftEditsThisVisit.keys()) {
+      if (name.startsWith(`${key}:`)) this.draftEditsThisVisit.delete(name)
+    }
+  }
+
   readonly inMemoryDraftIds = (key: RadioKey) => {
     const prefix = `${key}:`
     const ids = new Set<string>()

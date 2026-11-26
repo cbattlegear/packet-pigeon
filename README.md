@@ -302,6 +302,29 @@ the radio's clock, storage use, default flood region, and available GPS and
 Wi-Fi controls. Bluetooth PIN and Wi-Fi changes take effect after restarting
 the radio. Packet Pigeon connects through USB or Bluetooth.
 
+## Backup and recovery
+
+Open **Settings → Backup and recovery** to download selected configuration
+sections or preview a MeshCore v1.52 configuration JSON before restoring it.
+The default export excludes keys. Key exports require confirmation and store
+the selected keys in readable JSON. Keep those files somewhere private.
+
+Restore can update matching contacts and skips new ones when the contact list
+is full. Channels with a matching key reuse their existing slot. New channels
+need a free slot. Backups preserve default sending scope and indefinite
+retention. Imported retention also supports 1, 7, 30, or 90 days. Results show
+skipped, failed, and unconfirmed changes.
+
+Identity recovery first reboots the selected radio to save pending contacts.
+Reconnect the same radio and type its current key prefix to confirm replacement.
+The radio restarts again if contacts were written. Reconnect to verify the
+recovered public key. Packet Pigeon saves queued messages to the browser before
+each recovery restart and stops the restart if saving fails. Messages arriving
+during a restart may be lost. Recovery requires firmware with identity import and reboot
+verification. **Local archive and radio maintenance** offers a separate download
+of cached chats and drafts, cache clearing for a disconnected radio, and
+confirmations for radio reboot and factory reset.
+
 ## Telemetry
 
 Open **Diagnostics → Radio telemetry** for the connected radio's readings, or
