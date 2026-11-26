@@ -537,6 +537,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set repeat off', true), /administrator/)
+  await assert.rejects(send('set allow.read.only on', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
@@ -546,6 +547,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set repeat on', true), /administrator/)
+  await assert.rejects(send('set allow.read.only off', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
@@ -559,6 +561,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set lat 45'), /Confirm/)
   await assert.rejects(send('set repeat on'), /Confirm/)
   await assert.rejects(send('set repeat off'), /Confirm/)
+  await assert.rejects(send('set allow.read.only on'), /Confirm/)
+  await assert.rejects(send('set allow.read.only off'), /Confirm/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
@@ -621,6 +625,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   assert.equal(new TextDecoder().decode(Uint8Array.from(policyFrame.slice(13))), `${policy.tag}|gps advert`)
   for (const command of ['set repeat on', 'set repeat off']) {
     const receipt = await send(command, true)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
+  for (const command of ['get allow.read.only', 'set allow.read.only on', 'set allow.read.only off']) {
+    const receipt = await send(command, command !== 'get allow.read.only')
     const frame = port.commands.filter(([code]) => code === 2).at(-1)
     assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
   }

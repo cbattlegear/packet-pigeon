@@ -467,7 +467,11 @@ one. The reported role is not a guarantee of current authorization.
 Administrators can open **Administrator CLI** to search and send a limited set
 of read-only queries, including `neighbors` for recent repeater-heard nodes,
 confirm a flood or zero-hop advertisement, or change advertisement intervals,
-owner information, repeater name, stored position, and packet forwarding with confirmation.
+owner information, repeater name, stored position, packet forwarding, and
+read-only room access with confirmation. The access policy affects only
+repeater firmware that runs a room server; use `get allow.read.only` before
+changing it. Enabling the policy allows read-only visitors, while disabling it
+requires room access.
 Use `get repeat` to check forwarding before changing it. Disabling forwarding
 can disrupt mesh routes and some firmware also stops responding to discovery
 requests. Position edits change one coordinate at a time; current values can be
