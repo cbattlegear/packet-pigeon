@@ -17,6 +17,8 @@ export const repeaterCliCommands = [
   { command: 'discover.neighbors', description: 'Discover nearby repeaters', confirm: true,
     warning: 'Supported by repeater firmware v1.14.1; support on other builds varies. This asks the repeater to broadcast a zero-hop discovery request; nearby repeaters may also transmit replies. It replaces any discovery already in progress. Replies may update the limited neighbor cache and evict older entries. Discovery responses are unauthenticated and do not prove identity. An OK reply does not prove a broadcast occurred or that any neighbors replied. Wait up to 60 seconds, then request neighbors separately; old entries may remain and the list can be incomplete.' },
   { command: 'get name', description: 'Read the advertised name' },
+  { command: 'get public.key', description: 'Read the reported public key' },
+  { command: 'get role', description: 'Read the firmware role' },
   { command: 'powersaving', description: 'Read repeater power-saving preference' },
   { command: 'powersaving on', description: 'Enable repeater power-saving preference', confirm: true,
     warning: 'Depending on the board and firmware, the repeater may sleep when idle and be less responsive. An on reply reports the preference, not actual sleep. Verify the reply and preference.' },
@@ -89,6 +91,12 @@ export type RepeaterNeighbor = {
   keyPrefix: string
   secondsAgo: number
   snrQuarterDb: number
+}
+
+export function compareRepeaterPublicKey(reply: string, expectedKey: string): 'match' | 'mismatch' | 'unrecognized' {
+  const match = /^> ([0-9a-f]{64})$/i.exec(reply)
+  if (!match) return 'unrecognized'
+  return match[1].toLowerCase() === expectedKey.toLowerCase() ? 'match' : 'mismatch'
 }
 
 export function parseRepeaterNeighbors(reply: string): RepeaterNeighbor[] {

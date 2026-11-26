@@ -1855,4 +1855,36 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
   assert.equal(await page.locator('.node-map path[stroke="#6047a6"][stroke-width="4"]').count(), 0)
   assert.equal(await page.locator('.node-map path[stroke="#6047a6"][stroke-width="3"]').count(), 2)
+
+  await page.evaluate(() => { window.location.hash = 'contacts' })
+  await search.fill('get public.key')
+  const beforeIdentity = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  await page.getByRole('button', { name: /get public.key.*Read the reported public key/ }).click()
+  await page.getByText(/a match alone does not prove identity/i).first().waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeIdentity)
+  for (const [reply, expected] of [
+    [`> ${'BC'.repeat(32)}`, 'Reported key matches the saved contact.'],
+    [`> ${'dd'.repeat(32)}`, 'Reported key differs from the saved contact.'],
+    ['> unsupported', 'Unrecognized public-key reply; it cannot be compared.'],
+  ]) {
+    await page.getByRole('button', { name: 'Send get public.key' }).click()
+    const history = page.locator('.repeater-cli-history li').filter({ hasText: 'get public.key' }).first()
+    await history.getByText(/Accepted by radio/).waitFor()
+    await page.evaluate((text) => window.queueRepeaterReply(text), reply)
+    await sync.click()
+    await history.getByText(expected, { exact: false }).waitFor()
+    await history.getByText(/A match alone does not prove identity; replies can be delayed or misattributed/).waitFor()
+  }
+  await search.fill('get role')
+  await page.getByRole('button', { name: /get role.*Read the firmware role/ }).click()
+  await page.getByText(/firmware role, not the current user's access level/).waitFor()
+  await page.getByRole('button', { name: 'Send get role' }).click()
+  const roleHistory = page.locator('.repeater-cli-history li').filter({ hasText: 'get role' }).first()
+  await roleHistory.getByText(/Accepted by radio/).waitFor()
+  await page.evaluate(() => window.queueRepeaterReply('> repeater'))
+  await sync.click()
+  await roleHistory.getByText('> repeater', { exact: true }).waitFor()
+  await roleHistory.getByText(/reported firmware role, not your access level/).waitFor()
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
 })

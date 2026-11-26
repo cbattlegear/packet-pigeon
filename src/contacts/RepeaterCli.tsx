@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import {
-  parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
+  compareRepeaterPublicKey, parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
   repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
   repeaterRegionRemoveCommand,
   repeaterGuestPasswordCommand, repeaterRemoveAccessCommand, repeaterGrantAdminCommand, repeaterGrantAdminWarning,
@@ -557,6 +557,9 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     </>}
     {selected === 'neighbors' && <p>Each reply line is a four-byte key prefix, seconds since heard, and SNR multiplied by 4, separated by colons.
       The list is limited by the repeater. Only unique matches with saved coordinates can be mapped; separate dots do not imply a route.</p>}
+    {selected === 'get public.key' && <p>Compare the reported key with the saved contact; a match alone does not prove identity.
+      Replies may be delayed or misattributed and firmware support varies.</p>}
+    {selected === 'get role' && <p>This reads the node's firmware role, not the current user's access level. Firmware support varies.</p>}
     {selected === 'discover.neighbors' && action && 'warning' in action && <p>{action.warning}</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
@@ -1077,6 +1080,14 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           {item.reply !== null ? <pre>{item.reply.text || '(empty reply)'}</pre> :
             <p>{now >= item.deadline ? 'No reply synced before the deadline. It may still arrive.' :
               'Waiting for a reply. Sync messages to check.'}</p>}
+          {item.command === 'get public.key' && item.reply !== null &&
+            <p className="contact-status">
+              {{ match: 'Reported key matches the saved contact.', mismatch: 'Reported key differs from the saved contact.',
+                unrecognized: 'Unrecognized public-key reply; it cannot be compared.' }[compareRepeaterPublicKey(item.reply.text, contactKey)]}
+              {' '}A match alone does not prove identity; replies can be delayed or misattributed.
+            </p>}
+          {item.command === 'get role' && item.reply !== null &&
+            <p className="contact-status">This is the reported firmware role, not your access level. Firmware support varies.</p>}
           {item.command === 'region' && item.reply !== null &&
             <p className="contact-status">The region tree may be truncated without an indication; it is not a complete inventory.
               F marks flood permission, ^ marks the home region, and * is the unscoped wildcard.</p>}

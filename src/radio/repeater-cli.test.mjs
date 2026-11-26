@@ -5,7 +5,7 @@ import {
   repeaterNameCommand, repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
   repeaterTransmitPowerCommand, repeaterGuestPasswordCommand, repeaterRegionPutCommand, repeaterRegionRemoveCommand, repeaterRemoveAccessCommand,
   repeaterGrantAdminCommand, repeaterLimitedAccessCommand, repeaterRemoveNeighborCommand,
-  parseRepeaterNeighbors,
+  compareRepeaterPublicKey, parseRepeaterNeighbors,
 } from './repeater-cli.ts'
 
 const key = 'bc'.repeat(32)
@@ -21,6 +21,22 @@ test('CLI queries use the repeater text type and a tagged command', async () => 
     tag: 'A7', route: 'flood', timeoutMs: 10_000,
   })
   assert.deepEqual([...command], [2, 1, 0, 0, 0, 0, 0, ...new Uint8Array(6).fill(0xbc), ...encoder.encode('A7|get name')])
+})
+
+test('identity queries accept only exact commands and compare complete public-key replies', () => {
+  for (const command of ['get public.key', 'get role']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.command, command)
+    assert.equal('confirm' in action, false)
+  }
+  for (const command of ['get public.key ', 'get public.key extra', 'get role\nreboot', 'get role extra']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+  assert.equal(compareRepeaterPublicKey(`> ${key.toUpperCase()}`, key), 'match')
+  assert.equal(compareRepeaterPublicKey(`> ${'dd'.repeat(32)}`, key), 'mismatch')
+  for (const reply of ['', '> unsupported', `> ${key.slice(0, -2)}`, `> ${key} extra`, `> ${key}\n`]) {
+    assert.equal(compareRepeaterPublicKey(reply, key), 'unrecognized')
+  }
 })
 
 test('neighbor replies parse exact firmware records and reject malformed or unsafe values', () => {

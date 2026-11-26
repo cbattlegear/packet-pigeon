@@ -729,6 +729,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(readAccess(), /administrator/)
   await assert.rejects(readNeighbors(), /Log in/)
   await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(send('get public.key'), /administrator/)
+  await assert.rejects(send('get role'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
@@ -786,6 +788,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     total: 1, entries: [{ publicKey: 'dd'.repeat(32), secondsAgo: 42, snrDb: -5 }],
   })
   await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(send('get public.key'), /administrator/)
+  await assert.rejects(send('get role'), /administrator/)
   await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('discover.neighbors', true), /administrator/)
   await assert.rejects(send(`neighbor.remove ${'dd'.repeat(32)}`, true), /administrator/)
