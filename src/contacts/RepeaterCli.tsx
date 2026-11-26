@@ -4,7 +4,7 @@ import type { MessageSync } from '../integration/message-sync.ts'
 import type { CompanionSession } from '../radio/companion-session.ts'
 import {
   parseRepeaterNeighbors, repeaterCliCommand, repeaterCliCommands, repeaterNameCommand, repeaterOwnerInfoCommand,
-  repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand,
+  repeaterPositionCommand, repeaterRegionQuery, repeaterHomeRegionCommand, repeaterRegionFloodCommand, repeaterRegionPutCommand,
   repeaterGuestPasswordCommand,
   repeaterTransmitPowerCommand, UncertainRepeaterCliError,
 } from '../radio/repeater-cli.ts'
@@ -304,6 +304,16 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function putRegion() {
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterRegionPutCommand(regionName)
+      void send(command.command, command.description, command.confirm, command.warning)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid region name.')
+    }
+  }
+
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -412,6 +422,15 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
         </label>
         <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Read region</button>
       </form>
+      <p>Add a named region under the wildcard, or move an existing exact name there. Firmware treats names
+        differing only by a leading <code>#</code> as the same name. New regions deny floods by default; moved
+        regions keep their permissions. This can affect routes and remote access. Read and compare the region first:
+        queries use prefix matching and the tree can be truncated, so neither proves a name is absent.
+        Unprefixed names are limited to 29 UTF-8 bytes; names beginning with <code>#</code> or <code>$</code> to 30.
+        Private <code>$</code> regions require keys; this action does not configure them.
+        Sync the reply and read the region again. The change is not saved until the separate entire region-map save.</p>
+      <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+        onClick={putRegion}>Add or move region under wildcard</button>
       <p>To change a named region's flood permission, read it first and compare the returned name. Firmware prefers
         exact names but may match a different region, including when names differ only by a leading <code>#</code>.
         The change reply does not identify the affected entry. Read and compare it again afterward, but read-back uses
