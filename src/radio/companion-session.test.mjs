@@ -730,6 +730,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('get radio.rxgain'), /administrator/)
   await assert.rejects(send('set radio.rxgain on', true), /administrator/)
   await assert.rejects(send('set agc.reset.interval 4', true), /administrator/)
+  await assert.rejects(send('set multi.acks 1', true), /administrator/)
   await assert.rejects(send('set guest.password Guest-123', true), /administrator/)
   await assert.rejects(send('set flood.max 0', true), /administrator/)
   await assert.rejects(send('set loop.detect strict', true), /administrator/)
@@ -765,6 +766,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('get radio.rxgain'), /administrator/)
   await assert.rejects(send('set radio.rxgain off', true), /administrator/)
   await assert.rejects(send('get agc.reset.interval'), /administrator/)
+  await assert.rejects(send('get multi.acks'), /administrator/)
+  await assert.rejects(send('set multi.acks 0', true), /administrator/)
   await assert.rejects(send('set flood.max.unscoped 0', true), /administrator/)
   await assert.rejects(send('get loop.detect'), /administrator/)
   await assert.rejects(send('get path.hash.mode'), /administrator/)
@@ -826,6 +829,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set radio.rxgain off'), /Confirm/)
   await assert.rejects(send('set agc.reset.interval 4'), /Confirm/)
   await assert.rejects(send('set agc.reset.interval 5', true), /AGC reset interval/)
+  await assert.rejects(send('set multi.acks 1'), /Confirm/)
+  await assert.rejects(send('set multi.acks 0'), /Confirm/)
+  await assert.rejects(send('set multi.acks 2', true), /supported repeater CLI command/)
   await assert.rejects(send('set radio.rxgain on extra', true), /supported repeater CLI command/)
   await assert.rejects(send('set guest.password Guest-123'), /Confirm/)
   await assert.rejects(send('set flood.max.advert 0'), /Confirm/)
@@ -963,6 +969,11 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const receiverGainFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(receiverGainFrame.slice(13))), `${receiverGain.tag}|set radio.rxgain on`)
   for (const [command, confirmed] of [['get agc.reset.interval', false], ['set agc.reset.interval 16', true]]) {
+    const receipt = await send(command, confirmed)
+    const frame = port.commands.filter(([code]) => code === 2).at(-1)
+    assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)
+  }
+  for (const [command, confirmed] of [['get multi.acks', false], ['set multi.acks 1', true], ['set multi.acks 0', true]]) {
     const receipt = await send(command, confirmed)
     const frame = port.commands.filter(([code]) => code === 2).at(-1)
     assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${receipt.tag}|${command}`)

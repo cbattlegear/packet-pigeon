@@ -209,6 +209,23 @@ test('AGC reset intervals are bounded to exact four-second steps and require con
   }
 })
 
+test('extra direct ACK preference accepts only exact supported commands', () => {
+  assert.equal(repeaterCliCommand('get multi.acks').command, 'get multi.acks')
+  for (const command of ['set multi.acks 0', 'set multi.acks 1']) {
+    const action = repeaterCliCommand(command)
+    assert.equal(action.confirm, true)
+    assert.match(action.warning, /extra multipart ACK/)
+    assert.match(action.warning, /delivery or improved reliability is not guaranteed/)
+    assert.match(action.warning, /Already queued ACKs are unaffected/)
+    assert.match(action.warning, /local advert interval below 60 minutes to zero/)
+    assert.match(action.warning, /does not prove ACKs were sent or the preference was saved/)
+  }
+  for (const command of ['get multi.acks ', 'set multi.acks', 'set multi.acks on', 'set multi.acks 2',
+    'set multi.acks 01', 'set multi.acks 1 ', 'set multi.acks 0\nreboot']) {
+    assert.throws(() => repeaterCliCommand(command), /supported repeater CLI command/)
+  }
+})
+
 test('advertisement interval changes accept only supported exact values', () => {
   for (const command of ['set advert.interval 0', 'set advert.interval 60', 'set advert.interval 240',
     'set flood.advert.interval 0', 'set flood.advert.interval 3', 'set flood.advert.interval 168']) {

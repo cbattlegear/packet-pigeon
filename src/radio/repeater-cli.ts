@@ -5,6 +5,7 @@ import { expectResponse } from './serial-link.ts'
 import type { SerialLink } from './serial-link.ts'
 
 const receiverGainWarning = 'Support depends on the repeater radio and firmware build. Changing gain may affect reception and power use. OK or matching read-back does not prove the radio applied the preference or saved it successfully. On some unsupported builds, a gain query returns radio parameters instead of on/off. In v1.14.1, saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent.'
+const multiAckWarning = 'In repeater firmware v1.14.1, enabling this attempts to queue one extra multipart ACK when forwarding an eligible direct ACK, and can delay the normal ACK. It can use more airtime; other nodes may not support multipart ACKs, and delivery or improved reliability is not guaranteed. Already queued ACKs are unaffected. Firmware support varies. Saving also sets a local advert interval below 60 minutes to zero; an already scheduled advert may still be sent. An OK reply or matching read-back does not prove ACKs were sent or the preference was saved.'
 
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
@@ -24,6 +25,9 @@ export const repeaterCliCommands = [
   { command: 'get radio', description: 'Read radio parameters' },
   { command: 'get radio.rxgain', description: 'Read receiver boosted-gain preference' },
   { command: 'get agc.reset.interval', description: 'Read AGC reset interval' },
+  { command: 'get multi.acks', description: 'Read extra direct ACK preference' },
+  { command: 'set multi.acks 1', description: 'Enable extra direct ACKs', confirm: true, warning: multiAckWarning },
+  { command: 'set multi.acks 0', description: 'Disable extra direct ACKs', confirm: true, warning: multiAckWarning },
   { command: 'set radio.rxgain on', description: 'Enable receiver boosted-gain preference', confirm: true,
     warning: receiverGainWarning },
   { command: 'set radio.rxgain off', description: 'Disable receiver boosted-gain preference', confirm: true,
