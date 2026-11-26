@@ -130,6 +130,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       </li>)}
     </ul>
     {!choices.length && <p>No commands match.</p>}
+    {selected === 'neighbors' && <p>Each reply line is a four-byte key prefix, seconds since heard, and SNR multiplied by 4, separated by colons.
+      The list is limited by the repeater; prefixes may not uniquely identify a node. This does not show a map.</p>}
     <div className="contact-actions">
       <button type="button" disabled={!action || !ready || busy || pending || syncStatus.syncing} onClick={() => {
         if (action) void send(action.command, action.description, 'confirm' in action && action.confirm,

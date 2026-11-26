@@ -531,10 +531,12 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const signal = () => new AbortController().signal
   const send = (command, confirmed = false) => session.sendRepeaterCommand(key, target, route, command, confirmed, signal())
   await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(send('neighbors'), /administrator/)
   await assert.rejects(send('clock sync', true), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
   await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(send('neighbors'), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
   for (const command of ['get guest.password', 'set guest.password test', 'reboot']) {
@@ -583,6 +585,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const clock = await send('clock sync', true)
   const clockFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(clockFrame.slice(13))), `${clock.tag}|clock sync`)
+  const neighbors = await send('neighbors')
+  const neighborsFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(neighborsFrame.slice(13))), `${neighbors.tag}|neighbors`)
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {
