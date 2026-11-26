@@ -29,6 +29,19 @@ test('CLI rejects unsafe and unsupported text before dispatch', async () => {
   assert.equal(repeaterCliCommand('advert').confirm, true)
 })
 
+test('advertisement interval changes accept only supported exact values', () => {
+  for (const command of ['set advert.interval 0', 'set advert.interval 60', 'set advert.interval 240',
+    'set flood.advert.interval 0', 'set flood.advert.interval 3', 'set flood.advert.interval 168']) {
+    assert.equal(repeaterCliCommand(command).confirm, true)
+  }
+  for (const command of ['set advert.interval 59', 'set advert.interval 61', 'set advert.interval 242',
+    'set flood.advert.interval 2', 'set flood.advert.interval 169', 'set advert.interval -2',
+    'set advert.interval 060', 'set advert.interval 60.0', 'set advert.interval 60\n', 'set advert.interval 60\nreboot',
+    'set flood.advert.interval 999999999999999999999']) {
+    assert.throws(() => repeaterCliCommand(command), /interval|supported/)
+  }
+})
+
 test('CLI confirmation failures distinguish rejection from uncertain dispatch', async () => {
   const link = (reply) => ({ async request(_bytes, receive) { return receive(Uint8Array.of(...reply)).value } })
   await assert.rejects(sendRepeaterCli(link([1, 2]), key, 'ver', 'AA'), { code: 'device-error' })

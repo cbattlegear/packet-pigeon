@@ -531,6 +531,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const signal = () => new AbortController().signal
   const send = (command, confirmed = false) => session.sendRepeaterCommand(key, target, route, command, confirmed, signal())
   await assert.rejects(send('ver'), /administrator/)
+  await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
   await assert.rejects(send('ver'), /administrator/)
   admin = true
@@ -539,6 +540,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
     await assert.rejects(send(command, true), /supported repeater CLI command/)
   }
   await assert.rejects(send('advert'), /Confirm/)
+  await assert.rejects(send('set advert.interval 60'), /Confirm/)
+  await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46
   await assert.rejects(send('ver'), /route changed/)
   contact[36] = 0x45
@@ -571,6 +574,10 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   assert.throws(() => session.reserveQueuedMessage(key), /contact change/)
   port.emit(6, 0, ...new Uint8Array(8))
   await pending
+  delayed = false
+  const changed = await send('set flood.advert.interval 3', true)
+  const frame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(frame.slice(13))), `${changed.tag}|set flood.advert.interval 3`)
 })
 
 test('repeater CLI does not reuse reply tags after reconnecting', async (t) => {

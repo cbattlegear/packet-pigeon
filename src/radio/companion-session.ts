@@ -629,7 +629,7 @@ export class CompanionSession {
     if (key === radioKey) throw new Error('Choose a different repeater from the connected radio.')
     const action = repeaterCliCommand(command)
     if ('confirm' in action && action.confirm && !confirmed) {
-      throw new Error('Confirm the advertisement before sending it.')
+      throw new Error('Confirm this repeater action before sending it.')
     }
     signal.throwIfAborted()
     return this.runRadioCommand(radioKey, async (link) => {

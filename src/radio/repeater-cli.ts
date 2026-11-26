@@ -38,8 +38,21 @@ export class UncertainRepeaterCliError extends Error {
 
 export function repeaterCliCommand(command: string) {
   const found = repeaterCliCommands.find((item) => item.command === command)
-  if (!found) throw new Error('Choose a supported repeater CLI command.')
-  return found
+  if (found) return found
+  const interval = /^set (advert\.interval|flood\.advert\.interval) (.*)$/.exec(command)
+  if (interval && interval[0] === command) {
+    const local = interval[1] === 'advert.interval'
+    const value = Number(interval[2])
+    if (!/^(0|[1-9][0-9]*)$/.test(interval[2]) || !Number.isSafeInteger(value) ||
+      (local ? value !== 0 && (value < 60 || value > 240 || value % 2 !== 0)
+        : value !== 0 && (value < 3 || value > 168))) {
+      throw new Error(local
+        ? 'Enter 0 to disable or an even local interval from 60 to 240 minutes.'
+        : 'Enter 0 to disable or a flood interval from 3 to 168 hours.')
+    }
+    return { command, description: `Set ${local ? 'local' : 'flood'} advertisement interval`, confirm: true as const }
+  }
+  throw new Error('Choose a supported repeater CLI command.')
 }
 
 const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
