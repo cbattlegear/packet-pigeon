@@ -2018,6 +2018,27 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
   await sync.click()
   await missingGps.getByText('null', { exact: true }).waitFor()
   await missingGps.getByText(/null or unsupported reply does not establish hardware support/).waitFor()
+  await search.fill('bootloader')
+  const beforeBootloaderQuery = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length)
+  await page.getByRole('button', { name: 'get bootloader.ver — Read the bootloader version', exact: true }).click()
+  await page.getByText(/not the repeater firmware version or proof that a bootloader works/).first().waitFor()
+  assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 2).length), beforeBootloaderQuery)
+  for (const reply of ['> 0.6.1', '> unknown', 'ERROR: unsupported']) {
+    const beforeSync = await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length)
+    await page.getByRole('button', { name: 'Send get bootloader.ver', exact: true }).click()
+    const bootloaderHistory = page.locator('.repeater-cli-history li').first()
+    await bootloaderHistory.getByText(/Accepted by radio/).waitFor()
+    assert.equal(await page.evaluate(() => new TextDecoder().decode(Uint8Array.from(
+      window.fixtureCommands.filter(([code]) => code === 2).at(-1).slice(13))).slice(3)), 'get bootloader.ver')
+    assert.equal(await page.evaluate(() => window.fixtureCommands.filter(([code]) => code === 10).length), beforeSync)
+    await page.evaluate((text) => window.queueRepeaterReply(text), reply)
+    await sync.click()
+    await bootloaderHistory.getByText(reply, { exact: true }).waitFor()
+    await bootloaderHistory.getByText(/unknown does not prove a bootloader is missing/).waitFor()
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+  await page.setViewportSize({ width: 1280, height: 720 })
   for (const [command, description, reply, help] of [
     ['get pwrmgt.support', 'Read power-management support', '> supported', 'firmware build flag'],
     ['get pwrmgt.source', 'Read reported power source', '> external', 'USB VBUS detection, not charging state'],

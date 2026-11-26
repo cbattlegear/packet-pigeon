@@ -32,6 +32,7 @@ export const repeaterBridgeBaudWarning = 'Changing the RS-232 baud rate can inte
 export const repeaterCliCommands = [
   { command: 'ver', description: 'Read the firmware version' },
   { command: 'board', description: 'Read the board manufacturer' },
+  { command: 'get bootloader.ver', description: 'Read the bootloader version' },
   { command: 'clock', description: 'Read the repeater clock' },
   { command: 'clock sync', description: 'Sync repeater clock from the connected radio', confirm: true,
     warning: 'Check the radio clock in Settings first. The repeater cannot move its clock backwards; a clock set too far ahead may disrupt later commands. Older companion firmware can cause the repeater to ignore this request.' },

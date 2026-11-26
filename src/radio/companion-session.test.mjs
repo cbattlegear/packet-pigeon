@@ -731,6 +731,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('ver'), /administrator/)
   await assert.rejects(send('get public.key'), /administrator/)
   await assert.rejects(send('get role'), /administrator/)
+  await assert.rejects(send('get bootloader.ver'), /administrator/)
   for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
     await assert.rejects(send(command), /administrator/)
   }
@@ -817,6 +818,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('clear stats', true), /administrator/)
   await assert.rejects(send('get public.key'), /administrator/)
   await assert.rejects(send('get role'), /administrator/)
+  await assert.rejects(send('get bootloader.ver'), /administrator/)
   for (const command of ['get pwrmgt.support', 'get pwrmgt.source', 'get pwrmgt.bootreason', 'get pwrmgt.bootmv']) {
     await assert.rejects(send(command), /administrator/)
   }
@@ -890,6 +892,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const changedRoute = { pathLength: 1, pathHex: Buffer.from(contact.slice(36, 100)).toString('hex') }
   await assert.rejects(session.readRepeaterAccessList(key, target, changedRoute, signal()), /route changed/)
   await assert.rejects(session.readRepeaterNeighbors(key, target, changedRoute, 0, signal()), /route changed/)
+  await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, 'get bootloader.ver', false, signal()), /route changed/)
   for (const command of ['log start', 'log stop', 'log erase']) {
     await assert.rejects(session.sendRepeaterCommand(key, target, changedRoute, command, true, signal()), /route changed/)
   }
@@ -1113,6 +1116,9 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   const receiverGain = await send('set radio.rxgain on', true)
   const receiverGainFrame = port.commands.filter(([code]) => code === 2).at(-1)
   assert.equal(new TextDecoder().decode(Uint8Array.from(receiverGainFrame.slice(13))), `${receiverGain.tag}|set radio.rxgain on`)
+  const bootloader = await send('get bootloader.ver')
+  const bootloaderFrame = port.commands.filter(([code]) => code === 2).at(-1)
+  assert.equal(new TextDecoder().decode(Uint8Array.from(bootloaderFrame.slice(13))), `${bootloader.tag}|get bootloader.ver`)
   for (const [command, confirmed] of [['get bridge.delay', false], ['set bridge.delay 0', true], ['set bridge.delay 10000', true]]) {
     const receipt = await send(command, confirmed)
     const frame = port.commands.filter(([code]) => code === 2).at(-1)

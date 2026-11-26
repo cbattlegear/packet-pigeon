@@ -584,6 +584,12 @@ The `get public.key` query compares a recognized reply with the saved contact;
 a match alone does not prove identity, and replies can be delayed or
 misattributed. `get role` reports the firmware role, not the user's access
 level. Firmware support for either query may vary.
+`get bootloader.ver` explicitly reads the reported bootloader version, not the
+repeater firmware version or proof of a working or update-compatible
+bootloader. Repeater v1.14.1 searches nRF52 flash for a UF2 marker; `unknown`
+does not prove a bootloader is missing, and other platforms report
+`ERROR: unsupported`. Support varies, and replies may be delayed or
+misattributed.
 **Manage repeater packet log** offers separately confirmed start, stop and
 erase commands. On repeater v1.14.1 the log can record timestamps, packet
 metadata and some address prefixes, revealing traffic patterns and consuming
