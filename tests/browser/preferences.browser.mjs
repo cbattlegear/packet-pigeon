@@ -52,7 +52,7 @@ test('notification permission and per-channel mode persist independently', async
   assert.equal(await page.getByLabel('Alert for synced messages').isChecked(), true)
 })
 
-test('a saved synced message alerts once and opens its conversation', async (t) => {
+test('sync progress follows saved receipts and a saved message alerts once', async (t) => {
   const context = await browser.newContext()
   t.after(() => context.close())
   await context.addInitScript(() => {
@@ -71,7 +71,17 @@ test('a saved synced message alerts once and opens its conversation', async (t) 
     const slot = new Uint8Array(50)
     slot.set([18, 0]); slot.set(encoder.encode('Public'), 2)
     let controller
-    let remaining = 2
+    const direct = [7, 1, 2, 3, 4, 5, 6, 0, 0, 42, 0, 0, 0, 104, 105]
+    const replies = [direct, direct, [10], [0x55, 1, 2]]
+    window.syncFixture = {
+      waiting: false,
+      calls: 0,
+      reply() {
+        if (!this.waiting || replies.length === 0) throw new Error('No queued fixture response')
+        this.waiting = false
+        emit(replies.shift())
+      },
+    }
     const port = new EventTarget()
     const emit = (bytes) => controller.enqueue(Uint8Array.of(0x3e, bytes.length, 0, ...bytes))
     Object.assign(port, {
@@ -82,8 +92,10 @@ test('a saved synced message alerts once and opens its conversation', async (t) 
         else if (command === 1) emit(settings)
         else if (command === 4) { emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]) }
         else if (command === 31) emit(slot)
-        else if (command === 10) emit(remaining-- > 0
-          ? [7, 1, 2, 3, 4, 5, 6, 0, 0, 42, 0, 0, 0, 104, 105] : [10])
+        else if (command === 10) {
+          window.syncFixture.waiting = true
+          window.syncFixture.calls++
+        }
         else throw Error(`Unexpected command ${command}`)
       } }),
       async open() {}, async close() {},
@@ -100,7 +112,19 @@ test('a saved synced message alerts once and opens its conversation', async (t) 
   await sync.waitFor()
   await page.waitForFunction(() => !Array.from(document.querySelectorAll('button'))
     .find((button) => button.textContent === 'Sync messages')?.disabled)
+  const status = page.getByRole('status', { name: 'Sync status' })
+  await status.filter({ hasText: 'Idle' }).waitFor()
   await sync.click()
+  await status.filter({ hasText: 'messages: 0 saved' }).waitFor()
+  await page.waitForFunction(() => window.syncFixture.calls === 1 && window.syncFixture.waiting)
+  await page.evaluate(() => window.syncFixture.reply())
+  await status.filter({ hasText: 'messages: 1 saved' }).waitFor()
+  await page.waitForFunction(() => window.syncFixture.calls === 2 && window.syncFixture.waiting)
+  await page.evaluate(() => window.syncFixture.reply())
+  await status.filter({ hasText: 'messages: 2 saved' }).waitFor()
+  await page.waitForFunction(() => window.syncFixture.calls === 3 && window.syncFixture.waiting)
+  await page.evaluate(() => window.syncFixture.reply())
+  await status.filter({ hasText: 'Idle' }).waitFor()
   await page.waitForFunction(() => window.alerts.length === 1)
   await page.waitForFunction(() => Array.from(document.querySelectorAll('button'))
     .some((button) => button.textContent === 'Sync messages'))
@@ -114,6 +138,88 @@ test('a saved synced message alerts once and opens its conversation', async (t) 
     try { return (await storage.read(radioKeyFromPublicKey('ab'.repeat(32))))?.mutedDirectConversations?.includes('direct:010203040506') }
     finally { storage.close() }
   })
+  await sync.click()
+  await status.filter({ hasText: 'messages: 0 saved' }).waitFor()
+  await page.waitForFunction(() => window.syncFixture.calls === 4 && window.syncFixture.waiting)
+  await page.evaluate(() => window.syncFixture.reply())
+  await status.filter({ hasText: 'Needs attention' }).waitFor()
+  await page.getByText(/An unrecognized response was saved as raw bytes/).waitFor()
+})
+
+test('reconnect progress does not hide an unsaved receipt', async (t) => {
+  const context = await browser.newContext()
+  t.after(() => context.close())
+  await context.addInitScript(() => {
+    const encoder = new TextEncoder()
+    const info = Uint8Array.of(13, 14, 20, 0, ...new Uint8Array(78))
+    const self = Uint8Array.of(5, 1, 0, 0, ...new Uint8Array(32).fill(0xab),
+      ...new Uint8Array(22), ...encoder.encode('Fixture'))
+    let controller
+    const emit = (bytes) => controller.enqueue(Uint8Array.of(0x3e, bytes.length, 0, ...bytes))
+    const port = new EventTarget()
+    window.radioFixture = {
+      opens: 0,
+      waiting: false,
+      reconnectingContacts: false,
+      reply() {
+        if (!this.waiting) throw new Error('No queued fixture request')
+        this.waiting = false
+        emit([7, 1, 2, 3, 4, 5, 6, 0, 0, 42, 0, 0, 0, 104, 105])
+      },
+      disconnect() { port.dispatchEvent(new Event('disconnect')) },
+      finishContacts() { emit([4, 0, 0, 0, 0]) },
+    }
+    Object.assign(port, {
+      getInfo: () => ({ usbVendorId: 1, usbProductId: 2 }),
+      async open() {
+        window.radioFixture.opens++
+        port.readable = new ReadableStream({ start(stream) { controller = stream } })
+        port.writable = new WritableStream({ write(frame) {
+          const command = frame[3]
+          if (command === 22) emit(info)
+          else if (command === 1) emit(self)
+          else if (command === 4) {
+            emit([2, 0, 0, 0, 0])
+            if (window.radioFixture.opens === 1) emit([4, 0, 0, 0, 0])
+            else window.radioFixture.reconnectingContacts = true
+          } else if (command === 10) window.radioFixture.waiting = true
+          else throw new Error(`Unexpected command ${command}`)
+        } })
+      },
+      async close() {},
+    })
+    Object.defineProperty(navigator, 'serial', {
+      value: { async requestPort() { return port }, async getPorts() { return [port] } },
+    })
+  })
+
+  const page = await context.newPage()
+  page.setDefaultTimeout(8000)
+  await page.goto(url)
+  await page.getByRole('button', { name: 'Connect USB' }).click()
+  const status = page.getByRole('status', { name: 'Sync status' })
+  await status.filter({ hasText: 'Idle' }).waitFor()
+  await page.getByText('Local cache idle').waitFor()
+  await page.getByRole('button', { name: 'Sync messages' }).click()
+  await page.waitForFunction(() => window.radioFixture.waiting)
+  await page.evaluate(() => {
+    const transaction = IDBDatabase.prototype.transaction
+    IDBDatabase.prototype.transaction = function (names, mode, options) {
+      if (mode === 'readwrite') {
+        IDBDatabase.prototype.transaction = transaction
+        throw new Error('Simulated storage failure')
+      }
+      return transaction.call(this, names, mode, options)
+    }
+    window.radioFixture.reply()
+  })
+  await page.getByText(/A received message is not saved/).waitFor()
+  await status.filter({ hasText: 'Needs attention' }).waitFor()
+  await page.evaluate(() => window.radioFixture.disconnect())
+  await page.waitForFunction(() => window.radioFixture.reconnectingContacts)
+  await status.filter({ hasText: 'contacts: 0 / 0 · Needs attention' }).waitFor()
+  await page.evaluate(() => window.radioFixture.finishContacts())
+  await status.filter({ hasText: 'Needs attention' }).waitFor()
 })
 
 test('discovery and full-storage alerts retain their radio across a switch and offline navigation', async (t) => {

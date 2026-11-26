@@ -29,12 +29,59 @@ function sourceFor(frames) {
   }
 }
 
+test('reports only durably saved receipts during each manual sync', async () => {
+  const factory = new IDBFactory()
+  const source = sourceFor([direct, direct])
+  let releaseSave
+  let notifySave
+  const saving = new Promise((resolve) => { notifySave = resolve })
+  const saveGate = new Promise((resolve) => { releaseSave = resolve })
+  let first = true
+  const sync = new MessageSync(source, async () => {
+    const storage = await openRadioStorage(factory)
+    return {
+      ...storage,
+      update: async (target, update) => {
+        if (first) {
+          first = false
+          notifySave()
+          await saveGate
+        }
+        await storage.update(target, update)
+      },
+    }
+  })
+  const progress = []
+  sync.subscribe(() => {
+    const { syncing, receiptsSaved } = sync.getSnapshot()
+    if (syncing) progress.push(receiptsSaved)
+  })
+
+  const running = sync.sync()
+  await saving
+  assert.equal(sync.getSnapshot().syncing, true)
+  assert.equal(sync.getSnapshot().pending, true)
+  assert.equal(sync.getSnapshot().receiptsSaved, 0)
+  assert.equal(source.calls, 1)
+  releaseSave()
+  await running
+  assert.equal(sync.getSnapshot().syncing, false)
+  assert.equal(sync.getSnapshot().receiptsSaved, 2)
+  assert.equal(source.calls, 3)
+  assert.ok(progress.includes(0) && progress.includes(1) && progress.includes(2))
+
+  await sync.sync()
+  assert.equal(sync.getSnapshot().receiptsSaved, 0)
+  assert.equal(source.calls, 4)
+})
+
 test('preserves identical receipts independently and keeps unsupported bytes readable', async () => {
   const factory = new IDBFactory()
   const source = sourceFor([direct, direct, Uint8Array.of(0x55, 1, 2), Uint8Array.of(16)])
   const sync = new MessageSync(source, () => openRadioStorage(factory))
   await sync.sync()
   assert.match(sync.getSnapshot().error, /unrecognized/)
+  assert.equal(sync.getSnapshot().receiptsSaved, 3)
   assert.equal(source.calls, 3)
   await sync.sync()
   assert.match(sync.getSnapshot().error, /unrecognized/)
@@ -76,12 +123,14 @@ test('stops after a failed save and retries the same receipt before fetching ano
   await sync.sync()
   assert.equal(source.calls, 1)
   assert.equal(sync.getSnapshot().pending, true)
+  assert.equal(sync.getSnapshot().receiptsSaved, 0)
   assert.deepEqual(alerts, [])
   assert.match(sync.getSnapshot().error, /Disk unavailable/)
   source.snapshot.phase = 'idle'
   await sync.sync()
   assert.equal(source.calls, 1)
   assert.equal(sync.getSnapshot().pending, false)
+  assert.equal(sync.getSnapshot().receiptsSaved, 1)
   assert.equal(attempts[0].id, attempts[1].id)
   assert.deepEqual(alerts, [attempts[0].id])
   const storage = await openRadioStorage(factory)
@@ -89,6 +138,7 @@ test('stops after a failed save and retries the same receipt before fetching ano
   storage.close()
   source.snapshot.phase = 'ready'
   await sync.sync()
+  assert.equal(sync.getSnapshot().receiptsSaved, 1)
   assert.equal(sync.getSnapshot().data.messages.length, 2)
 })
 
@@ -117,6 +167,7 @@ test('stops for inspection after retrying a failed unsupported receipt save', as
       await sync.sync()
       assert.equal(source.calls, 1, 'no additional queue request after saving unsupported bytes')
       assert.equal(sync.getSnapshot().pending, false)
+      assert.equal(sync.getSnapshot().receiptsSaved, 1)
       assert.match(sync.getSnapshot().error, /unrecognized/)
       assert.equal(attempts[0].id, attempts[1].id)
       assert.equal(sync.getSnapshot().data.messages[0].rawHex, Buffer.from(frame).toString('hex'))

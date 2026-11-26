@@ -11,6 +11,7 @@ type MessageSource = {
 type PendingReceipt = { key: RadioKey; message: StoredMessage; release: () => void }
 type Status = {
   syncing: boolean
+  receiptsSaved: number
   error: string | null
   pending: boolean
   key: RadioKey | null
@@ -51,7 +52,7 @@ export class MessageSync {
   private readonly cacheReady: () => boolean
   private pendingReceipt?: PendingReceipt
   private loadVersion = 0
-  private status: Status = { syncing: false, error: null, pending: false, key: null, data: null }
+  private status: Status = { syncing: false, receiptsSaved: 0, error: null, pending: false, key: null, data: null }
 
   constructor(source: MessageSource, openStorage = openRadioStorage, cacheReady = () => true) {
     this.source = source
@@ -101,7 +102,7 @@ export class MessageSync {
     await storage.update(pending.key, { messages: [pending.message] })
     this.pendingReceipt = undefined
     pending.release()
-    this.update({ pending: false })
+    this.update({ pending: false, receiptsSaved: this.status.receiptsSaved + 1 })
     const data = await storage.read(pending.key)
     if (data) for (const listener of this.receiptListeners) listener(pending.key, pending.message, data)
     return pending.message.receipt !== undefined
@@ -110,7 +111,7 @@ export class MessageSync {
   readonly sync = async () => {
     if (this.status.syncing) return
     ++this.loadVersion
-    this.update({ syncing: true, error: null })
+    this.update({ syncing: true, receiptsSaved: 0, error: null })
     let storage: Awaited<ReturnType<typeof openRadioStorage>> | undefined
     try {
       storage = await this.openStorage()

@@ -174,9 +174,13 @@ function App() {
     error: 'Error',
   }[snapshot.phase]
   const progress = snapshot.progress
-  const syncStatus = progress
+  const radioSyncStatus = progress
     ? `${progress.stage}: ${progress.completed}${progress.total === null ? '' : ` / ${progress.total}`}`
-    : snapshot.phase === 'syncing' ? 'Syncing' : snapshot.phase === 'ready' ? 'Idle' : 'Not syncing'
+    : snapshot.phase === 'syncing' ? 'Syncing' : null
+  const receiptSyncStatus = messageStatus.syncing ? `messages: ${messageStatus.receiptsSaved} saved`
+    : messageStatus.pending || messageStatus.error ? 'Needs attention' : null
+  const syncStatus = [radioSyncStatus, receiptSyncStatus].filter(Boolean).join(' · ')
+    || (snapshot.phase === 'ready' ? 'Idle' : 'Not syncing')
 
   useEffect(() => {
     const refresh = () => setNotificationPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
@@ -542,7 +546,7 @@ function App() {
           ? `${snapshot.phase === 'syncing' || snapshot.phase === 'ready' ? '' : 'Last: '}${snapshot.device.name || 'Unnamed radio'}`
           : 'None'}</strong></div>
         <div><span>Connection</span><strong>{connection}</strong></div>
-        <div><span>Sync</span><strong>{syncStatus}</strong></div>
+        <div><span>Sync</span><strong role="status" aria-label="Sync status">{syncStatus}</strong></div>
         <p>{cacheStatus.error ? 'Cache needs attention' : cacheStatus.pending ? `Saving ${cacheStatus.pending} update(s)` : 'Local cache idle'}</p>
       </footer>
     </div>
