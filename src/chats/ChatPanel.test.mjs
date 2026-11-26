@@ -119,3 +119,30 @@ test('enables manual Bluetooth sync and preserves offline receipt retry', async 
     await vite.close()
   }
 })
+
+test('distinguishes loading, absent cache, and refresh failures for the selected radio', async () => {
+  const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
+  try {
+    const { ChatPanel } = await vite.ssrLoadModule(fileURLToPath(new URL('ChatPanel.tsx', import.meta.url)))
+    const key = 'ab'.repeat(32)
+    const render = (cacheLoad, data = null) => renderToStaticMarkup(createElement(ChatPanel, {
+      snapshot: { phase: 'idle', transport: null, device: { publicKey: key } },
+      messageSync: {}, messageStatus: {}, direct: { inMemoryDraftIds: () => [], draft: () => '' },
+      status: { key, data, cacheLoad }, cacheSaving: false, active: true, preferences: defaultPreferences, locale: 'en',
+    }))
+    assert.match(render({ state: 'loading' }), /Loading cached chats/)
+    assert.match(render({ state: 'ready' }), /No cached chats/)
+    const failed = render({ state: 'error', message: 'Read failed' })
+    assert.match(failed, /Could not load cached chats/)
+    assert.match(failed, /Retry loading chats/)
+    assert.doesNotMatch(failed, /Loading cached chats/)
+    const stale = render({ state: 'error', message: 'Read failed' }, {
+      contacts: [], channels: [{ index: 1, name: 'Test' }], messages: [], drafts: [], preferences: null,
+    })
+    assert.match(stale, /Showing previously loaded data/)
+    assert.match(stale, /Conversation with Test/)
+    assert.match(stale, /Retry loading chats/)
+  } finally {
+    await vite.close()
+  }
+})

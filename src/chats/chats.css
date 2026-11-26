@@ -61,6 +61,22 @@
   overflow-wrap: anywhere;
 }
 
+.chat-pane-container {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.chat-pane-container > .conversation-pane {
+  flex: 1;
+}
+
+.chat-cache-error {
+  padding: 12px 28px;
+  color: var(--error);
+}
+
 .chat-conversation-list {
   display: grid;
   gap: 4px;
@@ -216,6 +232,25 @@
 .chat-workspace .chat-message-actions button {
   padding: 4px 8px;
   font-size: 0.875rem;
+}
+
+.chat-context-actions {
+  position: fixed;
+  z-index: 20;
+  display: grid;
+  gap: 4px;
+  max-width: min(20rem, 100vw);
+  max-height: 100vh;
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: 0 4px 16px #0004;
+}
+
+.chat-context-actions button {
+  text-align: left;
 }
 
 .chat-delivery p {

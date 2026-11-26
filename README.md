@@ -9,6 +9,8 @@ per-radio local cache. Contacts supports offline browsing, and the map can
 show synced contacts from the current session. Chats supports direct messages,
 drafts, delivery tracking, and manually syncing received queue entries over USB
 or Bluetooth. Channel chats also support sending and local message actions.
+If a cached chat load fails, Chats offers a retry and retains any previously
+loaded data for that radio.
 
 ## Getting started
 
@@ -194,7 +196,8 @@ Incoming sender names are unverified and can be impersonated. A reply adds a
 name mention and a short quoted preview while keeping the existing draft. Use
 **Mention a name** to insert a saved contact or observed sender name, or type
 `@[name]` directly. Names containing `]` cannot be used by the reply or
-mention picker. Mentions are plain text, not verified identities. Copy, local deletion and blocking a sender name do not
+mention picker. Mentions are plain text, not verified identities. Right-click a channel
+message for its actions, or use the visible buttons below it. Copy, local deletion and blocking a sender name do not
 affect other devices. A possible-repeat filter retains the individual receipts,
 which may represent distinct messages. Matching channel receipts also show a count
 and, when enabled, their reported path lengths and signal readings, including
