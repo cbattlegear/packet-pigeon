@@ -42,7 +42,7 @@ export function channelReply(name: string, body: string, draft: string) {
   const source = body.replace(/^@\[[^\]\r\n]+\]\s*/u, '')
   const characters = graphemeSegmenter
     ? Array.from(graphemeSegmenter.segment(source), ({ segment }) => segment) : Array.from(source)
-  const preview = characters.slice(0, 10).join('')
+  const preview = characters.slice(0, 10).join('').replace(/\r\n|[\s\u0085]/gu, ' ')
   return `${mention(name)}\n>${preview}${characters.length > 10 ? '..' : ''}\n${draft}`
 }
 

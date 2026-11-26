@@ -467,8 +467,8 @@ test('channel chat sends, replies by name, and keeps local message actions scope
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const key = radioKeyFromPublicKey(radio)
     const storage = await openRadioStorage()
-    const messages = ['Bob', 'Alice'].map((name, index) => {
-      const text = `${name}: ${name === 'Alice' ? '@[Pigeon] ' : ''}hello from ${name}`
+    const messages = ['Bob', 'Alice', 'Eve'].map((name, index) => {
+      const text = name === 'Eve' ? 'Eve: No\nYes' : `${name}: ${name === 'Alice' ? '@[Pigeon] ' : ''}hello from ${name}`
       return {
         id: name, conversationId: 'channel:0', sender: '', timestamp: Date.now() - 1000, text,
         receipt: {
@@ -530,6 +530,10 @@ test('channel chat sends, replies by name, and keeps local message actions scope
   await input.fill('Existing draft')
   await conversation.getByRole('button', { name: 'Reply to Bob' }).click()
   assert.equal(await input.inputValue(), '@[Bob]\n>hello from..\nExisting draft')
+  await input.fill('x'.repeat(140))
+  await conversation.getByRole('button', { name: 'Reply to Eve' }).click()
+  assert.equal(await input.inputValue(), `@[Eve]\n>No Yes\n${'x'.repeat(140)}`)
+  assert.equal(await conversation.getByRole('button', { name: 'Send message' }).isDisabled(), true)
   const selfMention = conversation.locator('[data-receipt-id="Alice"] .chat-mention--self')
   assert.equal(await selfMention.count(), 1)
   assert.equal(await selfMention.textContent(), '@[Pigeon]')

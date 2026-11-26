@@ -44,6 +44,13 @@ test('replies preserve the draft and quote the message without its leading menti
   assert.throws(() => channelReply('Bad]name', 'hello', ''), /cannot be represented/)
 })
 
+test('flattens multiline previews while preserving the draft and truncation', () => {
+  for (const separator of ['\n', '\r\n', '\r', '\t', '\u000b', '\u000c', '\u0085', '\u00a0', '\u2028', '\u2029']) {
+    assert.equal(channelReply('Bob', `No${separator}Yes`, 'My\nresponse'), '@[Bob]\n>No Yes\nMy\nresponse')
+  }
+  assert.equal(channelReply('Bob', '12345\n67890', 'draft'), '@[Bob]\n>12345 6789..\ndraft')
+})
+
 test('inserts a mention at the selection and replaces an unfinished query at the caret', () => {
   assert.deepEqual(insertChannelMention('Meet @Bo later', 'Bob', 8, 8),
     { text: 'Meet @[Bob] later', cursor: 12 })
