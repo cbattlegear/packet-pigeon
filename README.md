@@ -506,7 +506,7 @@ which can map unique matches with saved positions as separate points rather
 than a route. Unknown or ambiguous four-byte prefixes are not mapped.
 Administrators can also confirm a flood or zero-hop advertisement, or change
 advertisement intervals, owner information, repeater name, stored position,
-and packet forwarding with confirmation.
+packet forwarding, and flood hop limits with confirmation.
 The confirmed `reboot` command may interrupt mesh traffic and normally sends no
 reply; acceptance by the radio does not prove execution. The app clears the
 reported access and status after an accepted or unconfirmed reboot. Log in again
@@ -515,6 +515,15 @@ Use `get repeat` to check forwarding before changing it. Disabling forwarding
 can disrupt mesh routes and some firmware also stops responding to discovery
 requests. Position edits change one coordinate at a time; current values can be
 read with `get lat` and `get lon`.
+Flood hop limits apply to forwarded floods: the overall limit applies to all,
+while unscoped and advertisement limits also apply to matching packets. The
+lowest applicable limit wins; zero stops forwarding matching floods and can
+disrupt routes or remote access. Direct packets and other routing or region
+rules are unaffected by these limits. Read each limit explicitly before
+changing it. Verify firmware support: some older versions answer a specific
+unscoped or advertisement query with the overall limit, so a numeric reply does
+not prove support. An unscoped reply of 255 indicates an unset value tracking
+the overall limit; these controls cannot restore that unset state after changing it.
 Name changes do not change the public key or send an advertisement. Read the
 stored name before replacing it; names are 1 to 31 UTF-8 bytes without leading
 or trailing spaces, control characters, or `[]/\:,?*`. An advertisement with

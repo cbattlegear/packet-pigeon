@@ -607,6 +607,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set repeat off', true), /administrator/)
+  await assert.rejects(send('set flood.max 0', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   await assert.rejects(send('set advert.interval 60', true), /administrator/)
   await session.manageRepeater(key, target, route, 'login', '', signal())
@@ -616,6 +617,7 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set name Relay', true), /administrator/)
   await assert.rejects(send('set lat 45', true), /administrator/)
   await assert.rejects(send('set repeat on', true), /administrator/)
+  await assert.rejects(send('set flood.max.unscoped 0', true), /administrator/)
   await assert.rejects(send('gps advert'), /administrator/)
   admin = true
   await session.manageRepeater(key, target, route, 'login', '', signal())
@@ -630,6 +632,8 @@ test('repeater CLI requires current admin access, a verified route, and confirme
   await assert.rejects(send('set lat 45'), /Confirm/)
   await assert.rejects(send('set repeat on'), /Confirm/)
   await assert.rejects(send('set repeat off'), /Confirm/)
+  await assert.rejects(send('set flood.max.advert 0'), /Confirm/)
+  await assert.rejects(send('set flood.max 256', true), /flood hop limit/)
   await assert.rejects(send('set advert.interval 60'), /Confirm/)
   await assert.rejects(send('set advert.interval 61', true), /even local interval/)
   contact[36] = 0x46

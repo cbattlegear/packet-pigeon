@@ -14,6 +14,9 @@ export const repeaterCliCommands = [
   { command: 'get radio', description: 'Read radio parameters' },
   { command: 'get tx', description: 'Read transmit power' },
   { command: 'get repeat', description: 'Read forwarding mode' },
+  { command: 'get flood.max', description: 'Read the overall flood hop limit' },
+  { command: 'get flood.max.unscoped', description: 'Read the unscoped flood hop limit' },
+  { command: 'get flood.max.advert', description: 'Read the flood advertisement hop limit' },
   { command: 'set repeat on', description: 'Enable packet forwarding', confirm: true,
     warning: 'Forwarding is still subject to the repeater routing and region settings.' },
   { command: 'set repeat off', description: 'Disable packet forwarding', confirm: true,
@@ -136,6 +139,14 @@ export function repeaterCliCommand(command: string) {
         : 'Enter 0 to disable or a flood interval from 3 to 168 hours.')
     }
     return { command, description: `Set ${local ? 'local' : 'flood'} advertisement interval`, confirm: true as const }
+  }
+  const floodLimit = /^set (flood\.max(?:\.unscoped|\.advert)?) (.*)$/.exec(command)
+  if (floodLimit && floodLimit[0] === command) {
+    const value = floodLimit[2]
+    if (!/^(0|[1-9][0-9]*)$/.test(value) || Number(value) > 64) {
+      throw new Error('Enter a whole flood hop limit from 0 to 64.')
+    }
+    return { command, description: `Set ${floodLimit[1]} hop limit`, confirm: true as const }
   }
   throw new Error('Choose a supported repeater CLI command.')
 }

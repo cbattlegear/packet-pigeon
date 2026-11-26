@@ -49,6 +49,8 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   const [selected, setSelected] = useState('')
   const [intervalKind, setIntervalKind] = useState<'advert.interval' | 'flood.advert.interval'>('advert.interval')
   const [interval, setInterval] = useState('')
+  const [floodLimitKind, setFloodLimitKind] = useState<'flood.max' | 'flood.max.unscoped' | 'flood.max.advert'>('flood.max')
+  const [floodLimit, setFloodLimit] = useState('')
   const [ownerInfo, setOwnerInfo] = useState('')
   const [repeaterName, setRepeaterName] = useState('')
   const [latitude, setLatitude] = useState('')
@@ -162,6 +164,18 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     }
   }
 
+  function submitFloodLimit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!ready || busy || pending || syncStatus.syncing) return
+    try {
+      const command = repeaterCliCommand(`set ${floodLimitKind} ${floodLimit}`)
+      void send(command.command, `${command.description} to ${floodLimit}`, true,
+        'Lower limits can disrupt mesh routes and remote access. Zero stops forwarding matching floods. Other applicable limits can be more restrictive.')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Invalid flood hop limit.')
+    }
+  }
+
   function submitName(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!ready || busy || pending || syncStatus.syncing) return
@@ -218,6 +232,37 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
       }}>Sync messages for replies</button>
       <button type="button" disabled={!history.length || pending} onClick={() => setHistory([])}>Clear CLI history</button>
     </div>
+    <details>
+      <summary>Change flood hop limits</summary>
+      <p>These limits apply to forwarded flood packets, not direct packets. The overall limit applies to all floods;
+        the unscoped and advertisement limits also apply to their matching packets. The lowest applicable limit wins.
+        Zero stops forwarding matching floods and can disrupt routes or remote access. Other routing and region
+        rules still apply.</p>
+      <p>Verify firmware support before using a specific limit: some older firmware answers its query with the overall
+        limit instead, so a numeric reply does not prove support. If an unscoped query returns 255, it indicates an
+        unset value tracking the overall limit; these controls cannot restore that unset state after changing it.</p>
+      <form className="contact-actions" onSubmit={submitFloodLimit}>
+        <label>Flood limit type
+          <select value={floodLimitKind} disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => {
+              const value = event.currentTarget.value
+              if (value === 'flood.max' || value === 'flood.max.unscoped' || value === 'flood.max.advert') setFloodLimitKind(value)
+            }}>
+            <option value="flood.max">Overall</option>
+            <option value="flood.max.unscoped">Unscoped</option>
+            <option value="flood.max.advert">Advertisement</option>
+          </select>
+        </label>
+        <button type="button" disabled={!ready || busy || pending || syncStatus.syncing}
+          onClick={() => void send(`get ${floodLimitKind}`, `Read ${floodLimitKind} hop limit`, false)}>Read selected limit</button>
+        <label>Flood hop limit (0 to 64)
+          <input type="text" inputMode="numeric" required value={floodLimit}
+            disabled={!ready || busy || pending || syncStatus.syncing}
+            onChange={(event) => setFloodLimit(event.currentTarget.value)} />
+        </label>
+        <button type="submit" disabled={!ready || busy || pending || syncStatus.syncing}>Set flood hop limit</button>
+      </form>
+    </details>
     <details>
       <summary>Change advertisement interval</summary>
       <p>Changing an interval affects future transmissions. Use 0 to disable. Local intervals are even minutes
