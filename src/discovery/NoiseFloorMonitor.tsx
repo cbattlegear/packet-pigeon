@@ -15,7 +15,7 @@ export function NoiseFloorMonitor({ radioKey, active, ready, usb, firmware, sess
   const [busy, setBusy] = useState(false)
   const [reading, setReading] = useState<{ value: number; time: number } | null>(null)
   const [error, setError] = useState('')
-  const supported = ready && usb && firmware >= 8
+  const supported = ready && firmware >= 8
 
   if ((!active || !supported) && polling) setPolling(false)
 
@@ -52,8 +52,8 @@ export function NoiseFloorMonitor({ radioKey, active, ready, usb, firmware, sess
     <p>Read radio statistics locally every 2 seconds. This does not transmit a mesh request.
       Stopping prevents further polls; an in-flight read must finish or time out.</p>
     {!ready ? <p>Connect a radio and finish syncing to read its noise floor.</p>
-      : !usb ? <p>Connect over USB to read radio statistics; Bluetooth framing is not yet supported.</p>
-        : firmware < 8 ? <p>Radio statistics require companion protocol v8 or newer.</p> : null}
+      : firmware < 8 ? <p>Radio statistics require companion protocol v8 or newer.</p> : null}
+    {supported && !usb && <p>Bluetooth notifications can be split or dropped. Malformed or missing replies stop polling.</p>}
     <div className="contact-actions">
       <button type="button" disabled={!active || !supported || polling || busy} onClick={() => {
         setError('')
