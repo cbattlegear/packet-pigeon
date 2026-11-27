@@ -10,6 +10,9 @@ import { coverageSamples } from './terrain.ts'
 import type { CoverageLayer, ProfileResult } from './terrain.ts'
 import { mapSegments } from '../paths/model.ts'
 import type { MapPath } from '../paths/model.ts'
+import {
+  consumeWheelZoom, mapMaxZoom, mapMinZoom, normalizedWheelDelta, pointerAnchoredCenter, shouldHandleMapWheel,
+} from './wheel-zoom.ts'
 import land from './world-land.json'
 import 'leaflet/dist/leaflet.css'
 
@@ -40,7 +43,7 @@ export function MapCanvas({
     if (!container.current) return
     const limits = latLngBounds([-mercatorLatitude, -180], [mercatorLatitude, 180])
     const map = createMap(container.current, {
-      center: [28, 0], zoom: 2, minZoom: 0, maxZoom: 19,
+      center: [28, 0], zoom: 2, minZoom: mapMinZoom, maxZoom: mapMaxZoom,
       maxBounds: limits, maxBoundsViscosity: 1, scrollWheelZoom: false, trackResize: false,
     })
     mapRef.current = map
@@ -56,7 +59,37 @@ export function MapCanvas({
       if (entry.contentRect.width && entry.contentRect.height) map.invalidateSize({ pan: false })
     })
     observer.observe(container.current)
+    let wheelDelta = 0
+    let lastWheelAt = 0
+    const viewport = container.current
+    function zoomWithWheel(event: WheelEvent) {
+      if (!event.deltaY || !shouldHandleMapWheel(event.target, viewport)) return
+      const elapsed = event.timeStamp - lastWheelAt
+      const delta = normalizedWheelDelta(event.deltaY, event.deltaMode, viewport.clientHeight)
+      if (elapsed > 250 || (wheelDelta && Math.sign(delta) !== Math.sign(wheelDelta))) wheelDelta = 0
+      wheelDelta += delta
+      lastWheelAt = event.timeStamp
+      const currentZoom = map.getZoom()
+      const next = consumeWheelZoom(currentZoom, wheelDelta)
+      wheelDelta = next.remainingDelta
+      event.preventDefault()
+      if (next.zoom === currentZoom) return
+
+      const pointer = map.mouseEventToContainerPoint(event)
+      const projectedCenter = map.project(map.getCenter(), currentZoom)
+      const size = map.getSize()
+      const center = pointerAnchoredCenter(
+        { x: projectedCenter.x, y: projectedCenter.y },
+        { x: pointer.x, y: pointer.y },
+        { x: size.x, y: size.y },
+        currentZoom,
+        next.zoom,
+      )
+      map.setView(map.unproject([center.x, center.y], next.zoom), next.zoom, { animate: false })
+    }
+    viewport.addEventListener('wheel', zoomWithWheel, { passive: false })
     return () => {
+      viewport.removeEventListener('wheel', zoomWithWheel)
       observer.disconnect()
       map.remove()
       mapRef.current = null
