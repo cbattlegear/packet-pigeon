@@ -900,19 +900,23 @@ function MessageText({ text, channel, ownName }: { text: string; channel: boolea
   const source: ChannelTextPart[] = channel ? channelTextParts(text) : [{ kind: 'text', text }]
   const parts = source.flatMap<ImageLinkPart | ChannelTextPart>((part) =>
     part.kind === 'text' ? imageLinkParts(part.text) : [part])
-  const urls = [...new Set(parts.flatMap((part) => part.kind === 'image' ? [part.url] : []))]
+  const links = [...new Map(parts.flatMap((part) => part.kind === 'image' || part.kind === 'link'
+    ? [[part.url, part.kind] as const] : [])).entries()]
   return <>
-    <p>{parts.map((part, index) => part.kind === 'image'
+    <p>{parts.map((part, index) => part.kind === 'image' || part.kind === 'link'
       ? <a key={index} href={part.url} target="_blank" rel="noopener noreferrer">{part.url}</a>
       : part.kind === 'mention' ? <ChannelMessageText key={index} text={`@[${part.name}]`} ownName={ownName} /> : part.text)}</p>
-    {urls.map((url) => <MessageImage key={url} url={url} />)}
+    {links.map(([url, kind]) => <MessageImage key={url} url={url} automatic={kind === 'image'} />)}
   </>
 }
 
-function MessageImage({ url }: { url: string }) {
+function MessageImage({ url, automatic }: { url: string; automatic: boolean }) {
+  const [requested, setRequested] = useState(automatic)
   const [failed, setFailed] = useState(false)
   return <div className="chat-image">
-    {failed ? <p className="chat-failed" role="status">Image could not be loaded. Use the message link to open it.</p>
+    {!requested ? <button type="button" aria-label={`Load image from ${url}`}
+      onClick={() => setRequested(true)}>Load image: {url}</button>
+      : failed ? <p className="chat-failed" role="status">Image could not be loaded: {url}. Use the message link to open it.</p>
       : <img src={url} alt={`Image from ${new URL(url).hostname}`} loading="lazy" referrerPolicy="no-referrer"
         onError={() => setFailed(true)} />}
   </div>

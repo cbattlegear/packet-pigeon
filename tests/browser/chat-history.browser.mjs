@@ -432,7 +432,7 @@ test('inline images preserve links, failures and message actions without rerende
     assert.match(await row.getByRole('status').textContent(), /Image could not be loaded/)
     assert.equal(await row.getByRole('link', { name: broken, exact: true }).getAttribute('href'), broken)
     assert.equal(await row.getByRole('link', { name: wide, exact: true }).getAttribute('href'), wide)
-    assert.equal(await row.getByRole('link', { name: article, exact: true }).count(), 0)
+    assert.equal(await row.getByRole('link', { name: article, exact: true }).getAttribute('href'), article)
     assert.equal(await row.locator('.chat-mention').textContent(), '@[Friend]')
     const dimensions = await row.getByRole('img').evaluate((image) => ({
       image: image.getBoundingClientRect().width, row: image.closest('li').clientWidth,
@@ -456,7 +456,9 @@ test('inline images preserve links, failures and message actions without rerende
       window.getSelection()?.removeAllRanges()
       await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
     })
-    await row.getByRole('img').click({ button: 'right' })
+    const imageContextMenu = await row.getByRole('img').evaluate((image) =>
+      image.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 })))
+    assert.equal(imageContextMenu, false)
     const menu = page.getByRole('group', { name: 'Channel message context actions' })
     await menu.waitFor()
     await menu.getByRole('button', { name: /^Copy message:/ }).click()
@@ -470,6 +472,93 @@ test('inline images preserve links, failures and message actions without rerende
     assert.equal(requests.get(broken), 1)
     assert.equal(requests.has(article), false)
   })
+})
+
+test('extensionless images load on request without probing ordinary links', async (t) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 } })
+  t.after(() => context.close())
+  const page = await context.newPage()
+  page.setDefaultTimeout(8000)
+  const radio = 'ab'.repeat(32)
+  const contact = '01'.repeat(32)
+  const image = 'https://images.example/file?id=123'
+  const gif = 'https://images.example/animated?id=456'
+  const article = 'https://images.example/article'
+  const requests = new Map()
+  await page.route('https://images.example/**', async (route) => {
+    const requested = route.request().url()
+    requests.set(requested, (requests.get(requested) ?? 0) + 1)
+    if (requested === image) {
+      await route.fulfill({ contentType: 'image/svg+xml',
+        body: '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50"/>' })
+    } else if (requested === gif) {
+      await route.fulfill({ contentType: 'image/gif', body: Buffer.from(
+        '47494638396101000100800000000000ffffff21ff0b4e45545343415045322e300301000000'
+        + '21f904000a0000002c0000000001000100000202440100'
+        + '21f904000a0000002c00000000010001000002024c01003b', 'hex') })
+    } else {
+      await route.fulfill({ contentType: 'text/html', body: '<p>Article</p>' })
+    }
+  })
+  await page.goto(`${url}#chats`)
+  await page.evaluate(async ({ radio, contact, image, gif, article }) => {
+    const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+    const storage = await openRadioStorage()
+    const text = `Alice: ${gif} ${article}`
+    try {
+      await storage.update(radioKeyFromPublicKey(radio), {
+        contacts: [{ publicKey: contact, name: 'Friend', details: {
+          type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
+          latitude: 0, longitude: 0, lastModifiedAt: 0,
+        } }],
+        channels: [{ index: 0, name: 'Public' }],
+        preferences: { selectedConversationId: `direct:${contact}` },
+        messages: [
+          { id: 'direct-image', conversationId: `direct:${contact}`, sender: contact,
+            timestamp: 1703123456000, text: `${image} ${image}` },
+          { id: 'channel-gif', conversationId: 'channel:0', sender: '', timestamp: 1703123456000, text,
+            receipt: { kind: 'channel-text', receiptId: 'channel-gif', channelIndex: 0, textType: 0,
+              senderTimestamp: 1703123456, text, pathLength: 255, snrDb: null } },
+        ],
+      })
+    } finally { storage.close() }
+  }, { radio, contact, image, gif, article })
+  await page.reload()
+  await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  const dm = page.locator('[data-receipt-id="direct-image"]')
+  const loadImage = dm.getByRole('button', { name: `Load image from ${image}` })
+  await loadImage.waitFor()
+  assert.equal(await loadImage.count(), 1)
+  assert.equal(requests.size, 0)
+  await loadImage.focus()
+  await page.keyboard.press('Enter')
+  await dm.getByRole('img').scrollIntoViewIfNeeded()
+  await page.waitForFunction(() => document.querySelector('[data-receipt-id="direct-image"] img')?.naturalWidth === 100)
+  assert.equal(await dm.getByRole('link', { name: image, exact: true }).count(), 2)
+  await page.getByLabel('Message', { exact: true }).fill('Rerender')
+  assert.equal(requests.get(image), 1)
+
+  await page.getByLabel('New chat').selectOption('channel:0')
+  const channel = page.locator('[data-receipt-id="channel-gif"]')
+  const loadGif = channel.getByRole('button', { name: `Load image from ${gif}` })
+  await loadGif.waitFor()
+  assert.equal(requests.has(gif), false)
+  assert.equal(requests.has(article), false)
+  await loadGif.click()
+  await channel.getByRole('img').scrollIntoViewIfNeeded()
+  await page.waitForFunction(() => document.querySelector('[data-receipt-id="channel-gif"] img')?.naturalWidth === 1)
+  assert.equal(await channel.getByRole('img').getAttribute('src'), gif)
+  assert.equal(requests.get(gif), 1)
+  assert.equal(requests.has(article), false)
+  await channel.getByRole('button', { name: `Load image from ${article}` }).click()
+  await channel.getByRole('status').waitFor()
+  assert.match(await channel.getByRole('status').textContent(), /Image could not be loaded/)
+  assert.equal(await channel.getByRole('link', { name: article, exact: true }).getAttribute('href'), article)
+  assert.equal(requests.get(article), 1)
+  await page.getByLabel('Message', { exact: true }).fill('Rerender again')
+  assert.equal(requests.get(gif), 1)
+  assert.equal(requests.get(article), 1)
+  assert.equal(await channel.getByRole('button', { name: 'Reply to Alice' }).count(), 1)
 })
 
 test('a failed cached chat load offers retry instead of an indefinite loading state', async (t) => {

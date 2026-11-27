@@ -272,6 +272,13 @@
 
 .chat-image {
   margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.chat-image button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
 }
 
 .chat-image img {
