@@ -23,11 +23,14 @@ import { ChatSearch } from './ChatSearch.tsx'
 import type { NamedRegion } from '../radio/channel-scope.ts'
 import { framedTransport } from '../radio/transport.ts'
 import { channelMentionNames, channelMessageBody, channelReply, channelTextParts, insertChannelMention, isSelfMention, mentionableName } from './mentions.ts'
+import type { ChannelTextPart } from './mentions.ts'
 import { PathDetails } from '../paths/PathDetails.tsx'
 import type { MapPath, PathNode } from '../paths/model.ts'
 import { contactPosition } from '../contacts/model.ts'
 import type { RemoteNodeLoginSession } from '../contacts/RemoteNodePanel.tsx'
 import { canPostToRoom, maxRoomTextBytes } from '../radio/node-access.ts'
+import { imageLinkParts } from './image-links.ts'
+import type { ImageLinkPart } from './image-links.ts'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
@@ -764,7 +767,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                   : nodeMessageSender(conversation, message, contacts)}</strong>
                 {timestamp(message.timestamp, formatTime)}
               </div>
-              {message.text && <p>{isChannel ? <ChannelMessageText text={body} ownName={senderName} /> : body}</p>}
+              {message.text && <MessageText text={body} channel={isChannel} ownName={senderName} />}
               {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
               {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
               {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
@@ -891,6 +894,28 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       {conversation.recipient && <RetrySettings key={radioKey} radioKey={radioKey} current={options} direct={direct} />}
     </section>
   )
+}
+
+function MessageText({ text, channel, ownName }: { text: string; channel: boolean; ownName: string | null }) {
+  const source: ChannelTextPart[] = channel ? channelTextParts(text) : [{ kind: 'text', text }]
+  const parts = source.flatMap<ImageLinkPart | ChannelTextPart>((part) =>
+    part.kind === 'text' ? imageLinkParts(part.text) : [part])
+  const urls = [...new Set(parts.flatMap((part) => part.kind === 'image' ? [part.url] : []))]
+  return <>
+    <p>{parts.map((part, index) => part.kind === 'image'
+      ? <a key={index} href={part.url} target="_blank" rel="noopener noreferrer">{part.url}</a>
+      : part.kind === 'mention' ? <ChannelMessageText key={index} text={`@[${part.name}]`} ownName={ownName} /> : part.text)}</p>
+    {urls.map((url) => <MessageImage key={url} url={url} />)}
+  </>
+}
+
+function MessageImage({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false)
+  return <div className="chat-image">
+    {failed ? <p className="chat-failed" role="status">Image could not be loaded. Use the message link to open it.</p>
+      : <img src={url} alt={`Image from ${new URL(url).hostname}`} loading="lazy" referrerPolicy="no-referrer"
+        onError={() => setFailed(true)} />}
+  </div>
 }
 
 function ChannelMessageText({ text, ownName }: { text: string; ownName: string | null }) {

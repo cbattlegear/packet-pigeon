@@ -358,6 +358,120 @@ test('channel message context actions work offline alongside visible keyboard co
   assert.equal(await menu.count(), 0)
 })
 
+test('inline images preserve links, failures and message actions without rerender reloads', async (t) => {
+  for (const width of [1200, 390]) await t.test(`${width}px chat layout`, async (t) => {
+    const context = await browser.newContext({ viewport: { width, height: 844 } })
+    t.after(() => context.close())
+    const page = await context.newPage()
+    page.setDefaultTimeout(8000)
+    const radio = 'ab'.repeat(32)
+    const contact = '01'.repeat(32)
+    const gif = 'https://images.example/animated.GIF?token=fixture'
+    const wide = 'https://images.example/wide.svg'
+    const broken = 'https://images.example/broken.png'
+    const article = 'https://images.example/article'
+    const requests = new Map()
+    await page.route('https://images.example/**', async (route) => {
+      const requested = route.request().url()
+      requests.set(requested, (requests.get(requested) ?? 0) + 1)
+      if (requested === gif) {
+        // Two-frame looping GIF; keep browser animation rather than converting to a bitmap.
+        await route.fulfill({ contentType: 'image/gif', body: Buffer.from(
+          '47494638396101000100800000000000ffffff21ff0b4e45545343415045322e300301000000'
+          + '21f904000a0000002c0000000001000100000202440100'
+          + '21f904000a0000002c00000000010001000002024c01003b', 'hex') })
+      } else if (requested === wide) {
+        await route.fulfill({ contentType: 'image/svg+xml',
+          body: '<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="1000"><rect width="2000" height="1000" fill="red"/></svg>' })
+      } else if (requested === broken) {
+        await route.fulfill({ contentType: 'text/html', body: '<p>Not an image</p>' })
+      } else {
+        await route.abort()
+      }
+    })
+    await page.goto(`${url}#chats`)
+    await page.evaluate(async ({ radio, contact, gif, wide, broken, article }) => {
+      const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
+      const storage = await openRadioStorage()
+      const text = `Alice: @[Friend] photo ${wide} missing ${broken} ordinary ${article}`
+      try {
+        await storage.update(radioKeyFromPublicKey(radio), {
+          contacts: [{ publicKey: contact, name: 'Friend', details: {
+            type: 1, flags: 0, pathLength: 255, pathHex: '', lastAdvertisedAt: 0,
+            latitude: 0, longitude: 0, lastModifiedAt: 0,
+          } }],
+          channels: [{ index: 0, name: 'Public' }],
+          preferences: { selectedConversationId: `direct:${contact}` },
+          messages: [
+            { id: 'gif', conversationId: `direct:${contact}`, sender: contact,
+              timestamp: 1703123456000, text: `Look ${gif} again ${gif}` },
+            { id: 'photo', conversationId: 'channel:0', sender: '', timestamp: 1703123456000, text,
+              receipt: { kind: 'channel-text', receiptId: 'photo', channelIndex: 0, textType: 0,
+                senderTimestamp: 1703123456, text, pathLength: 255, snrDb: null } },
+          ],
+        })
+      } finally { storage.close() }
+    }, { radio, contact, gif, wide, broken, article })
+    await page.reload()
+    await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+    const dm = page.locator('[data-receipt-id="gif"]')
+    await dm.getByRole('img').scrollIntoViewIfNeeded()
+    await page.waitForFunction(() => document.querySelector('[data-receipt-id="gif"] img')?.naturalWidth === 1)
+    assert.equal(await dm.getByRole('img').count(), 1)
+    assert.equal(await dm.getByRole('img').getAttribute('src'), gif)
+    assert.equal(await dm.getByRole('img').getAttribute('referrerpolicy'), 'no-referrer')
+    assert.equal(await dm.getByRole('link', { name: gif, exact: true }).count(), 2)
+    await page.getByLabel('Message', { exact: true }).fill('Draft rerender')
+    assert.equal(requests.get(gif), 1)
+
+    await page.getByLabel('New chat').selectOption('channel:0')
+    const row = page.locator('[data-receipt-id="photo"]')
+    await row.getByRole('img').first().scrollIntoViewIfNeeded()
+    await row.getByRole('status').waitFor()
+    await page.waitForFunction(() => document.querySelector('[data-receipt-id="photo"] img')?.naturalWidth === 2000)
+    assert.match(await row.getByRole('status').textContent(), /Image could not be loaded/)
+    assert.equal(await row.getByRole('link', { name: broken, exact: true }).getAttribute('href'), broken)
+    assert.equal(await row.getByRole('link', { name: wide, exact: true }).getAttribute('href'), wide)
+    assert.equal(await row.getByRole('link', { name: article, exact: true }).count(), 0)
+    assert.equal(await row.locator('.chat-mention').textContent(), '@[Friend]')
+    const dimensions = await row.getByRole('img').evaluate((image) => ({
+      image: image.getBoundingClientRect().width, row: image.closest('li').clientWidth,
+      page: document.documentElement.scrollWidth, viewport: window.innerWidth,
+    }))
+    assert.ok(dimensions.image <= dimensions.row && dimensions.image <= 512, JSON.stringify(dimensions))
+    assert.ok(dimensions.page <= dimensions.viewport, JSON.stringify(dimensions))
+    await page.evaluate(() => {
+      window.copiedMessage = null
+      Object.defineProperty(navigator, 'clipboard', { configurable: true,
+        value: { writeText: async (text) => { window.copiedMessage = text } } })
+    })
+    const original = `Alice: @[Friend] photo ${wide} missing ${broken} ordinary ${article}`
+    await row.getByRole('button', { name: /^Copy message:/ }).click()
+    assert.equal(await page.evaluate(() => window.copiedMessage), original)
+    await row.getByRole('button', { name: 'Reply to Alice' }).focus()
+    await page.keyboard.press('Enter')
+    assert.match(await page.getByLabel('Message', { exact: true }).inputValue(), /^@\[Alice\]\n>/)
+    await row.getByRole('img').scrollIntoViewIfNeeded()
+    await page.evaluate(async () => {
+      window.getSelection()?.removeAllRanges()
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    })
+    await row.getByRole('img').click({ button: 'right' })
+    const menu = page.getByRole('group', { name: 'Channel message context actions' })
+    await menu.waitFor()
+    await menu.getByRole('button', { name: /^Copy message:/ }).click()
+    assert.equal(await page.evaluate(() => window.copiedMessage), original)
+    const nativeLinkMenu = await row.getByRole('link', { name: wide, exact: true }).evaluate((link) =>
+      link.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))
+    assert.equal(nativeLinkMenu, true)
+    assert.equal(await menu.count(), 0)
+    await page.getByLabel('Message', { exact: true }).fill('Another rerender')
+    assert.equal(requests.get(wide), 1)
+    assert.equal(requests.get(broken), 1)
+    assert.equal(requests.has(article), false)
+  })
+})
+
 test('a failed cached chat load offers retry instead of an indefinite loading state', async (t) => {
   const context = await browser.newContext({ viewport: { width: 1200, height: 800 } })
   t.after(() => context.close())

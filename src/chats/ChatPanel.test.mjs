@@ -62,6 +62,8 @@ test('renders matching receipt details without claiming delivery', async () => {
     const messages = [
       channelReceipt('first'), channelReceipt('second', { pathLength: 0xff, snrDb: null }),
       channelReceipt('brackets', { text: 'Bad]name: hello' }),
+      channelReceipt('image', { text: 'Alice: @[Me] https://images.example/photo.png' }),
+      channelReceipt('url-name', { text: 'Alice: @[https://images.example/name.png]' }),
     ]
     const render = (pathMetadata) => renderToStaticMarkup(createElement(ChatPanel, {
       snapshot: { phase: 'ready', transport: 'usb', device: { publicKey: key, name: 'Me', type: 1 }, channels: [] },
@@ -77,6 +79,11 @@ test('renders matching receipt details without claiming delivery', async () => {
     assert.match(html, /Reply unavailable: the sender name contains a closing bracket/)
     assert.doesNotMatch(html, /aria-label="Reply to Bad\]name"/)
     assert.doesNotMatch(html, />Delivered</)
+    assert.match(html, /chat-mention chat-mention--self/)
+    assert.match(html, /href="https:\/\/images.example\/photo.png"/)
+    assert.match(html, /<img[^>]+src="https:\/\/images.example\/photo.png"/)
+    assert.match(html, /<span[^>]+class="chat-mention"[^>]*>@\[https:\/\/images.example\/name.png\]<\/span>/)
+    assert.doesNotMatch(html, /(?:href|src)="https:\/\/images.example\/name.png"/)
     assert.doesNotMatch(render(false), /1 path hop · 1-byte path hashes/)
   } finally {
     await vite.close()
