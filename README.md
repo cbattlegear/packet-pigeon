@@ -1142,6 +1142,12 @@ Stopping a ping stops waiting for a reply. The app never retries automatically.
 ## Channels
 
 Browse and search synced channel names online or from a selected cached radio.
+Right-click a channel or use its **...** actions button for **Settings**,
+**Rename**, **Share link or QR code**, **Sender names**, and **Delete channel**.
+The actions button also opens with Shift+F10 or Arrow Down; use arrow keys to
+move through the menu and Escape to close it. Settings show retention, browser
+alerts, and sending scope on demand. **Blocked names** manages radio-wide
+blocks; **Add channel** opens the creation form.
 With a connected radio, create a private channel, join using a 16-byte hex
 secret, add the well-known public channel or a deterministic hashtag channel,
 rename a channel, or delete one. Private creation displays its generated secret
@@ -1152,7 +1158,7 @@ names to 31 UTF-8 bytes and reports the number of available slots. A rejected
 or interrupted change may need a reconnect to check the radio's actual state.
 
 Deleting a channel does not delete cached messages; reusing its slot can make
-old messages appear associated with the replacement. Each channel lists sender
+old messages appear associated with the replacement. **Sender names** lists sender
 names observed in recognizable `name: message` text receipts, not verified
 members. Sender names are unauthenticated and can be changed or impersonated.
 Blocking a name uses an exact match across channels for the selected radio;
@@ -1172,7 +1178,7 @@ with the same slot and name cannot be distinguished. A synced deletion clears
 the setting. Retention does not change the radio or delete direct messages.
 
 Each channel can use **Radio default**, a case-sensitive named public hashtag
-region (companion protocol v8+), or **Explicitly unscoped** (v12+).
+region (companion protocol v8+), or **Unscoped** (v12+).
 Names are trimmed and prefixed with `#` if absent; the first 16 bytes of their
 SHA-256 hash select the region, matching MeshCore's companion protocol.
 These settings are browser-local and per radio/slot. An observed name change,
