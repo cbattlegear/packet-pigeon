@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -92,6 +93,7 @@ test('edits radio settings, reports partial saves, and writes credentials withou
   })
 
   await page.goto(server.resolvedUrls.local[0] + '#settings')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const settings = page.getByRole('region', { name: 'Radio device settings' })
   const results = settings.getByRole('list', { name: 'Radio settings results' })

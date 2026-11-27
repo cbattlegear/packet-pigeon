@@ -24,7 +24,7 @@ type Props = {
 
 export function PreferencesPanel({ preferences, saveFailed, update, wake, notifications }: Props) {
   return (
-    <section className="preferences" aria-label="App preferences">
+    <section className="preferences app-preferences" aria-label="App preferences">
       <fieldset>
         <legend>Appearance and language</legend>
         <div className="preference-field">
@@ -38,13 +38,12 @@ export function PreferencesPanel({ preferences, saveFailed, update, wake, notifi
         </div>
         <div className="preference-field">
           <label htmlFor="language">App language</label>
-          <select id="language" value={preferences.language} aria-describedby="language-help" onChange={(event) => {
+          <select id="language" value={preferences.language} onChange={(event) => {
             const option = languageOptions.find((value) => value === event.currentTarget.value)
             if (option) update('language', option)
           }}>
             {languageOptions.map((option) => <option key={option} value={option}>{languageLabels[option]}</option>)}
           </select>
-          <p id="language-help">English is currently available.</p>
         </div>
         <div className="preference-field">
           <label htmlFor="clock">Clock format</label>
@@ -58,7 +57,7 @@ export function PreferencesPanel({ preferences, saveFailed, update, wake, notifi
       </fieldset>
       <fieldset>
         <legend>Browser notifications</legend>
-        <p>Alerts are available only while this app is open. Messages arrive when you manually sync; there is no push or background delivery.</p>
+        <p>Alerts work while the app is open. Sync to check for messages.</p>
         <p role="status">Permission: {notifications.permission}. {notifications.permission === 'denied' && 'Change notification permission in your browser site settings.'}</p>
         <button type="button" disabled={notifications.permission !== 'default'} onClick={notifications.request}>Allow browser notifications</button>
         <label className="preference-check">
@@ -86,7 +85,6 @@ export function PreferencesPanel({ preferences, saveFailed, update, wake, notifi
             {title}
           </label>
         ))}
-        <p>Draft edits stay available during this visit. Previously saved drafts remain in the radio cache.</p>
       </fieldset>
       <fieldset>
         <legend>Display</legend>

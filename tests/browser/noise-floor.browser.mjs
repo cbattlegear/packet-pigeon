@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -35,6 +36,7 @@ test('noise-floor polling is opt-in and stops on cancel or navigation', async (t
     Object.defineProperty(navigator, 'serial', { value: { async requestPort() { return port } } })
   })
   await page.goto(server.resolvedUrls.local[0] + '#discovery')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const start = page.getByRole('button', { name: 'Start noise-floor polling' })
   await start.waitFor({ state: 'visible' })
@@ -51,6 +53,7 @@ test('noise-floor polling is opt-in and stops on cancel or navigation', async (t
   const afterNavigation = (await page.evaluate(() => window.commands)).filter(([code]) => code === 56).length
   await page.waitForTimeout(2200)
   assert.equal((await page.evaluate(() => window.commands)).filter(([code]) => code === 56).length, afterNavigation)
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Discovery' }).click()
   await page.evaluate(() => { window.holdNoise = true })
   await start.click()
@@ -112,6 +115,7 @@ test('Bluetooth noise-floor polling is opt-in, local, and stops on errors or nav
     Object.defineProperty(navigator, 'bluetooth', { value: { async requestDevice() { return device } } })
   })
   await page.goto(server.resolvedUrls.local[0] + '#discovery')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect Bluetooth' }).click()
   const monitor = page.getByRole('region', { name: 'Live noise floor' })
   const start = monitor.getByRole('button', { name: 'Start noise-floor polling' })

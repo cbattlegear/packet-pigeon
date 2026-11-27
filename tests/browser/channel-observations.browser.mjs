@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { createCipheriv, createHash, createHmac } from 'node:crypto'
 import { test } from 'node:test'
@@ -63,6 +64,7 @@ test('observes channel packets without merging ambiguous receipts or exposing ke
     } finally { storage.close() }
   }, radio)
   await page.reload()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const start = page.getByRole('button', { name: 'Observe channel packets' })
   await start.waitFor()

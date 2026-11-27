@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -108,6 +109,7 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
       storage.close()
     }
   })
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('link', { name: 'Browse discovered adverts' }).click()
   const discovered = page.getByRole('list', { name: 'Discovered adverts' })
@@ -226,6 +228,7 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
   assert.equal(browserStorage.includes('Unique fixture passphrase 123'), false)
   assert.match(browserStorage, /packet-pigeon:repeater-credential:v1:/)
   await page.reload()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('button', { name: /^Target relay/ }).click()
   await page.getByText('Repeater login and status', { exact: true }).click()

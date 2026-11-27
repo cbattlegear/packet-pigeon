@@ -35,7 +35,7 @@ type ContactsProps = {
   onMap: (position: Coordinates, terrain: boolean) => void
   onImport?: () => void
   onShare?: (link: string) => void
-  radioNavigation?: { key: RadioKey; sequence: number } | null
+  radioNavigation?: { key: RadioKey; sequence: number; contactKey?: string } | null
   onRadioNavigationHandled?: () => void
   onPathMap?: (path: MapPath) => void
   mapPathNodes?: readonly PathNode[]
@@ -109,10 +109,12 @@ export function ContactsPanel({ snapshot, session, messageSync, cacheSaving, mes
       ? discoveredHops : discoveryPathNodes(discoveryEntries(data))),
     ...(mapPathNodes ?? []),
   ], [data, discoveredHops, discoveredRadio, mapPathNodes, radioKey])
+  const [contactTarget, setContactTarget] = useState<ContactsProps['radioNavigation']>(null)
 
   useEffect(() => {
     if (!radioNavigation) return
     setOfflineChoice(radioNavigation.key)
+    if (radioNavigation.contactKey) setContactTarget(radioNavigation)
     onRadioNavigationHandled?.()
   }, [radioNavigation, onRadioNavigationHandled])
 
@@ -167,7 +169,8 @@ export function ContactsPanel({ snapshot, session, messageSync, cacheSaving, mes
       {onImport && <div className="contact-actions"><button type="button" onClick={onImport}>Import link or QR code</button></div>}
       {radioKey ? (
         <ContactBrowser
-          key={radioKey}
+          key={`${radioKey}:${contactTarget?.key === radioKey ? contactTarget.sequence : ''}`}
+          initialContactKey={contactTarget?.key === radioKey ? contactTarget.contactKey : undefined}
           radioKey={radioKey}
           entries={entries}
           unreadByContact={unreadByContact}
@@ -192,6 +195,7 @@ export function ContactsPanel({ snapshot, session, messageSync, cacheSaving, mes
 
 type BrowserProps = {
   radioKey: RadioKey
+  initialContactKey?: string
   entries: ContactEntry[]
   unreadByContact: ReadonlyMap<string, number>
   session: ContactsProps['session']
@@ -208,14 +212,14 @@ type BrowserProps = {
   additionalPathNodes: readonly PathNode[]
 }
 
-function ContactBrowser({ radioKey, entries, unreadByContact, session, messageSync, canWrite, firmware, framed, radioBusy, active, savePreference, onMap, onShare,
+function ContactBrowser({ radioKey, initialContactKey, entries, unreadByContact, session, messageSync, canWrite, firmware, framed, radioBusy, active, savePreference, onMap, onShare,
   onPathMap, additionalPathNodes }: BrowserProps) {
   const [search, setSearch] = useState('')
   const [role, setRole] = useState<NodeRole | 'all'>('all')
   const [sort, setSort] = useState<ContactSort>('name')
   const [favorites, setFavorites] = useState(false)
   const [selected, setSelected] = useState(() => new Set<string>())
-  const [detailKey, setDetailKey] = useState('')
+  const [detailKey, setDetailKey] = useState(initialContactKey ?? '')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
   const [location, setLocation] = useState<Coordinates | null>(null)

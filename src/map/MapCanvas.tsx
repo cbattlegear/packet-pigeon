@@ -15,6 +15,7 @@ import 'leaflet/dist/leaflet.css'
 
 type MapCanvasProps = {
   nodes: readonly MapNode[]
+  selectedKey: string | null
   self: Coordinates | null
   focus: Coordinates | readonly Coordinates[] | null
   useTiles: boolean
@@ -30,7 +31,7 @@ type MapCanvasProps = {
 const point = ({ lat, lon }: Coordinates): [number, number] => [lat, lon]
 
 export function MapCanvas({
-  nodes, self, focus, useTiles, picking, profile, layers, displayPath, onSelect, onPick, onTileError,
+  nodes, selectedKey, self, focus, useTiles, picking, profile, layers, displayPath, onSelect, onPick, onTileError,
 }: MapCanvasProps) {
   const container = useRef<HTMLDivElement>(null)
   const mapRef = useRef<LeafletMap | null>(null)
@@ -48,7 +49,7 @@ export function MapCanvas({
       pane: 'offline-land',
       interactive: false,
       attribution: '<a href="https://www.naturalearthdata.com/">Natural Earth</a>',
-      style: { color: '#a9bab0', fillColor: '#c8d4bc', fillOpacity: 0.72, weight: 1 },
+      style: { className: 'map-land', fillOpacity: 1, weight: 1 },
     }).addTo(map)
     control.scale({ imperial: false }).addTo(map)
     const observer = new ResizeObserver(([entry]) => {
@@ -123,13 +124,19 @@ export function MapCanvas({
       for (const group of cells.values()) {
         if (group.length === 1) {
           const [{ node, position }] = group
-          marker(position, {
+          const selected = node.publicKey === selectedKey
+          const pin = marker(position, {
             title: node.name,
-            icon: divIcon({ className: `node-pin node-role-${node.role}`, iconSize: [16, 16] }),
+            icon: divIcon({ className: `node-pin node-role-${node.role}${selected ? ' node-pin--selected' : ''}`, iconSize: [16, 16] }),
           }).on('click', () => {
             if (picking && mapPosition(node.position)) onPick(node.position)
             else onSelect(node)
           }).addTo(overlay)
+          if (selected) {
+            const label = document.createElement('span')
+            label.textContent = node.name
+            pin.bindTooltip(label, { permanent: true, direction: 'right', offset: [8, 0], className: 'map-pin-label' })
+          }
         } else {
           const bounds = latLngBounds(group.map(({ position }) => position))
           marker(bounds.getCenter(), {
@@ -153,7 +160,7 @@ export function MapCanvas({
       map.off('moveend', draw)
       overlay.remove()
     }
-  }, [nodes, self, onSelect, picking, onPick])
+  }, [nodes, selectedKey, self, onSelect, picking, onPick])
 
   useEffect(() => {
     const map = mapRef.current

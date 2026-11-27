@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -80,6 +81,7 @@ test('active discovery sends only chosen requests and stops listening on navigat
     Object.defineProperty(navigator, 'serial', { value: { async requestPort() { return port } } })
   })
   await page.goto(server.resolvedUrls.local[0] + '#discovery')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const send = page.getByRole('button', { name: 'Send nearby discovery' })
   await send.waitFor({ state: 'visible' })
@@ -153,6 +155,7 @@ test('active discovery sends only chosen requests and stops listening on navigat
   await page.waitForFunction(() => document.querySelector('#nearby-heading')?.parentElement
     ?.querySelector('[role="status"]')?.textContent?.startsWith('Stopped waiting.'))
   await page.evaluate(() => window.discoveryReply(0xdd))
+  await openWorkspaceMenu(page, 'More')
   await navigation.getByRole('link', { name: 'Discovery', exact: true }).click()
   assert.equal(await results.getByRole('button', { name: /Node dddddddd/ }).count(), 0)
   await results.getByRole('button', { name: /Saved relay/ }).click()
@@ -220,6 +223,7 @@ test('Bluetooth discovery is opt-in and explains incomplete replies', async (t) 
     Object.defineProperty(navigator, 'bluetooth', { value: { async requestDevice() { return device } } })
   })
   await page.goto(server.resolvedUrls.local[0] + '#discovery')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect Bluetooth' }).click()
   const send = page.getByRole('button', { name: 'Send nearby discovery' })
   await send.waitFor({ state: 'visible' })

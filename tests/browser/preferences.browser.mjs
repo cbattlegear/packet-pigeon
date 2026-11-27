@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -48,6 +49,7 @@ test('notification permission and per-channel mode persist independently', async
   await page.reload()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
   assert.equal(await page.getByLabel('Browser alerts for Public').inputValue(), 'mentions')
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Settings' }).click()
   assert.equal(await page.getByLabel('Alert for synced messages').isChecked(), true)
 })
@@ -106,6 +108,7 @@ test('sync progress follows saved receipts and a saved message alerts once', asy
   page.setDefaultTimeout(8000)
   await page.goto(`${url}#settings`)
   await page.getByLabel('Alert for synced messages').check()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('link', { name: 'Chats' }).click()
   const sync = page.getByRole('button', { name: 'Sync messages' })
@@ -191,6 +194,7 @@ test('reconnect progress does not hide an unsaved receipt', async (t) => {
   const page = await context.newPage()
   page.setDefaultTimeout(8000)
   await page.goto(url)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const status = page.getByRole('status', { name: 'Sync status' })
   await page.getByRole('button', { name: 'Sync messages' }).click()
@@ -269,11 +273,14 @@ test('discovery and full-storage alerts retain their radio across a switch and o
   await page.goto(`${url}#settings`)
   await page.getByLabel('Alert for newly discovered contacts (USB)').check()
   await page.getByLabel('Alert when radio contact or channel storage is full').check()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.waitForFunction(() => window.alerts.filter((entry) => entry.options.tag.includes('ab'.repeat(32))).length === 2)
   await page.evaluate(() => window.emitDiscovery())
   await page.waitForFunction(() => window.alerts.filter((entry) => entry.options.tag.includes('ab'.repeat(32))).length === 3)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Disconnect' }).click()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.waitForFunction(() => window.alerts.some((entry) => entry.options.tag.includes('cd'.repeat(32))))
   for (const kind of ['discovery', 'full:' + 'ab'.repeat(32) + ':contacts', 'full:' + 'ab'.repeat(32) + ':channels']) {
@@ -282,6 +289,7 @@ test('discovery and full-storage alerts retain their radio across a switch and o
     await page.getByRole('alert').filter({ hasText: 'The alert belongs to a different radio' }).first().waitFor()
     assert.equal(new URL(page.url()).hash, '#settings')
   }
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Disconnect' }).click()
   for (const [kind, label] of [['discovery', 'Discovery cache radio'], ['contacts', 'Cached radio'], ['channels', 'Cached radio']]) {
     await page.evaluate((kind) => window.alerts.find((entry) => entry.options.tag.includes('ab'.repeat(32))
@@ -373,6 +381,7 @@ test('enabling oldest unread repositions the open conversation and preserves its
   })
   const input = page.getByRole('textbox', { name: 'Message', exact: true })
   await input.fill('Keep this draft')
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Settings' }).click()
   await page.getByLabel('Open conversations at the oldest unread message').check()
   await page.getByRole('link', { name: 'Chats' }).click()
@@ -418,6 +427,7 @@ test('sender blocks preserve chat preferences and unread receipts until restored
   await page.getByRole('button', { name: 'Block sender name Alice' }).click()
   await page.getByText('Sender name blocked on this radio.').waitFor()
 
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Settings' }).click()
   await page.getByLabel('Show conversation previews').uncheck()
   await page.getByRole('link', { name: 'Chats' }).click()
@@ -446,6 +456,7 @@ test('sender blocks preserve chat preferences and unread receipts until restored
     try { return (await storage.read(radioKeyFromPublicKey(radio))).readMessages?.includes('Alice') }
     finally { storage.close() }
   }, radio)
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Settings' }).click()
   assert.equal(await page.getByLabel('Show conversation previews').isChecked(), false)
 })

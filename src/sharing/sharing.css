@@ -3,8 +3,8 @@
   max-height: calc(100% - 2rem);
   padding: 20px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
+  border-radius: 14px;
+  background: var(--raised);
   color: inherit;
   overflow-wrap: anywhere;
 }
