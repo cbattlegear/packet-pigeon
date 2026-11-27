@@ -204,6 +204,22 @@ Only receipts brought into view are marked read, including while searching.
 Contact unread badges use the same per-radio read markers as Chats; ambiguous
 sender prefixes are not attributed to a contact.
 
+Direct HTTPS image links in DMs and channels display inline, including animated
+GIFs. Supported URL paths end in `.avif`, `.bmp`, `.gif`, `.ico`, `.jpg`, `.jpeg`,
+`.png`, `.svg`, or `.webp` (case-insensitive; query strings and fragments are
+allowed). Other HTTPS links, including extensionless image URLs, offer **Load
+image**; they are not contacted until you select it. This may attempt to load
+an ordinary link as an image. The original URL remains visible and clickable;
+unavailable images show a fallback without changing the message or its actions.
+Repeated URLs in one message display one image or load action. No article/video
+previews are generated, and page metadata is not parsed. If you choose **Load
+image** on an ordinary link, its response may be downloaded even though it is
+not an image.
+Loading a remote image contacts its host and may disclose your IP address,
+even when browsing cached chats offline from the radio. Images use no referrer,
+but this does not hide your IP. Remote media is not saved with the message cache
+and may be unavailable without internet access.
+
 The app saves the outgoing message and each expected acknowledgement before
 transmitting. It shows sending, sent, delivered, and failed states. Delivered
 means the radio received a matching MeshCore acknowledgement, not that a person

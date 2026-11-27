@@ -266,6 +266,28 @@
   overflow-wrap: anywhere;
 }
 
+.chat-message-list a {
+  overflow-wrap: anywhere;
+}
+
+.chat-image {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.chat-image button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.chat-image img {
+  display: block;
+  max-width: min(100%, 32rem);
+  max-height: 24rem;
+  object-fit: contain;
+}
+
 .chat-mention {
   color: var(--accent-text);
   font-weight: 700;
