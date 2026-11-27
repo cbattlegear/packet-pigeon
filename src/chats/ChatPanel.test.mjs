@@ -54,7 +54,7 @@ test('correlates live observations by exact fields and flags ambiguous saved mes
   assert.equal(correlateChannelObservations(1, [first], [{ ...observed[0], textType: 1 }]).size, 0)
 })
 
-test('renders matching receipt details without claiming delivery', async () => {
+test('renders hop counts and hides receipt diagnostics from the chat timeline', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   try {
     const { ChatPanel } = await vite.ssrLoadModule(fileURLToPath(new URL('ChatPanel.tsx', import.meta.url)))
@@ -72,11 +72,8 @@ test('renders matching receipt details without claiming delivery', async () => {
       cacheSaving: false, active: true, preferences: { ...defaultPreferences, pathMetadata }, locale: 'en',
     }))
     const html = render(true)
-    assert.match(html, /2 matching queued receipts \(possible repeats\)/)
-    assert.match(html, /may not queue every heard copy/)
-    assert.match(html, /1 path hop · 1-byte path hashes/)
-    assert.match(html, /Direct receipt/)
-    assert.match(html, /Reply unavailable: the sender name contains a closing bracket/)
+    assert.match(html, />1 hop</)
+    assert.doesNotMatch(html, /matching queued receipts|path hashes|Direct receipt/)
     assert.doesNotMatch(html, /aria-label="Reply to Bad\]name"/)
     assert.doesNotMatch(html, />Delivered</)
     assert.match(html, /chat-mention chat-mention--self/)
@@ -84,7 +81,7 @@ test('renders matching receipt details without claiming delivery', async () => {
     assert.match(html, /<img[^>]+src="https:\/\/images.example\/photo.png"/)
     assert.match(html, /<span[^>]+class="chat-mention"[^>]*>@\[https:\/\/images.example\/name.png\]<\/span>/)
     assert.doesNotMatch(html, /(?:href|src)="https:\/\/images.example\/name.png"/)
-    assert.doesNotMatch(render(false), /1 path hop · 1-byte path hashes/)
+    assert.doesNotMatch(render(false), />1 hop</)
   } finally {
     await vite.close()
   }
@@ -116,7 +113,7 @@ test('enables manual Bluetooth sync and preserves offline receipt retry', async 
     const bluetooth = render('ready', 'bluetooth')
     assert.doesNotMatch(button(bluetooth, 'Sync messages'), /\bdisabled\b/)
     assert.match(bluetooth, /Bluetooth may truncate or drop messages/)
-    assert.match(bluetooth, /The radio removes each message from its queue before replying, so missing content cannot be recovered from the radio\./)
+    assert.match(bluetooth.replace(/\s+/g, ' '), /The radio removes each message from its queue before replying, so missing content cannot be recovered from the radio\./)
     assert.doesNotMatch(button(render('ready', 'usb'), 'Sync messages'), /\bdisabled\b/)
     assert.doesNotMatch(button(render('ready', 'bluetooth', { pending: true }), 'Retry saving and sync'), /\bdisabled\b/)
     assert.match(button(render('ready', 'bluetooth', { syncing: true }), 'Syncing messages…'), /\bdisabled\b/)
