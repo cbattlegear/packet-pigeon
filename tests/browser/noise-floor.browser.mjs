@@ -26,6 +26,7 @@ test('noise-floor polling is opt-in and stops on cancel or navigation', async (t
         if (command[0] === 22) emit(info)
         else if (command[0] === 1) emit(device)
         else if (command[0] === 4) { emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]) }
+        else if (command[0] === 10) emit([10])
         else if (command[0] === 56) { if (!window.holdNoise) window.replyNoise() }
         else throw Error('Unexpected command')
       } }),
@@ -93,6 +94,7 @@ test('Bluetooth noise-floor polling is opt-in, local, and stops on errors or nav
         if (bytes[0] === 22) emit([13, 14, 40, 0, ...new Uint8Array(78)])
         else if (bytes[0] === 1) emit([5, 1, 0, 0, ...new Uint8Array(32).fill(0xab), ...new Uint8Array(22), ...new TextEncoder().encode('Fixture')])
         else if (bytes[0] === 4) { emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]) }
+        else if (bytes[0] === 10) emit([10])
         else if (bytes[0] === 56) { if (!window.holdNoise) window.replyNoise() }
         else throw Error(`Unexpected command ${bytes[0]}`)
       },
@@ -115,7 +117,8 @@ test('Bluetooth noise-floor polling is opt-in, local, and stops on errors or nav
   const start = monitor.getByRole('button', { name: 'Start noise-floor polling' })
   await monitor.getByText(/Bluetooth notifications can be split or dropped/).waitFor()
   assert(await start.isEnabled())
-  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4])
+  await page.waitForFunction(() => window.commands.some(([code]) => code === 10))
+  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4, 10])
   await start.click()
   await monitor.getByText(/Last reading: -123 dBm/).waitFor()
   assert.deepEqual((await page.evaluate(() => window.commands)).at(-1), [56, 1])

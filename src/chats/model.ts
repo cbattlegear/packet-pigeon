@@ -5,7 +5,6 @@ import type { CapturedChannelObservation } from '../integration/channel-observat
 export type Conversation = {
   id: string
   title: string
-  description: string
   recipient: string | null
   channel: { index: number; name: string } | null
   node?: { type: 'room' | 'sensor'; publicKey: string }
@@ -32,10 +31,7 @@ export function conversations(data: RadioData, inMemoryDraftIds: readonly string
       ? { type: role === 3 ? 'room' as const : 'sensor' as const, publicKey: contact.publicKey } : undefined
     const recipient = contact && matches.length === 1 && (role === 1 || role === 3) ? contact.publicKey : null
     const title = contact ? names.get(key) || contact.name || 'Unnamed contact' : `Unknown contact ${key.slice(0, 12)}`
-    const description = node ? `${node.type === 'room' ? 'Room server' : 'Sensor alerts'} · ${node.publicKey}` : contact
-      ? recipient ? contact.publicKey : matches.length > 1 ? 'Ambiguous key prefix; sending is unavailable.' : 'This contact cannot receive direct messages.'
-      : 'Sender or former contact is not uniquely identified.'
-    return { id, title, description, recipient, channel: null, ...(node ? { node } : {}), messages: [] }
+    return { id, title, recipient, channel: null, ...(node ? { node } : {}), messages: [] }
   }
 
   function add(id: string) {
@@ -47,11 +43,11 @@ export function conversations(data: RadioData, inMemoryDraftIds: readonly string
         const index = Number(id.slice('channel:'.length))
         const channel = data.channels.find((entry) => entry.index === index)
         conversation = {
-          id, title: channel?.name || `Channel ${index}`, description: 'Channel messages; sender names are not verified.',
+          id, title: channel?.name || `Channel ${index}`,
           recipient: null, channel: channel ?? null, messages: [],
         }
       } else {
-        conversation = { id, title: 'Unrecognized responses', description: 'Raw bytes are preserved for inspection.', recipient: null, channel: null, messages: [] }
+        conversation = { id, title: 'Unrecognized responses', recipient: null, channel: null, messages: [] }
       }
       byId.set(id, conversation)
     }
@@ -73,11 +69,7 @@ export function conversations(data: RadioData, inMemoryDraftIds: readonly string
       else id = `direct:${key}`
     }
     const conversation = add(id)
-    if (isBlockedChannelMessage(message, blockedSenders)) {
-      conversation.description = 'Received channel entries; messages from blocked names are hidden.'
-    } else {
-      conversation.messages.push(message)
-    }
+    if (!isBlockedChannelMessage(message, blockedSenders)) conversation.messages.push(message)
   }
   for (const conversation of byId.values()) {
     conversation.messages.sort((first, second) => {
@@ -216,10 +208,12 @@ export function messageVisibility(messages: readonly StoredMessage[], hidePossib
 
 export function receiptPathDescription(pathLength: number) {
   if (pathLength === 0xff) return 'Direct receipt'
-  if (!Number.isInteger(pathLength) || pathLength < 0 || pathLength > 0xff || pathLength >>> 6 === 3) {
-    return 'Unsupported path metadata'
-  }
-  const hops = pathLength & 63
+  const hops = receiptHopCount(pathLength)
+  if (hops === null) return 'Unsupported path metadata'
   const width = (pathLength >>> 6) + 1
   return `${hops} path hop${hops === 1 ? '' : 's'} · ${width}-byte path hashes`
+}
+
+export function receiptHopCount(pathLength: number) {
+  return Number.isInteger(pathLength) && pathLength >= 0 && pathLength < 0xc0 ? pathLength & 63 : null
 }

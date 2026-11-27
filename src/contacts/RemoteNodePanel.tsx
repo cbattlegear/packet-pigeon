@@ -166,7 +166,7 @@ export function RemoteNodePanel({ session, ...target }: Target & { session: Remo
           Disabling it does not revoke existing access-list entries; known clients may still sign in with a blank password.
           A blank room password may still grant posting access.</p>
         <p>Companion firmware v1.11 and earlier may cause these commands to be ignored.
-          Read and change replies appear in Chats after a manual sync; they are not matched to commands and may arrive late.</p>
+          Read and change replies sync automatically into Chats while connected; they are not matched to commands and may arrive late.</p>
         <div className="contact-actions">
           <button type="button" disabled={disabled}
             onClick={() => send({ kind: 'read-allow-read-only' }, 'Read automatic read-only entry', false)}>Read read-only setting</button>

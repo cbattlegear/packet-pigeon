@@ -204,8 +204,7 @@ button:disabled {
   background: var(--surface);
 }
 
-.pane-heading,
-.conversation-heading {
+.pane-heading {
   min-height: 104px;
   padding: 25px 28px;
   border-bottom: 1px solid var(--border);
@@ -215,14 +214,9 @@ button:disabled {
   font-size: 1.5rem;
 }
 
-.pane-heading p,
-.conversation-heading span {
+.pane-heading p {
   color: var(--muted);
   font-size: 0.875rem;
-}
-
-.conversation-heading p {
-  font-weight: 700;
 }
 
 .conversation-pane,
@@ -238,29 +232,9 @@ button:disabled {
   padding: 20px 28px;
 }
 
-.message-controls p,
-.received-messages time {
+.message-controls p {
   color: var(--muted);
   font-size: 0.875rem;
-}
-
-.received-messages {
-  display: grid;
-  gap: 12px;
-  padding: 24px 28px;
-  list-style: none;
-}
-
-.received-messages li {
-  min-width: 0;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow-wrap: anywhere;
-}
-
-.received-messages p {
-  white-space: pre-wrap;
 }
 
 .state-message {
@@ -399,8 +373,7 @@ button:disabled {
     border-bottom: 1px solid var(--border);
   }
 
-  .pane-heading,
-  .conversation-heading {
+  .pane-heading {
     min-height: auto;
     padding: 20px;
   }

@@ -7,7 +7,7 @@ The app provides keyboard-accessible navigation and user-initiated USB,
 Bluetooth, and local network companion connections. It syncs contacts and
 channels into a per-radio local cache. Contacts supports offline browsing, and the map can
 show synced contacts from the current session. Chats supports direct messages,
-drafts, delivery tracking, and manually syncing received queue entries. Channel
+drafts, delivery tracking, and automatically syncing received queue entries. Channel
 chats also support sending and local message actions.
 If a cached chat load fails, Chats offers a retry and retains any previously
 loaded data for that radio.
@@ -68,10 +68,82 @@ Run message sync fixtures with `node --test src/integration/message-sync.test.js
 Run direct-message fixtures with
 `node --test src/radio/direct-message.test.mjs src/integration/direct-messages.test.js src/chats/model.test.js`.
 Run channel-message framing fixtures with `node --test src/radio/channel-message.test.mjs`.
+Run reaction protocol and persistence fixtures with
+`node --test src/radio/reactions.test.mjs src/chats/reactions.test.mjs src/integration/direct-messages.test.js`.
+Run the reaction picker regression with `node --test tests/browser/reactions.browser.mjs`.
 These checks use mocks and do not need a radio.
 
 With Google Chrome installed, run `npm run test:browser` for the browser
 regressions. The tests use cached fixtures and simulated radios.
+
+## Message reactions
+
+Use **Message actions** → **React** on an ordinary DM or channel message, or
+its right-click actions, to choose a quick emoji or enter one emoji (including
+skin tones, flags and joined families). The picker is keyboard-accessible and
+leaves the composer draft unchanged. Room/management messages are excluded.
+Sending requires the selected radio to be connected and other message actions
+to be finished. Reaction matching details and wire text are available under
+**Message actions** → **Message details**.
+Reaction summaries show emoji counts and expandable sender names. Counts group
+canonically equivalent emoji and deduplicate each sender/emoji pair; channel
+names are unverified and can be impersonated. Blocking a channel sender hides
+their reactions from summaries without deleting the saved receipts.
+
+Outgoing reactions use MeshCoreOne's native format: `emoji\nhash` for DMs and
+`@[target sender]emoji\nhash` for channels. The eight lowercase Crockford symbols
+encode the first five SHA-256 bytes of the target's UTF-8 body followed by its
+unsigned 32-bit little-endian **wire timestamp**, not the browser display date.
+Channel envelopes are split at the first colon and whitespace is handled like
+the reference client. Previously used DM timestamps remain matchable after a
+manual retry; outgoing channel sender names are captured, not replaced when
+the radio is renamed. Incoming native emoji-first channel reactions are also
+accepted, as are Crockford case and O/I/L aliases.
+
+MeshCore Open v1 (`r:millis_senderHash_textHash:emoji`) and v3
+(`r:four-hex-hash:two-hex-index`) are receive-only. Dart hashing uses UTF-16 code
+units; v3 covers timestamp, channel sender (omitted for DMs) and the first five
+text code units. Like MeshCoreOne, Open matching uses a five-minute timestamp
+window: v1 around its target timestamp, v3 around local receipt time (sender
+time for older cached receipts). Delayed queues or clock differences can leave
+Open reactions unmatched.
+
+All reaction wire receipts remain in the same per-radio cache as normal
+messages. Summaries are rebuilt from those durable receipts on reads, so native
+and Open reactions arriving before their targets survive reloads; unmatched
+and ambiguous payloads remain visible with their wire text. No TTL or fixed
+pending-reaction queue silently discards them. Hash collisions, identical target
+receipts and ambiguous DM key prefixes are not resolved by guessing. Sending
+also refuses an ambiguous target. Local deletion, retention cleanup or browser
+storage eviction can remove targets or reaction receipts and therefore counts.
+Malformed/unsupported formats stay visible as ordinary text.
+An in-memory per-radio projection cache avoids rematching unchanged histories
+after draft/read-marker edits, and indexed candidate matching avoids scanning
+every message for each reaction. It detects relevant writes from other tabs;
+the durable receipts, not the cache, remain the source of truth.
+
+DM reactions use the existing acknowledgement, cancel and retry handling.
+Channel reactions have only radio acceptance, not delivery confirmation; an
+uncertain outcome can be deliberately resent. Our own reaction is counted once
+the radio accepts it (DM sent/delivered, channel accepted), which does not prove
+every peer received it. Failed/uncertain sends keep their delivery state visible.
+This has been verified with protocol vectors and mocked radios/browser storage,
+not a physical cross-client exchange; no live radio traffic was sent.
+Native recognition/sending requires `Intl.Segmenter`, and hashing requires Web
+Crypto in a secure context. Emoji classification follows the browser's Unicode
+tables, which may differ from MeshCoreOne's frozen Unicode version for newly
+introduced emoji. Sender names containing `]` cannot be emitted; unusual colon
+or whitespace names can also disagree with the peer's channel-envelope parsing.
+The existing Bluetooth truncation and firmware dequeue-before-save limitations
+still apply.
+
+The wire contract and vectors were checked against
+[MeshCoreOne-Android reaction services and tests](https://github.com/cbattlegear/MeshCoreOne-Android/tree/6baa75b98b44a53cc28a221cf7ca6d028692e547/android/core/services/src/main/kotlin/com/meshcoreone/android/core/services/reactions),
+including `ReactionHashIndependentVectorsTest`, `ReactionParserTest`,
+`MeshCoreOpenReactionParserTest`, `SyncCoordinatorReactionHandlers` and the
+actual app `react` send path. That repository is GPL-3.0; this is an independent
+TypeScript implementation of the wire contract, not copied Kotlin/Swift source
+or UI code. The Open v3 index-to-emoji mapping is protocol data.
 
 ## USB companion session
 
@@ -99,7 +171,13 @@ unplug/replug on every supported browser.
 
 `src/radio` exports `CompanionSession` and `getWebSerialSupport()`;
 `connect()` must be called directly from a user action for the port chooser.
-Use **Sync messages** in Chats to request queued receipts. Each receipt,
+Incoming messages sync automatically on connection and when the companion sends
+its message-waiting notification, over USB, Bluetooth, and the local network.
+Queue reads wait for contact/channel cache writes and other radio commands to
+finish. Notifications during a drain are coalesced, including a recheck if one
+arrives while the radio is reporting an empty queue. No periodic polling is used.
+**Sync messages** in Chats remains available for an explicit recheck or retry.
+Each receipt,
 including an unsupported or malformed response's raw bytes, is saved before
 requesting another; receipts are stored individually and are not deduplicated
 by their contents. The workspace sync status shows how many receipts have been
@@ -108,7 +186,10 @@ optional filter hides possible repeats without deleting them; they may be
 distinct messages. Unrecognized or malformed responses are
 saved as raw bytes and stop the sync for inspection; they can also be device
 errors rather than receipts. If saving fails, syncing stops and the receipt stays
-in memory for retry. Keep the tab open until it has been saved. Radio ownership
+in memory for retry. Automatic draining pauses on sync errors for inspection;
+use **Retry saving** or **Sync messages** after resolving the problem. A new
+connection retries pending receipts before reading that radio's queue. Keep the
+tab open until the receipt has been saved. Radio ownership
 remains reserved, even after disconnect, until that receipt is saved; retry
 saving in the owning tab to let another tab connect. Browser or process
 termination can still lose the in-memory receipt and release the lock. Failed
@@ -143,7 +224,8 @@ and checks its radio public key before syncing. **Disconnect** cancels recovery
 and releases the connection. Pairing, GATT data exchange and disconnect recovery
 are covered by simulated transport tests. Physical BLE hardware has not been tested.
 
-Use **Sync messages** in Chats to sync the incoming queue manually over Bluetooth.
+Bluetooth syncs queued messages automatically, using the same message-waiting
+notification as USB. **Sync messages** is available for a recheck or retry.
 As with USB, each received response is saved before requesting the next. Each
 Bluetooth notification is treated as a complete companion frame. BLE firmware
 can split or drop responses that exceed the negotiated MTU, which Web Bluetooth
@@ -261,7 +343,7 @@ that the companion queued blocks another login to that node on the current
 connection. The firmware matches replies by key prefix. Even after connecting
 again, an earlier reply may still arrive over the mesh.
 
-Choose **Sync messages** to fetch queued room posts and sensor alerts. The
+Queued room posts and sensor alerts sync automatically while connected. The
 browser keeps received entries for history, search, unread markers, and optional
 notifications. Room history supplied by the server depends on the companion's
 firmware cursor. A room post's author is resolved from the four-byte key prefix
@@ -359,7 +441,7 @@ on** uses the browser's Screen Wake Lock API while the tab is visible and
 depends on browser and device support.
 
 Browser notifications are opt-in in Settings and require browser permission.
-They alert for direct and channel text, room posts, and sensor alerts saved during manual message sync while
+They alert for direct and channel text, room posts, and sensor alerts saved during message sync while
 the app remains open, not after closure or through background push. The Channels
 page offers all, mentions-only and muted modes per radio and channel. Mentions
 match the connected radio's name without regard to case and are not authenticated. Direct
@@ -711,7 +793,7 @@ keys. The field clears on submission, and synced replies are saved with other
 messages. The frequency query reports the preference, not the active radio
 frequency or proof of persistence; v1.14.1 uses floating-point precision.
 Read-only entries in CLI history can be sent again explicitly; each send is a
-new mesh request, and replies appear after a manual message sync. Earlier requests or
+new mesh request, and replies sync automatically while connected. Earlier requests or
 replies may still arrive. Management actions cannot be repeated from history.
 The confirmed `discover.neighbors` action asks the repeater to broadcast a
 zero-hop discovery request; nearby repeaters may also transmit replies. It
@@ -1030,8 +1112,9 @@ Admin-password changes, identity changes,
 and arbitrary commands are not supported. The radio's
 acceptance is not proof that the repeater executed a
 command. **Sync messages for replies**
-explicitly drains and saves the ordinary message queue, including unrelated
-messages; nothing is synced automatically. CLI replies are saved in Chats; replies
+remains available to explicitly recheck and save the ordinary message queue,
+including unrelated messages; incoming replies also sync automatically while
+connected. CLI replies are saved in Chats; replies
 from uniquely identified saved repeaters do not generate message notifications.
 The searchable history in Contacts lasts only while that repeater remains
 selected. Reply tags are unique within the tab, but a delayed reply from an
@@ -1251,8 +1334,8 @@ Keep work small and split by behavior, rather than creating empty layers up fron
   Browser data clearing or eviction can remove the cache.
 - **Integration:** `src/integration/session-cache.ts` captures completed lists
   and messages from session snapshots and queues writes under the session's
-  full public key. `src/integration/message-sync.ts` saves each manually fetched
-  receipt before requesting the next. `src/integration/direct-messages.ts`
+  full public key. `src/integration/message-sync.ts` automatically drains queued
+  messages, saving each receipt before requesting the next. `src/integration/direct-messages.ts`
   manages user-initiated sends, acknowledgement tracking, and durable drafts.
   The UI subscribes to session and cache state; coordinate future changes to
   that boundary between workstreams.

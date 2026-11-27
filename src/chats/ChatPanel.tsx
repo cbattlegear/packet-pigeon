@@ -16,8 +16,9 @@ import { openRadioStorage, radioKeyFromPublicKey, validChannelScopeSettings } fr
 import type { DirectSendOptions, RadioData, RadioKey, StoredChannel, StoredContact, StoredMessage, StoredOutgoing } from '../storage/index.ts'
 import type { Coordinates } from '../map/nodes.ts'
 import { ComposerTools } from '../sharing/ComposerTools.tsx'
+import { ShareModal } from '../sharing/ShareDialogs.tsx'
 import { contactShareLink } from '../sharing/meshcoreLinks.ts'
-import { conversations, correlateChannelObservations, matchingChannelReceipts, messageDay, messageVisibility, nodeMessageSender, oldestUnreadReceipt, receiptPathDescription, searchMessages, unreadReceipts } from './model.ts'
+import { conversations, correlateChannelObservations, matchingChannelReceipts, messageDay, messageVisibility, nodeMessageSender, oldestUnreadReceipt, receiptHopCount, receiptPathDescription, searchMessages, unreadReceipts } from './model.ts'
 import type { Conversation } from './model.ts'
 import { ChatSearch } from './ChatSearch.tsx'
 import type { NamedRegion } from '../radio/channel-scope.ts'
@@ -31,6 +32,9 @@ import type { RemoteNodeLoginSession } from '../contacts/RemoteNodePanel.tsx'
 import { canPostToRoom, maxRoomTextBytes } from '../radio/node-access.ts'
 import { imageLinkParts } from './image-links.ts'
 import type { ImageLinkPart } from './image-links.ts'
+import { canReactTo } from './reactions.ts'
+import { reactionEmojiSupport } from '../radio/reactions.ts'
+import { ReactionPicker } from './ReactionPicker.tsx'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
@@ -38,7 +42,7 @@ const RemoteNodeLogin = lazy(async () => ({ default: (await import('../contacts/
 
 type SearchTarget = { id: string }
 
-type MessageContext = { id: string; x: number; y: number; row: HTMLLIElement }
+type MessageContext = { id: string; trigger: HTMLElement; point?: { x: number; y: number }; channel: boolean }
 
 type Props = {
   snapshot: CompanionSnapshot
@@ -66,6 +70,7 @@ type ChatDisplay = {
   preferences: AppPreferences
   read: ReadonlySet<string>
   formatTime: (date: Date) => string
+  formatClock: (date: Date) => string
   formatDate: (date: Date) => string
   ownContact: string | null
   contacts: readonly StoredContact[]
@@ -95,24 +100,35 @@ function MessageContextActions({ context, onClose, children }: {
   useLayoutEffect(() => {
     const element = menu.current
     if (!element) return
-    const bounds = element.getBoundingClientRect()
-    element.style.left = `${Math.max(0, Math.min(context.x, window.innerWidth - bounds.width))}px`
-    element.style.top = `${Math.max(0, Math.min(context.y, window.innerHeight - bounds.height))}px`
+    const place = () => {
+      const bounds = element.getBoundingClientRect()
+      const anchor = context.trigger.getBoundingClientRect()
+      const x = context.point?.x ?? anchor.right - bounds.width
+      let y = context.point?.y ?? anchor.bottom + 4
+      if (!context.point && y + bounds.height > window.innerHeight) y = anchor.top - bounds.height - 4
+      element.style.left = `${Math.max(0, Math.min(x, window.innerWidth - bounds.width))}px`
+      element.style.top = `${Math.max(0, Math.min(y, window.innerHeight - bounds.height))}px`
+    }
+    place()
     element.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
+    if (context.point) return
+    window.addEventListener('scroll', place, true)
+    return () => window.removeEventListener('scroll', place, true)
   }, [context])
   useEffect(() => {
     function dismiss(event: PointerEvent) {
+      if (!context.point && context.trigger.contains(event.target as Node)) return
       if (!menu.current?.contains(event.target as Node)) onClose()
     }
     function keydown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault()
-        context.row.focus({ preventScroll: true })
+        context.trigger.focus({ preventScroll: true })
         onClose()
       }
     }
     function scroll(event: Event) {
-      if (!menu.current?.contains(event.target as Node)) onClose()
+      if (context.point && !menu.current?.contains(event.target as Node)) onClose()
     }
     document.addEventListener('pointerdown', dismiss)
     document.addEventListener('keydown', keydown)
@@ -125,9 +141,10 @@ function MessageContextActions({ context, onClose, children }: {
       window.removeEventListener('scroll', scroll, true)
     }
   }, [context, onClose])
-  return createPortal(<div ref={menu} className="chat-context-actions" role="group" aria-label="Channel message context actions"
+  return createPortal(<div ref={menu} className="chat-context-actions" role="group"
+    aria-label={context.channel ? 'Channel message context actions' : 'Message actions'}
     onBlur={(event) => {
-      if (!event.currentTarget.contains(event.relatedTarget)) onClose()
+      if (!event.currentTarget.contains(event.relatedTarget) && (context.point || event.relatedTarget !== context.trigger)) onClose()
     }}>
     {children}
   </div>, document.body)
@@ -152,6 +169,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
     [data, direct, status])
   const read = useMemo(() => new Set(data?.readMessages), [data?.readMessages])
   const formatTime = useMemo(() => clockFormatter(locale, preferences.clock).format, [locale, preferences.clock])
+  const formatClock = useMemo(() => clockFormatter(locale, preferences.clock, false).format, [locale, preferences.clock])
   const formatDate = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format, [locale])
   const radioSelection = selection?.key === radioKey ? selection : null
   const preferred = radioSelection?.id ?? data?.preferences?.selectedConversationId
@@ -207,7 +225,6 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
       <section className="conversation-list" aria-labelledby="chats-heading">
         <div className="pane-heading">
           <h1 id="chats-heading">Chats</h1>
-          <p>Direct messages and received entries</p>
         </div>
         <div className="message-controls">
           {live ? <p>Radio <code>{live.slice(0, 12)}…</code></p> : (
@@ -222,15 +239,16 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
           )}
           {loadError && <p role="alert">{loadError}</p>}
           <button type="button" onClick={() => void messageSync.sync()}
+            title="Messages sync automatically while connected. Select to recheck."
             disabled={messageStatus.syncing || (!canSync && !messageStatus.pending)}>
             {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
               ? canSync ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
           </button>
-          <p>Receipts are saved before requesting the next. Interruptions can still lose a message.</p>
           {snapshot.transport === 'bluetooth' && (
-            <p>Bluetooth may truncate or drop messages; incomplete text can look complete. The radio removes each
-              message from its queue before replying, so missing content cannot be recovered from the radio. Use USB or
-              the local network for safer sync.</p>
+            <details className="chat-sync-limits"><summary>Bluetooth sync limits</summary>
+              <p>Bluetooth may truncate or drop messages. The radio removes each message from its queue before replying, so
+                missing content cannot be recovered from the radio. Use USB or the local network for safer sync.</p>
+            </details>
           )}
         </div>
         {radioKey && data && <>
@@ -273,10 +291,14 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             <p>Could not refresh cached chats: {cacheLoad.message} Showing previously loaded data.</p>
             <button type="button" onClick={() => void direct.load(radioKey)}>Retry loading chats</button>
           </div>}
+          {data.reactionError && <p className="chat-cache-error" role="alert">{data.reactionError}</p>}
+          {!reactionEmojiSupport && <p className="chat-cache-error" role="alert">
+            This browser cannot segment emoji. Native and channel reaction recognition and sending are unavailable; wire text is preserved.
+          </p>}
           <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} searchTarget={searchTarget}
             senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
             display={{
-              active, preferences, read, formatTime, formatDate, mapPosition, ownContact,
+              active, preferences, read, formatTime, formatClock, formatDate, mapPosition, ownContact,
               nodeSession, nodeReady: Boolean(live && live === radioKey && canSync),
               nodeBusy: cacheSaving || messageStatus.syncing || messageStatus.pending || status.activeId !== null,
               contacts: data.contacts, channels: live ? snapshot.channels : data.channels,
@@ -390,10 +412,10 @@ function deliveryLabel(outgoing: StoredOutgoing) {
   return `Sending${progress}`
 }
 
-function timestamp(value: number | null, format: ChatDisplay['formatTime']) {
+function timestamp(value: number | null, format: ChatDisplay['formatTime'], full: ChatDisplay['formatTime']) {
   if (value === null || !Number.isFinite(value) || Math.abs(value) > 8.64e15) return null
   const date = new Date(value)
-  return <time dateTime={date.toISOString()}>{format(date)}</time>
+  return <time dateTime={date.toISOString()} title={full(date)}>{format(date)}</time>
 }
 
 const idleObservation = { phase: 'idle' as const, error: null, dropped: 0, evicted: 0, entries: [] }
@@ -401,8 +423,8 @@ const noSubscription = () => () => {}
 const noObservation = () => idleObservation
 
 function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted, searchTarget }: ConversationProps) {
-  const { active, preferences, read, formatTime, formatDate, ownContact, contacts, channels, readChannelKey, mapPosition,
-    observationSource, canObserve, regionNames, pathNodes, onPathMap, nodeSession, nodeReady, nodeBusy } = display
+  const { active, preferences, read, formatTime, formatClock, formatDate, ownContact, contacts, channels, readChannelKey, mapPosition,
+    observationSource, canObserve, regionNames, onPathMap, nodeSession, nodeReady, nodeBusy } = display
   const room = conversation.node?.type === 'room' ? conversation.node : undefined
   const roomCanPost = !room || canPostToRoom(nodeSession.getRemoteNodeAccess(radioKey, room.publicKey))
   const [draft, setDraft] = useState(() => direct.draft(radioKey, conversation.id))
@@ -415,6 +437,8 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   const [previousSearchTarget, setPreviousSearchTarget] = useState(searchTarget)
   const [awayFromBottom, setAwayFromBottom] = useState(false)
   const [messageContext, setMessageContext] = useState<MessageContext | null>(null)
+  const [reactionMessage, setReactionMessage] = useState<string | null>(null)
+  const [detailId, setDetailId] = useState<string | null>(null)
   const composer = useRef<HTMLTextAreaElement>(null)
   const mentionPicker = useRef<HTMLDetailsElement>(null)
   const messageList = useRef<HTMLOListElement>(null)
@@ -445,6 +469,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   }
   const shown = useMemo(() => searchMessages(visible, search), [visible, search])
   const contextMessage = messageContext && shown.find((message) => message.id === messageContext.id)
+  const detailMessage = detailId && conversation.messages.find((message) => message.id === detailId)
   const bytes = new TextEncoder().encode(draft).length
   const isChannel = conversation.id.startsWith('channel:')
   const mentionNames = useMemo(() => conversation.channel
@@ -631,25 +656,34 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     await direct.sendChannel(radioKey, conversation.channel.index, conversation.channel.name, message.text, preferences.saveDrafts, true)
   }
 
-  function channelActions(message: StoredMessage, inContext = false) {
-    const sender = channelSender(message)
+  function messageActions(message: StoredMessage) {
+    const sender = isChannel ? channelSender(message) : null
     const body = channelMessageBody(message)
     const run = (action: () => void) => {
-      if (inContext) {
-        messageContext?.row.focus({ preventScroll: true })
-        setMessageContext(null)
-      }
+      messageContext?.trigger.focus({ preventScroll: true })
+      setMessageContext(null)
       action()
     }
     return <>
+      {!conversation.node && canReactTo(message) && <button type="button"
+        disabled={!reactionEmojiSupport || senderName === null || nodeBusy || status.pending > 0}
+        title={senderName === null ? 'Connect this radio to react' : undefined}
+        aria-label={`React to message: ${body.slice(0, 40)}`}
+        onClick={() => run(() => setReactionMessage(message.id))}>React</button>}
       {message.text && <button type="button" onClick={() => run(() => void copy(message))}
         aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
-      {conversation.channel && sender && (mentionableName(sender)
-        ? <button type="button" onClick={() => run(() => reply(sender, body))} aria-label={`Reply to ${sender}`}>Reply</button>
-        : <span className="chat-meta">Reply unavailable: the sender name contains a closing bracket (]).</span>)}
+      {conversation.channel && sender && mentionableName(sender)
+        && <button type="button" onClick={() => run(() => reply(sender, body))} aria-label={`Reply to ${sender}`}>Reply</button>}
       {sender && <button type="button" onClick={() => run(() => void block(sender))} aria-label={`Block sender name ${sender}`}>Block</button>}
-      <button type="button" disabled={message.channelOutgoing?.status === 'sending'}
-        aria-label={`Delete channel message: ${message.text.slice(0, 40)}`} onClick={() => run(() => void remove(message))}>Delete</button>
+      {message.channelOutgoing && message.channelOutgoing.status !== 'sending'
+        && conversation.channel?.name === message.channelOutgoing.channelName && (
+          <button type="button" disabled={status.activeId !== null || status.pending > 0}
+            aria-label={`Resend channel message: ${message.text.slice(0, 40)}`}
+            onClick={() => run(() => void resend(message))}>Resend</button>
+      )}
+      <button type="button" onClick={() => run(() => setDetailId(message.id))}>Message details</button>
+      {isChannel && <button type="button" disabled={message.channelOutgoing?.status === 'sending'}
+        aria-label={`Delete channel message: ${message.text.slice(0, 40)}`} onClick={() => run(() => void remove(message))}>Delete</button>}
     </>
   }
 
@@ -672,14 +706,17 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
 
   return (
     <section className="conversation-pane" aria-label={`Conversation with ${conversation.title}`}>
-      <div className="conversation-heading">
-        <p>{conversation.title}</p>
-        <span>{conversation.description}</span>
-        {preferences.pathMetadata && conversation.messages.some(({ receipt }) => receipt &&
-          receipt.pathLength !== 0xff && (receipt.pathLength & 63) > 0) &&
-          <span>Saved receipts report hop count and hash width. For full paths, review live channel observations or packets captured in <a href="#diagnostics">Diagnostics</a>.</span>}
-        {isChannel && <span>Radio acceptance does not confirm delivery. Live packet matches are best effort.</span>}
-        {conversation.id.startsWith('direct:') && <label>Browser alerts
+      <header className="conversation-heading">
+        <h2>{conversation.title}</h2>
+        <input type="search" className="chat-search" aria-label="Search messages" placeholder="Search messages"
+          value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
+        {isChannel && observer && (observed.phase === 'active' || observed.phase === 'starting'
+          ? <button type="button" aria-label="Stop channel observation" onClick={() => observer.stop()}>Stop observing</button>
+          : <button type="button" aria-label="Observe channel packets" disabled={!canObserve || !conversation.channel || regionNames === null}
+            onClick={() => {
+              if (conversation.channel && regionNames) void observer.start(radioKey, conversation.channel, regionNames)
+            }}>Observe</button>)}
+        {conversation.id.startsWith('direct:') && <label className="chat-alert-select">Alerts
           <select aria-label={`Browser alerts for ${conversation.title}`} value={muted ? 'muted' : 'all'}
             disabled={savingNotification} onChange={(event) => {
               const muted = event.currentTarget.value === 'muted'
@@ -699,148 +736,123 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             <option value="all">All messages</option><option value="muted">Muted</option>
           </select>
         </label>}
-        {conversation.id.startsWith('direct:') && <span>Mute applies to senders sharing this 12-character key prefix.</span>}
-      </div>
+        {conversation.recipient && <RetrySettings key={radioKey} radioKey={radioKey} current={options} direct={direct} />}
+      </header>
       {room && <Suspense fallback={null}>
         <RemoteNodeLogin session={nodeSession} radioKey={radioKey} nodeKey={room.publicKey} type={3}
           active={active} ready={nodeReady} busy={nodeBusy} />
       </Suspense>}
-      {isChannel && observer && <div className="chat-observation">
-        <div className="chat-observation-actions">
-          {observed.phase === 'active' || observed.phase === 'starting'
-            ? <button type="button" onClick={() => observer.stop()}>Stop channel observation</button>
-            : <button type="button" disabled={!canObserve || !conversation.channel || regionNames === null}
-              onClick={() => {
-                if (conversation.channel && regionNames) void observer.start(radioKey, conversation.channel, regionNames)
-              }}>Observe channel packets</button>}
-          <details><summary>About observation</summary>
-            <p>Available over USB or the local network. Reads this channel key temporarily and captures up to 500 packets in this tab until stopped,
-              disconnected or the conversation changes. Captures can miss packets; matches and region names are best effort.
-              Region candidates use named sending scopes saved when observation starts. Restart after changing scopes;
-              16-bit codes can collide and unknown regions cannot be identified.</p>
-          </details>
-        </div>
+      {isChannel && observer && (regionNames === null || observed.error || observed.phase === 'starting'
+        || observed.dropped > 0 || observed.evicted > 0) && <div className="chat-observation">
         {regionNames === null && <p role="alert">Saved channel scopes are invalid; reset them in Channels before observing.</p>}
         {observed.error && <p role="alert">{observed.error}</p>}
         {observed.phase === 'starting' && <p role="status">Starting channel observation…</p>}
-        {observed.phase === 'active' && <p role="status">Observing channel packets.
-          {observed.dropped > 0 && ` ${observed.dropped} packets were skipped while processing.`}
-          {observed.evicted > 0 && ` ${observed.evicted} older channel observations were discarded.`}</p>}
+        {observed.phase === 'active' && (observed.dropped > 0 || observed.evicted > 0) && <p role="status">
+          {observed.dropped > 0 && `${observed.dropped} packets skipped. `}
+          {observed.evicted > 0 && `${observed.evicted} older observations discarded.`}</p>}
       </div>}
       {repeats.size > 0 && (
         <label className="chat-repeat-filter">
           <input type="checkbox" checked={hideRepeats} onChange={(event) => setHideRepeats(event.currentTarget.checked)} />
-          <span>Hide {repeats.size} possible repeat{repeats.size === 1 ? '' : 's'}.
-            These may be distinct messages; all receipts are kept.</span>
+          <span>Hide {repeats.size} possible repeat{repeats.size === 1 ? '' : 's'}</span>
         </label>
       )}
-      <label className="chat-search">Search messages
-        <input type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
-      </label>
       {conversation.messages.length ? (
-        <ol className="received-messages chat-message-list" ref={messageList} onScroll={(event) => {
+        <ol className="chat-message-list" ref={messageList} onScroll={(event) => {
           const element = event.currentTarget
           following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 60
           setAwayFromBottom(!following.current)
         }}>
           {shown.map((message, index) => {
-            const sender = channelSender(message)
-            const body = channelMessageBody(message)
-            const matches = channelMatches.get(message.id)
-            const correlation = correlations.get(message.id)
+            const outgoing = message.outgoing || message.channelOutgoing
+            const channelSend = message.channelOutgoing
+            const time = timestamp(message.timestamp, formatClock, formatTime)
+            const hops = preferences.pathMetadata && message.receipt ? receiptHopCount(message.receipt.pathLength) : null
             const day = messageDay(message.timestamp)
             const previousDay = index ? messageDay(shown[index - 1].timestamp) : undefined
             return (
-            <Fragment key={message.id}>
-            {day !== previousDay && <li className="chat-divider">{day === null ? 'Unknown date' : formatDate(new Date(message.timestamp!))}</li>}
-            {message.id === unreadBoundary.current && <li className="chat-divider chat-divider--unread">New messages</li>}
-            <li data-receipt-id={message.id} tabIndex={-1}
-              onContextMenu={(event) => {
-                if (!isChannel || (event.target as Element).closest('button, a, input, select, textarea, summary')
-                  || window.getSelection()?.isCollapsed === false) return
-                event.preventDefault()
-                setMessageContext({ id: message.id, x: event.clientX, y: event.clientY, row: event.currentTarget })
-              }}
-              className={message.outgoing || message.channelOutgoing ? 'chat-message--outgoing' : undefined}>
-              <div className="chat-message-header">
-                <strong>{message.outgoing || message.channelOutgoing ? 'You' : isChannel ? sender ?? 'Unknown sender'
-                  : nodeMessageSender(conversation, message, contacts)}</strong>
-                {timestamp(message.timestamp, formatTime)}
-              </div>
-              {message.text && <MessageText text={body} channel={isChannel} ownName={senderName} />}
-              {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
-              {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
-              {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
-              {repeats.has(message.id) && <p className="chat-meta">Possible repeat; both receipts are kept.</p>}
-              {matches && <details className="chat-meta">
-                <summary>{matches.length} matching queued receipts (possible repeats)</summary>
-                <p>Matching text and timestamps can belong to separate messages. The radio may not queue every heard copy;
-                  this is not a delivery or complete repeat count.</p>
-                {preferences.pathMetadata && <ul>{matches.map((match) => <li key={match.id}>
-                  {match.receipt && <ReceiptPath receipt={match.receipt} />}
-                </li>)}</ul>}
-              </details>}
-              {correlation && <RxObservationDetails correlation={correlation} outgoing={Boolean(message.channelOutgoing)}
-                preferences={preferences} formatTime={formatTime} pathNodes={pathNodes} onPathMap={onPathMap} />}
-              {preferences.pathMetadata && message.receipt && <ReceiptPath receipt={message.receipt} />}
-              {preferences.regionMetadata && message.region && <p className="chat-meta">Region {message.region}</p>}
-              {message.outgoing && (
-                <div className="chat-delivery">
-                  <strong className={message.outgoing.status === 'failed' ? 'chat-failed' : undefined}>
-                    {deliveryLabel(message.outgoing)}
-                  </strong>
-                  {preferences.pathMetadata && message.outgoing.attempt > 0 && message.outgoing.status !== 'delivered' && (
-                    <span>{message.outgoing.route
-                      ? message.outgoing.route === 'direct' ? 'Direct' : 'Flood'
-                      : message.outgoing.attempt <= message.outgoing.options.directAttempts ? 'Direct phase' : 'Flood phase'}</span>
-                  )}
-                  {message.outgoing.error && <p>{message.outgoing.error}</p>}
-                  {message.outgoing.status === 'failed' && (
-                    <button type="button" disabled={!roomCanPost || status.activeId !== null || status.pending > 0}
-                      aria-label={`Retry message: ${message.text.slice(0, 40)}`} onClick={() => void retry(message)}>Retry</button>
-                  )}
-                  {status.activeId === message.id && (
-                    <button type="button" disabled={status.cancelling} onClick={direct.cancel}>
-                      {status.cancelling ? 'Cancelling…' : 'Cancel sending'}
-                    </button>
-                  )}
-                </div>
-              )}
-              {message.channelOutgoing && (
-                <div className="chat-delivery">
-                  <strong className={message.channelOutgoing.status === 'uncertain' ? 'chat-failed' : undefined}>
-                    {message.channelOutgoing.status === 'sending' ? 'Sending' : message.channelOutgoing.status === 'accepted'
-                      ? 'Accepted by radio' : 'Send status uncertain'}
-                  </strong>
-                  {message.channelOutgoing.error && <p>{message.channelOutgoing.error}</p>}
-                  {preferences.regionMetadata && message.channelOutgoing.scope && <p>
-                    Requested sending scope: {message.channelOutgoing.scope.mode === 'region'
-                      ? message.channelOutgoing.scope.name : message.channelOutgoing.scope.mode === 'unscoped'
-                        ? 'Explicitly unscoped' : 'Radio default'}
-                  </p>}
-                  {message.channelOutgoing.status !== 'sending'
-                    && conversation.channel?.name === message.channelOutgoing.channelName && (
-                    <button type="button" disabled={status.activeId !== null || status.pending > 0}
-                      aria-label={`Resend channel message: ${message.text.slice(0, 40)}`}
-                      onClick={() => void resend(message)}>Resend</button>
-                  )}
-                </div>
-              )}
-              {isChannel && (
-                <div className="chat-message-actions" role="group" aria-label="Channel message actions">
-                  {channelActions(message)}
-                </div>
-              )}
-              {message.rawHex && <details><summary>Raw receipt</summary><code>{message.rawHex}</code></details>}
-            </li>
-            </Fragment>
-          )})}
+              <Fragment key={message.id}>
+                {day !== previousDay && <li className="chat-divider">{day === null ? 'Unknown date' : formatDate(new Date(message.timestamp!))}</li>}
+                {message.id === unreadBoundary.current && <li className="chat-divider chat-divider--unread">New messages</li>}
+                <li data-receipt-id={message.id} tabIndex={-1}
+                  onContextMenu={(event) => {
+                    if ((event.target as Element).closest('button, a, input, select, textarea, summary')
+                      || window.getSelection()?.isCollapsed === false) return
+                    event.preventDefault()
+                    setMessageContext({ id: message.id, point: { x: event.clientX, y: event.clientY },
+                      trigger: event.currentTarget, channel: isChannel })
+                  }}
+                  className={outgoing ? 'chat-message chat-message--outgoing' : 'chat-message'}>
+                  <div className="chat-bubble">
+                    {!outgoing && <strong className="chat-sender">{isChannel ? channelSender(message) ?? 'Unknown sender'
+                      : nodeMessageSender(conversation, message, contacts)}</strong>}
+                    {message.reaction ? <>
+                      <p>Reaction {message.reaction.parsed.emoji}</p>
+                      {message.reaction.state !== 'matched' && <p className="chat-reaction-state">
+                        {message.reaction.state === 'ambiguous' ? 'Ambiguous reaction; not counted.'
+                          : message.reaction.state === 'unavailable' ? 'Reaction matching unavailable.'
+                            : 'Unmatched reaction; retained for later matching.'}
+                      </p>}
+                    </> : message.text && <MessageText text={channelMessageBody(message)} channel={isChannel} ownName={senderName} />}
+                    {message.reactions?.length ? <div className="chat-reaction-summary" role="group" aria-label="Message reactions">
+                      {message.reactions.map(({ emoji, count, senders }) => <details key={emoji}>
+                        <summary aria-label={`${emoji}: ${count} reaction${count === 1 ? '' : 's'}`}>{emoji} {count}</summary>
+                        <p>{senders.join(', ')}</p>
+                      </details>)}
+                    </div> : null}
+                    {message.receipt?.kind === 'channel-data' && <p>Channel data</p>}
+                    {message.conversationId === 'unsupported' && <p>Unrecognized response</p>}
+                    {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
+                    {(time || outgoing || hops !== null) && <div className="chat-message-footer">
+                      {time}
+                      {hops !== null && <span>{hops} {hops === 1 ? 'hop' : 'hops'}</span>}
+                      {message.outgoing && <span className={message.outgoing.status === 'failed' ? 'chat-failed' : undefined}>
+                        {deliveryLabel(message.outgoing)}
+                      </span>}
+                      {channelSend && <span className={channelSend.status === 'uncertain' ? 'chat-failed' : undefined}
+                        title={channelSend.status === 'accepted' ? 'Delivery is unconfirmed.' : undefined}>
+                        {channelSend.status === 'sending' ? 'Sending' : channelSend.status === 'accepted'
+                          ? 'Accepted by radio' : 'Send status uncertain'}
+                      </span>}
+                    </div>}
+                    {message.outgoing && (message.outgoing.status === 'failed' || status.activeId === message.id) && (
+                      <div className="chat-delivery">
+                        {message.outgoing.status === 'failed' && (
+                          <button type="button" disabled={!roomCanPost || status.activeId !== null || status.pending > 0}
+                            aria-label={`Retry message: ${message.text.slice(0, 40)}`} onClick={() => void retry(message)}>Retry</button>
+                        )}
+                        {status.activeId === message.id && (
+                          <button type="button" disabled={status.cancelling} onClick={direct.cancel}>
+                            {status.cancelling ? 'Cancelling…' : 'Cancel sending'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button className="chat-message-menu" type="button" aria-label="Message actions"
+                    aria-expanded={messageContext?.id === message.id} onClick={(event) => {
+                      const trigger = event.currentTarget
+                      if (messageContext?.trigger === trigger) setMessageContext(null)
+                      else setMessageContext({ id: message.id, trigger, channel: isChannel })
+                    }}>⋯</button>
+                </li>
+              </Fragment>
+            )
+          })}
           {!shown.length && <li className="chat-divider">No matching messages.</li>}
         </ol>
-      ) : <div className="state-message"><h2>No messages yet</h2><p>Messages in this conversation will appear here.</p></div>}
+      ) : <div className="state-message"><h2>No messages yet</h2></div>}
       {messageContext && contextMessage && <MessageContextActions context={messageContext} onClose={() => setMessageContext(null)}>
-        {channelActions(contextMessage, true)}
+        {messageActions(contextMessage)}
       </MessageContextActions>}
+      {reactionMessage && <ReactionPicker disabled={senderName === null || nodeBusy || status.pending > 0} error={status.error}
+        onClose={() => setReactionMessage(null)}
+        onSend={(emoji) => direct.react(radioKey, reactionMessage, emoji, options)} />}
+      {active && detailMessage && <ShareModal title="Message details" close={() => setDetailId(null)}>
+        <MessageDetails message={detailMessage} matches={channelMatches.get(detailMessage.id)}
+          correlation={correlations.get(detailMessage.id)} display={display}
+          onPathMap={onPathMap && ((path) => { setDetailId(null); onPathMap(path) })} />
+      </ShareModal>}
       {conversation.messages.length > 0 && awayFromBottom && <button className="chat-jump" type="button" onClick={() => {
         const list = messageList.current
         if (!list) return
@@ -853,47 +865,90 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       {actionError && <p className="chat-action-error" role="alert">{actionError}</p>}
       {(isChannel || conversation.id.startsWith('direct:')) && (conversation.node?.type !== 'sensor' || draft !== '') && (
         <form className="chat-composer" onSubmit={(event) => void send(event)}>
-          <label htmlFor="chat-draft">Message</label>
-          <textarea id="chat-draft" ref={composer} rows={3} value={draft} aria-describedby="chat-byte-count chat-draft-error"
-            onChange={(event) => updateDraft(event.currentTarget.value)} onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !event.repeat) {
-                event.preventDefault()
-                if (roomCanPost && draft && !invalid && status.activeId === null && (conversation.recipient || conversation.channel)) {
-                  event.currentTarget.form?.requestSubmit()
-                }
-              }
-            }} />
-          {isChannel && <details className="chat-mention-picker" ref={mentionPicker}>
-            <summary>Mention a name</summary>
-            <p>Mentions are plain text. Names are unverified and can be impersonated. Browser alerts depend on your notification settings.</p>
-            {mentionNames.length ? <div className="chat-mention-choice">
-              <label>Name to mention
-                <select value={selectedMention} onChange={(event) => setMentionName(event.currentTarget.value)}>
-                  <option value="">Select a name</option>
-                  {mentionNames.map((name) => <option key={name} value={name}>{name}</option>)}
-                </select>
-              </label>
-              <button type="button" disabled={!selectedMention} onClick={insertMention}>Insert mention</button>
-            </div> : <p>No mentionable chat contacts or observed senders are available. You can type <code>@[name]</code> directly.</p>}
-          </details>}
-          <div className="chat-compose-actions">
-            <span id="chat-byte-count">{limit === null ? `${bytes} UTF-8 bytes; connect to check the limit` : `${bytes}/${limit} UTF-8 bytes`}</span>
+          <div className="chat-compose-field">
             {active && <ComposerTools ownContact={ownContact} contacts={contacts} channels={channels}
               readChannelKey={readChannelKey} mapPosition={mapPosition} insert={insertInDraft} />}
-            <button type="submit" disabled={!roomCanPost || !draft || Boolean(invalid) || status.activeId !== null
-              || !(conversation.recipient || conversation.channel)}>{room ? 'Post message' : 'Send message'}</button>
+            {isChannel && <details className="chat-mention-picker" ref={mentionPicker}>
+              <summary aria-label="Mention a name" title="Mention a name">@</summary>
+              <div className="chat-tool-panel">
+                {mentionNames.length ? <div className="chat-mention-choice">
+                  <label>Name to mention
+                    <select value={selectedMention} onChange={(event) => setMentionName(event.currentTarget.value)}>
+                      <option value="">Select a name</option>
+                      {mentionNames.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" disabled={!selectedMention} onClick={insertMention}>Insert mention</button>
+                </div> : <p>No names available. Type <code>@[name]</code> to mention someone.</p>}
+              </div>
+            </details>}
+            <textarea id="chat-draft" ref={composer} rows={1} value={draft} aria-label="Message" placeholder="Message"
+              aria-describedby={draft ? 'chat-byte-count chat-draft-error' : 'chat-draft-error'}
+              onChange={(event) => updateDraft(event.currentTarget.value)} onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !event.repeat) {
+                  event.preventDefault()
+                  if (roomCanPost && draft && !invalid && status.activeId === null && (conversation.recipient || conversation.channel)) {
+                    event.currentTarget.form?.requestSubmit()
+                  }
+                }
+              }} />
+            {draft && <span className="chat-byte-count" id="chat-byte-count"
+              title={limit === null ? 'Connect to check the message limit' : 'UTF-8 bytes'}>
+              {limit === null ? bytes : `${bytes}/${limit}`}<span className="chat-sr-only"> UTF-8 bytes</span>
+            </span>}
+            <button className="chat-send" type="submit" aria-label={room ? 'Post message' : 'Send message'}
+              disabled={!roomCanPost || !draft || Boolean(invalid) || status.activeId !== null
+                || !(conversation.recipient || conversation.channel)}>{room ? 'Post' : 'Send'}</button>
           </div>
-          <p id="chat-draft-error" className="chat-action-error">{invalid}</p>
-          {room && !roomCanPost && <p>Sign in with posting access to send. You can still edit your draft.</p>}
-          {!conversation.recipient && !conversation.channel && <p>Sending is unavailable for this cached conversation. Your draft is still editable.</p>}
-          <p>{isChannel
-            ? 'The radio adds its sender name. Sending scope is configured in Channels. A channel message is a broadcast and cannot be recalled.'
-            : 'Flood fallback clears this contact’s saved radio route. Sent packets cannot be recalled.'}</p>
+          <p id="chat-draft-error" className="chat-action-error">{invalid || (room && !roomCanPost ? 'Posting access required.'
+            : !conversation.recipient && !conversation.channel ? 'Sending unavailable.' : '')}</p>
         </form>
       )}
-      {conversation.recipient && <RetrySettings key={radioKey} radioKey={radioKey} current={options} direct={direct} />}
     </section>
   )
+}
+
+function MessageDetails({ message, matches, correlation, display, onPathMap }: {
+  message: StoredMessage
+  matches?: StoredMessage[]
+  correlation?: { entries: CapturedChannelObservation[]; matchingMessages: number }
+  display: ChatDisplay
+  onPathMap?: ChatDisplay['onPathMap']
+}) {
+  const { formatTime, preferences, pathNodes } = display
+  const { receipt, rawHex, outgoing, channelOutgoing } = message
+  const time = timestamp(message.timestamp, formatTime, formatTime)
+  const scope = channelOutgoing?.scope
+  return <div className="chat-message-details">
+    {time}
+    {message.reaction && <>
+      <p>{message.reaction.state === 'matched' ? 'Matched to a message in this conversation.'
+        : message.reaction.state === 'ambiguous' ? 'Ambiguous reaction: multiple target messages match. Not counted.'
+          : message.reaction.state === 'unavailable' ? 'Reaction matching unavailable. Wire receipt retained.'
+            : 'Unmatched reaction: target not yet available. Retained for later matching.'}</p>
+      <details><summary>Wire reaction text</summary><pre>{channelMessageBody(message)}</pre></details>
+    </>}
+    {receipt?.kind === 'channel-data' && <p>Channel data (type {receipt.dataType}): <code>{receipt.dataHex}</code></p>}
+    {preferences.pathMetadata && receipt && <ReceiptPath receipt={receipt} />}
+    {preferences.regionMetadata && message.region && <p>Region {message.region}</p>}
+    {outgoing && <p>{deliveryLabel(outgoing)}
+      {preferences.pathMetadata && outgoing.route && ` · ${outgoing.route === 'direct' ? 'Direct' : 'Flood'}`}</p>}
+    {channelOutgoing?.status === 'accepted' && <p>Accepted by radio. Delivery is unconfirmed.</p>}
+    {preferences.regionMetadata && scope && <p>Scope: {scope.mode === 'region' ? scope.name
+      : scope.mode === 'unscoped' ? 'Explicitly unscoped' : 'Radio default'}</p>}
+    {(outgoing?.error || channelOutgoing?.error) && <p className="chat-failed">{outgoing?.error || channelOutgoing?.error}</p>}
+    {matches && <details>
+      <summary>{matches.length} matching queued receipts (possible repeats)</summary>
+      <p>Matching receipts can belong to separate messages. The radio may not queue every heard copy.</p>
+      {preferences.pathMetadata && <ul>{matches.map((match) => <li key={match.id}>
+        {match.receipt && <ReceiptPath receipt={match.receipt} />}
+      </li>)}</ul>}
+    </details>}
+    {correlation && <RxObservationDetails correlation={correlation} outgoing={Boolean(channelOutgoing)}
+      preferences={preferences} formatTime={formatTime} pathNodes={pathNodes} onPathMap={onPathMap} />}
+    {rawHex && <details><summary>Raw receipt</summary><code>{rawHex}</code></details>}
+    {!time && !receipt && !rawHex && !outgoing && !channelOutgoing && !message.region && <p>No details available.</p>}
+  </div>
 }
 
 function MessageText({ text, channel, ownName }: { text: string; channel: boolean; ownName: string | null }) {
@@ -992,19 +1047,21 @@ function RetrySettings({ radioKey, current, direct }: { radioKey: RadioKey; curr
   return (
     <details className="chat-retry-settings">
       <summary>Retry settings</summary>
-      <form onSubmit={(event) => void save(event)}>
-        <label>Direct attempts
-          <input type="number" min="0" max="8" required value={directAttempts}
-            onChange={(event) => setDirectAttempts(event.currentTarget.value)} />
-        </label>
-        <label>Flood attempts
-          <input type="number" min="0" max="8" required value={floodAttempts}
-            onChange={(event) => setFloodAttempts(event.currentTarget.value)} />
-        </label>
-        <button type="submit">Save settings</button>
-      </form>
-      <p>Choose 1–8 attempts in total. The radio may flood earlier if no route is saved.</p>
-      {message && <p role="status">{message}</p>}
+      <div className="chat-tool-panel">
+        <form onSubmit={(event) => void save(event)}>
+          <label>Direct attempts
+            <input type="number" min="0" max="8" required value={directAttempts}
+              onChange={(event) => setDirectAttempts(event.currentTarget.value)} />
+          </label>
+          <label>Flood attempts
+            <input type="number" min="0" max="8" required value={floodAttempts}
+              onChange={(event) => setFloodAttempts(event.currentTarget.value)} />
+          </label>
+          <button type="submit">Save settings</button>
+        </form>
+        <p>1–8 attempts total. Flood fallback clears the saved route.</p>
+        {message && <p role="status">{message}</p>}
+      </div>
     </details>
   )
 }

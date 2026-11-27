@@ -52,7 +52,8 @@ test('active discovery sends only chosen requests and stops listening on navigat
           emit(contact)
           if (routedPresent) emit(routed)
           emit([4, 0, 0, 0, 0])
-        } else if (command[0] === 30) {
+        } else if (command[0] === 10) emit([10])
+        else if (command[0] === 30) {
           if (command[1] === 0xbc) emit(contact)
           else if (command[1] === 0xee && routedPresent) emit(routed)
           else if (command[1] === 0xcd && hasTemporary) emit(temporary)
@@ -82,7 +83,8 @@ test('active discovery sends only chosen requests and stops listening on navigat
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const send = page.getByRole('button', { name: 'Send nearby discovery' })
   await send.waitFor({ state: 'visible' })
-  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4])
+  await page.waitForFunction(() => window.commands.some(([code]) => code === 10))
+  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4, 10])
   await page.getByLabel('Saved repeater').selectOption('ee'.repeat(32))
   assert.equal(await page.getByLabel('Reply path', { exact: true }).inputValue(), '3344 1122')
   await page.evaluate(() => window.changeRoutedPath())
@@ -165,7 +167,7 @@ test('active discovery sends only chosen requests and stops listening on navigat
   await page.getByText('Stopped waiting. A transmitted request cannot be recalled.').waitFor()
   assert(await send.isEnabled())
   assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code),
-    [22, 1, 4, 4, 30, 57, 55, 30, 57, 4, 30, 57, 30, 57, 30, 57, 55, 30, 57])
+    [22, 1, 4, 10, 4, 30, 57, 55, 30, 57, 4, 30, 57, 30, 57, 30, 57, 55, 30, 57])
 })
 
 test('Bluetooth discovery is opt-in and explains incomplete replies', async (t) => {
@@ -193,6 +195,7 @@ test('Bluetooth discovery is opt-in and explains incomplete replies', async (t) 
         if (bytes[0] === 22) emit([13, 14, 40, 0, ...new Uint8Array(78)])
         else if (bytes[0] === 1) emit([5, 1, 0, 0, ...new Uint8Array(32).fill(0xab), ...new Uint8Array(22), ...new TextEncoder().encode('Fixture')])
         else if (bytes[0] === 4) { emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]) }
+        else if (bytes[0] === 10) emit([10])
         else if (bytes[0] === 55) {
           emit([0x8e, 0xf8, 0x9c, 0, 0x92, 0xec, ...bytes.slice(3, 7), ...new Uint8Array(32).fill(0xcd)])
           emit([0])
@@ -222,7 +225,8 @@ test('Bluetooth discovery is opt-in and explains incomplete replies', async (t) 
   await send.waitFor({ state: 'visible' })
   await page.getByText(/Bluetooth may split or drop replies/).waitFor()
   assert(await send.isEnabled())
-  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4])
+  await page.waitForFunction(() => window.commands.some(([code]) => code === 10))
+  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4, 10])
   await send.click()
   await page.getByText(/Listening for up to 20 seconds/).waitFor()
   await page.getByRole('button', { name: /Node cdcdcdcd/ }).click()
@@ -231,5 +235,5 @@ test('Bluetooth discovery is opt-in and explains incomplete replies', async (t) 
   page.once('dialog', (dialog) => dialog.accept())
   await page.getByRole('button', { name: 'Request regions' }).click()
   await page.getByText('local', { exact: true }).waitFor()
-  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4, 55, 30, 57])
+  assert.deepEqual((await page.evaluate(() => window.commands)).map(([code]) => code), [22, 1, 4, 10, 55, 30, 57])
 })

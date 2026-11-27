@@ -295,7 +295,7 @@ test('channel message context actions work offline alongside visible keyboard co
       await storage.update(radioKeyFromPublicKey(radio), {
         channels: [{ index: 0, name: 'Public' }],
         messages: ['one', 'two'].map((id) => ({
-          id, conversationId: 'channel:0', sender: '', timestamp: 1703123456000, text: `Alice: ${id}`,
+          id, conversationId: 'channel:0', sender: '', timestamp: 1703123456000, text: `Alice: ${id}`, rawHex: '16010203',
           receipt: { kind: 'channel-text', receiptId: id, channelIndex: 0, textType: 0,
             senderTimestamp: 1703123456, text: `Alice: ${id}`, pathLength: 255, snrDb: null },
         })),
@@ -321,15 +321,18 @@ test('channel message context actions work offline alongside visible keyboard co
     return { selected, control }
   })
   assert.deepEqual(nativeMenus, { selected: true, control: true })
-  const visibleReply = first.getByRole('button', { name: 'Reply to Alice' })
-  await visibleReply.focus()
+  const trigger = first.getByRole('button', { name: 'Message actions' })
+  const menu = page.getByRole('group', { name: 'Channel message context actions' })
+  assert.equal(await first.getByRole('button', { name: 'Reply to Alice' }).count(), 0)
+  await trigger.focus()
+  await page.keyboard.press('Enter')
+  await menu.getByRole('button', { name: 'Reply to Alice' }).focus()
   await page.keyboard.press('Enter')
   const draft = page.getByLabel('Message', { exact: true })
   assert.match(await draft.inputValue(), /@\[Alice\]/)
   await draft.clear()
 
   await first.getByText('one', { exact: false }).click({ button: 'right' })
-  const menu = page.getByRole('group', { name: 'Channel message context actions' })
   await menu.waitFor()
   assert.equal(await menu.getByRole('button', { name: /Copy message: Alice: one/ }).count(), 1)
   assert.equal(await menu.getByRole('button', { name: 'Reply to Alice' }).count(), 1)
@@ -340,6 +343,14 @@ test('channel message context actions work offline alongside visible keyboard co
   await page.keyboard.press('Escape')
   assert.equal(await menu.count(), 0)
   assert.equal(await first.evaluate((element) => element === document.activeElement), true)
+
+  await first.getByText('one', { exact: true }).click({ button: 'right' })
+  assert.equal(await page.getByText('16010203').count(), 0)
+  await menu.getByRole('button', { name: 'Message details' }).click()
+  const details = page.getByRole('dialog', { name: 'Message details' })
+  await details.getByText('Raw receipt', { exact: true }).click()
+  await details.getByText('16010203', { exact: true }).waitFor()
+  await details.getByRole('button', { name: 'Close', exact: true }).click()
 
   await second.getByText('two', { exact: false }).click({ button: 'right' })
   await menu.getByRole('button', { name: 'Reply to Alice' }).click()
@@ -446,9 +457,12 @@ test('inline images preserve links, failures and message actions without rerende
         value: { writeText: async (text) => { window.copiedMessage = text } } })
     })
     const original = `Alice: @[Friend] photo ${wide} missing ${broken} ordinary ${article}`
-    await row.getByRole('button', { name: /^Copy message:/ }).click()
+    const menu = page.getByRole('group', { name: 'Channel message context actions' })
+    await row.getByRole('button', { name: 'Message actions' }).click()
+    await menu.getByRole('button', { name: /^Copy message:/ }).click()
     assert.equal(await page.evaluate(() => window.copiedMessage), original)
-    await row.getByRole('button', { name: 'Reply to Alice' }).focus()
+    await row.getByRole('button', { name: 'Message actions' }).click()
+    await menu.getByRole('button', { name: 'Reply to Alice' }).focus()
     await page.keyboard.press('Enter')
     assert.match(await page.getByLabel('Message', { exact: true }).inputValue(), /^@\[Alice\]\n>/)
     await row.getByRole('img').scrollIntoViewIfNeeded()
@@ -459,7 +473,6 @@ test('inline images preserve links, failures and message actions without rerende
     const imageContextMenu = await row.getByRole('img').evaluate((image) =>
       image.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 })))
     assert.equal(imageContextMenu, false)
-    const menu = page.getByRole('group', { name: 'Channel message context actions' })
     await menu.waitFor()
     await menu.getByRole('button', { name: /^Copy message:/ }).click()
     assert.equal(await page.evaluate(() => window.copiedMessage), original)
@@ -558,7 +571,7 @@ test('extensionless images load on request without probing ordinary links', asyn
   await page.getByLabel('Message', { exact: true }).fill('Rerender again')
   assert.equal(requests.get(gif), 1)
   assert.equal(requests.get(article), 1)
-  assert.equal(await channel.getByRole('button', { name: 'Reply to Alice' }).count(), 1)
+  assert.equal(await channel.getByRole('button', { name: 'Message actions' }).count(), 1)
 })
 
 test('a failed cached chat load offers retry instead of an indefinite loading state', async (t) => {
