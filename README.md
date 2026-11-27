@@ -43,21 +43,30 @@ loopback interface. Run `docker compose down` to stop it.
 
 ### Deploy to Azure Static Web Apps
 
-1. In Azure, use an existing Static Web App or create one with **Source**
-   set to **Other**. Use the **Deployment token** authorization policy.
-   [Azure setup guide](https://learn.microsoft.com/en-us/azure/static-web-apps/external-providers)
-2. On the app's **Overview** page, select **Manage deployment token**. In the
-   GitHub repository's **Settings → Secrets and variables → Actions**, save it
-   as the repository secret `AZURE_STATIC_WEB_APPS_API_TOKEN`.
-   [Azure token guide](https://learn.microsoft.com/en-us/azure/static-web-apps/deployment-token-management)
-3. In GitHub **Actions**, run **Deploy to Azure Static Web Apps** from `main`.
-   Future pushes to `main` deploy automatically. Open the site's URL from
-   the Azure app's **Overview** page once the workflow succeeds.
+In GitHub **Actions**, run **Deploy to Azure Static Web Apps** from `main`.
+Future pushes to `main` deploy automatically, and pull requests from this
+repository get preview deployments. The workflow uses the deployment secret
+created when Azure linked the app to this repository. For a new repository,
+create or choose a Static Web App that uses the **Deployment token** policy.
+On its **Overview** page, choose **Manage deployment token**, then store it
+as `AZURE_STATIC_WEB_APPS_API_TOKEN` in the new repository's Actions secrets.
+[Azure token guide](https://learn.microsoft.com/en-us/azure/static-web-apps/deployment-token-management)
 
-The workflow builds with Node.js 24 and uploads the Vite `dist` directory.
-The HTTPS site supports USB and Bluetooth in compatible browsers. Use the
-local app or Docker setup above for Wi-Fi and Ethernet companion connections
-through the local bridge.
+You can also deploy directly from your computer. Set the
+`SWA_CLI_DEPLOYMENT_TOKEN` environment variable in your shell using the token
+from the Azure app's **Overview** page. With Node.js 24 installed, run the
+following from the repository root.
+
+```sh
+npm ci
+npm run build
+npx --yes @azure/static-web-apps-cli@2.1.0 deploy ./dist --env production
+```
+
+Open the site's URL from the Azure app's **Overview** page after deployment.
+The HTTPS site supports USB and Bluetooth in compatible browsers. Use Docker
+or the local app for Wi-Fi and Ethernet companion connections.
+[Azure CLI deployment guide](https://learn.microsoft.com/en-us/azure/static-web-apps/static-web-apps-cli-deploy)
 
 ### Run from source
 
