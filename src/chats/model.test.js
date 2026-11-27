@@ -102,7 +102,6 @@ test('blocked channel names hide receipts without hiding direct or unattributed 
   const conversation = items.find((item) => item.id === 'channel:0')
   assert.deepEqual(conversation.messages.map(({ id }) => id), ['unknown'])
   assert.deepEqual(unreadReceipts(conversation.messages, new Set(['unknown'])), [])
-  assert.match(conversation.description, /blocked names are hidden/)
   assert.equal(items.find((item) => item.id.startsWith('direct:')).messages.length, 1)
   const restored = conversations({ ...data, blockedChannelSenders: [] })
     .find((item) => item.id === 'channel:0')

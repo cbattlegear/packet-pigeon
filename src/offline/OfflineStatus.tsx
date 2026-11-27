@@ -11,7 +11,7 @@ const offlineMessage = {
 
 type OfflineState = keyof typeof offlineMessage
 
-export function OfflineStatus() {
+export function OfflineStatus({ quiet = false }: { quiet?: boolean }) {
   const supported = window.isSecureContext && 'serviceWorker' in navigator
   const [state, setState] = useState<OfflineState>('preparing')
 
@@ -65,6 +65,7 @@ export function OfflineStatus() {
   }, [supported])
 
   if (!import.meta.env.PROD) return null
+  if (quiet && (!supported || state === 'ready' || state === 'preparing')) return null
 
   return (
     <p className="connection-status" role="status">{offlineMessage[supported ? state : 'unsupported']}</p>
