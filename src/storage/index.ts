@@ -200,6 +200,56 @@ export class RadioStorageError extends Error {
 const databaseName = 'packet-pigeon'
 const storeName = 'radios'
 
+type ReactionProjection = {
+  fingerprint: string
+  annotations: Map<string, { reaction?: MessageReaction; reactions?: ReactionSummary[] }>
+  hashes: Map<string, Promise<string>>
+}
+const reactionCaches = new WeakMap<IDBFactory, Map<string, ReactionProjection>>()
+
+// Fingerprint only inputs to the projection; draft and read-marker writes cannot change it.
+// Comparing the saved data rather than a tab-local revision also detects writes from other tabs.
+function reactionFingerprint(data: RadioData) {
+  return JSON.stringify([
+    data.contacts.map(({ publicKey, name }) => [publicKey, name]), data.blockedChannelSenders,
+    data.messages.map(({ id, conversationId, text, timestamp, receivedAt, receipt, outgoing, channelOutgoing, reactionTimestamps }) =>
+      [id, conversationId, text, timestamp, receivedAt, receipt, outgoing && [outgoing.recipient, outgoing.status, outgoing.wireTimestamp],
+        channelOutgoing && [channelOutgoing.senderName, channelOutgoing.status, channelOutgoing.wireTimestamp], reactionTimestamps]),
+  ])
+}
+
+async function projectRadioData(data: RadioData, key: RadioKey, factory: IDBFactory): Promise<RadioData> {
+  let cache = reactionCaches.get(factory)
+  if (!cache) {
+    cache = new Map()
+    reactionCaches.set(factory, cache)
+  }
+  const fingerprint = reactionFingerprint(data)
+  const previous = cache.get(key)
+  if (previous?.fingerprint === fingerprint) {
+    cache.delete(key)
+    cache.set(key, previous)
+    if (!previous.annotations.size) return data
+    return { ...data, messages: data.messages.map((message) => {
+      const annotation = previous.annotations.get(message.id)
+      return annotation ? { ...message, ...annotation } : message
+    }) }
+  }
+  const hashes = new Map<string, Promise<string>>()
+  const projected = await resolveReactions(data, key, previous?.hashes, hashes)
+  // A transient Web Crypto failure must be retried on the next read.
+  if (!projected.reactionError) {
+    const annotations = new Map<string, { reaction?: MessageReaction; reactions?: ReactionSummary[] }>()
+    for (const { id, reaction, reactions } of projected.messages) {
+      if (reaction || reactions) annotations.set(id, { reaction, reactions })
+    }
+    cache.delete(key)
+    cache.set(key, { fingerprint, annotations, hashes })
+    if (cache.size > 4) cache.delete(cache.keys().next().value!)
+  }
+  return projected
+}
+
 /** Call only with the full public key verified by the radio session. */
 export function radioKeyFromPublicKey(publicKey: string): RadioKey {
   if (!/^[\da-f]{64}$/i.test(publicKey) || publicKey.length !== 64) {
@@ -795,7 +845,7 @@ export async function openRadioStorage(factory?: IDBFactory) {
     read: (key: RadioKey) => runTransaction<RadioData | null>(db, 'readonly', (store, finish) => {
       const request = store.get(radioKeyFromPublicKey(key))
       request.onsuccess = () => finish(request.result ?? null)
-    }).then((data) => data ? resolveReactions(data, key) : null),
+    }).then((data) => data ? projectRadioData(data, key, factory ?? globalThis.indexedDB) : null),
     purge: (key: RadioKey) => runTransaction<void>(db, 'readwrite', (store, finish) => {
       const request = store.delete(radioKeyFromPublicKey(key))
       request.onsuccess = () => finish(undefined)
@@ -859,7 +909,7 @@ export async function openRadioStorage(factory?: IDBFactory) {
           }
         }
       },
-    ).then(async (result) => ({ ...result, data: await resolveReactions(result.data, key) })),
+    ).then(async (result) => ({ ...result, data: await projectRadioData(result.data, key, factory ?? globalThis.indexedDB) })),
     changeChannelMessage: (key: RadioKey, change: ChannelMessageChange) => runTransaction<DirectChangeResult>(
       db,
       'readwrite',
@@ -879,6 +929,6 @@ export async function openRadioStorage(factory?: IDBFactory) {
           }
         }
       },
-    ).then(async (result) => ({ ...result, data: await resolveReactions(result.data, key) })),
+    ).then(async (result) => ({ ...result, data: await projectRadioData(result.data, key, factory ?? globalThis.indexedDB) })),
   }
 }

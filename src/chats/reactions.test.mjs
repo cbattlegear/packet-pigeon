@@ -148,6 +148,105 @@ test('a browser hashing failure is explicit without rejecting an already saved r
     assert.equal((await storage.read(key)).drafts[0].text, 'Normal draft')
   } finally {
     Object.defineProperty(globalThis, 'crypto', descriptor)
+  }
+  assert.equal((await storage.read(key)).messages[1].reactions[0].count, 1)
+  storage.close()
+})
+
+test('blocking uses the exact channel envelope name, including surrounding whitespace', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  try {
+    const reaction = await buildReaction('👍', 'ok', stamp, 'Alice')
+    const plainReaction = await buildReaction('❤️', 'ok', stamp, 'Alice')
+    await storage.update(key, { messages: [
+      receipt('target', 'Alice: ok', { channel: true }),
+      receipt('padded', ` Bob : ${reaction}`, { channel: true }),
+      receipt('plain', `Bob: ${plainReaction}`, { channel: true }),
+    ], blockedChannelSender: { name: ' Bob ', blocked: true } })
+    let data = await storage.read(key)
+    assert.deepEqual(data.messages.find(({ id }) => id === 'target').reactions, [{ emoji: '❤️', count: 1, senders: ['Bob'] }])
+    await storage.update(key, { blockedChannelSender: { name: 'Bob', blocked: true } })
+    data = await storage.read(key)
+    assert.equal(data.messages.find(({ id }) => id === 'target').reactions, undefined)
+    await storage.update(key, { blockedChannelSender: { name: ' Bob ', blocked: false } })
+    data = await storage.read(key)
+    assert.deepEqual(data.messages.find(({ id }) => id === 'target').reactions, [{ emoji: '👍', count: 1, senders: ['Bob'] }])
+  } finally { storage.close() }
+})
+
+test('Open v3 matching uses a hash index rather than comparing every reaction with every candidate', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  const charCodeAt = String.prototype.charCodeAt
+  let codeUnits = 0
+  try {
+    const targets = Array.from({ length: 3000 }, (_, index) => receipt(`target-${index}`, `open-history-${index}`))
+    const reactions = Array.from({ length: 500 }, (_, index) =>
+      receipt(`reaction-${index}`, `r:${openReactionHash(`open-history-${index}`, stamp, null)}:00`))
+    await storage.update(key, { contacts: [contact], messages: [...targets, ...reactions] })
+    String.prototype.charCodeAt = function (...args) { codeUnits++; return charCodeAt.apply(this, args) }
+    const data = await storage.read(key)
+    assert.ok(data.messages.slice(3000).every(({ reaction }) => reaction && reaction.state !== 'unmatched'))
+    assert.ok(codeUnits < 150000, `Open hash work should scale with candidates, not candidates times reactions: ${codeUnits}`)
+  } finally {
+    String.prototype.charCodeAt = charCodeAt
+    storage.close()
+  }
+})
+
+test('indexed Open v1 windows ignore outside timestamps and count a target only once', async () => {
+  const storage = await openRadioStorage(new IDBFactory())
+  try {
+    const anchor = stamp + 10000
+    const same = Array.from({ length: 60 }, (_, index) => receipt(`older-${index}`, 'ok', { timestamp: stamp + index }))
+    const target = { ...receipt('target', 'ok', { timestamp: anchor }), reactionTimestamps: [anchor - 1, anchor + 1] }
+    const reaction = receipt('reaction', `r:${anchor * 1000}_0_${dartStringHash('ok')}:👍`)
+    await storage.update(key, { contacts: [contact], messages: [...same, target, reaction] })
+    let data = await storage.read(key)
+    assert.equal(data.messages.find(({ id }) => id === 'reaction').reaction.targetId, 'target')
+    assert.equal(data.messages.find(({ id }) => id === 'target').reactions[0].count, 1)
+    await storage.update(key, { messages: [receipt('second', 'ok', { timestamp: anchor - 300 })] })
+    data = await storage.read(key)
+    assert.equal(data.messages.find(({ id }) => id === 'reaction').reaction.state, 'ambiguous')
+    assert.equal(data.messages.find(({ id }) => id === 'target').reactions, undefined)
+  } finally { storage.close() }
+})
+
+test('large histories reuse projections on drafts and keep target hashes across receipt updates', async () => {
+  const factory = new IDBFactory()
+  const storage = await openRadioStorage(factory)
+  const otherConnection = await openRadioStorage(factory)
+  const subtle = crypto.subtle
+  const digest = subtle.digest
+  const segment = Intl.Segmenter.prototype.segment
+  let hashes = 0
+  let segments = 0
+  try {
+    await storage.update(key, { contacts: [contact], messages: [
+      ...Array.from({ length: 2101 }, (_, index) => receipt(`target-${index}`, `history-${index}`, { timestamp: stamp + index })),
+      receipt('first-reaction', await buildReaction('👍', 'history-0', stamp, null)),
+    ] })
+    Object.defineProperty(subtle, 'digest', { configurable: true, value: (...args) => { hashes++; return digest.apply(subtle, args) } })
+    Intl.Segmenter.prototype.segment = function (...args) { segments++; return segment.apply(this, args) }
+    let data = await storage.read(key)
+    assert.equal(data.messages.find(({ id }) => id === 'target-0').reactions[0].count, 1)
+    assert.ok(hashes >= 2100 && hashes <= 2101)
+    hashes = 0
+    segments = 0
+    for (let index = 0; index < 3; index++) {
+      await storage.update(key, { draft: { conversationId: `direct:${peer}`, text: `draft-${index}` } })
+      data = await otherConnection.read(key)
+    }
+    assert.equal(hashes, 0, 'draft writes must not rehash history')
+    assert.equal(segments, 0, 'draft writes must not reparse history')
+    assert.equal(data.drafts[0].text, 'draft-2')
+    await otherConnection.update(key, { messages: [receipt('new-target', 'fresh-history', { timestamp: stamp + 3000 })] })
+    data = await storage.read(key)
+    assert.equal(hashes, 1, 'a new receipt should only hash the new target')
+    assert.equal(data.messages.find(({ id }) => id === 'target-0').reactions[0].count, 1)
+  } finally {
+    Object.defineProperty(subtle, 'digest', { configurable: true, value: digest })
+    Intl.Segmenter.prototype.segment = segment
+    otherConnection.close()
     storage.close()
   }
 })

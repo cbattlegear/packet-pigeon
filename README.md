@@ -115,6 +115,10 @@ receipts and ambiguous DM key prefixes are not resolved by guessing. Sending
 also refuses an ambiguous target. Local deletion, retention cleanup or browser
 storage eviction can remove targets or reaction receipts and therefore counts.
 Malformed/unsupported formats stay visible as ordinary text.
+An in-memory per-radio projection cache avoids rematching unchanged histories
+after draft/read-marker edits, and indexed candidate matching avoids scanning
+every message for each reaction. It detects relevant writes from other tabs;
+the durable receipts, not the cache, remain the source of truth.
 
 DM reactions use the existing acknowledgement, cancel and retry handling.
 Channel reactions have only radio acceptance, not delivery confirmation; an

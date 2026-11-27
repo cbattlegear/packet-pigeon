@@ -1,4 +1,5 @@
 import type { RadioData, StoredMessage } from '../storage/index.ts'
+import { isBlockedChannelMessage } from '../channels/senders.ts'
 import { dartStringHash, messageReactionHash, openReactionHash, parseReaction, reactionChannelContent } from '../radio/reactions.ts'
 import type { ParsedReaction } from '../radio/reactions.ts'
 
@@ -27,16 +28,24 @@ export function canReactTo(message: StoredMessage) {
 }
 
 /**
- * Saved wire receipts are authoritative. Rebuild this projection on each cache read, including all pending
- * formats, rather than dropping an unmatched reaction or choosing an arbitrary hash collision.
+ * Saved wire receipts are authoritative. Index candidate identifiers without dropping pending formats
+ * or choosing an arbitrary hash collision.
  */
-export async function resolveReactions(data: RadioData, radioKey: string): Promise<RadioData> {
+export async function resolveReactions(
+  data: RadioData, radioKey: string, previousHashes = new Map<string, Promise<string>>(),
+  currentHashes = new Map<string, Promise<string>>(),
+): Promise<RadioData> {
   const contacts = data.contacts.map(({ publicKey }) => publicKey.toLowerCase())
+  const prefixes = new Map<string, string[]>()
+  for (const contact of contacts) {
+    const prefix = contact.slice(0, 12)
+    prefixes.set(prefix, [...(prefixes.get(prefix) ?? []), contact])
+  }
   const conversation = (message: StoredMessage) => {
     const id = message.outgoing ? `direct:${message.outgoing.recipient}` : message.conversationId
     if (!id.startsWith('direct:')) return id
     const key = id.slice(7).toLowerCase()
-    const matches = contacts.filter((full) => full.startsWith(key.slice(0, 12)))
+    const matches = prefixes.get(key.slice(0, 12)) ?? []
     return `direct:${key.length === 12 && matches.length === 1 ? matches[0] : key}`
   }
   const entries = data.messages.map((message) => {
@@ -44,7 +53,7 @@ export async function resolveReactions(data: RadioData, radioKey: string): Promi
     const id = conversation(message)
     const prefix = id.startsWith('direct:') ? id.slice(7) : null
     return { message, target, conversation: id,
-      ambiguousContact: prefix?.length === 12 && contacts.filter((key) => key.startsWith(prefix)).length > 1,
+      ambiguousContact: prefix?.length === 12 && (prefixes.get(prefix)?.length ?? 0) > 1,
       parsed: target ? parseReaction(target.text, target.sender !== null) : null }
   })
   const reactionEntries = entries.filter(({ parsed }) => parsed !== null)
@@ -57,41 +66,100 @@ export async function resolveReactions(data: RadioData, radioKey: string): Promi
     return [message.id, peer && (peer.text !== target!.text || peer.sender !== target!.sender)
       ? [target!, { ...peer, timestamp: target!.timestamp }] : [target!]]
   }))
-  const nativeHashes = new Map<string, { hash: string; sender: string | null }[]>()
+  type Candidate = (typeof candidates)[number]
+  type TimedCandidate = { candidate: Candidate; timestamp: number }
+  const native = new Map<string, Candidate[]>()
+  const openV1 = new Map<string, TimedCandidate[]>()
+  const openV3 = new Map<string, TimedCandidate[]>()
+  const hasFormat = (format: ParsedReaction['format']) => new Set(
+    reactionEntries.filter(({ parsed }) => parsed?.format === format).map(({ conversation }) => conversation),
+  )
+  const nativeConversations = hasFormat('meshcore')
+  const v1Conversations = hasFormat('open-v1')
+  const v3Conversations = hasFormat('open-v3')
+  const add = <T,>(index: Map<string, T[]>, key: string, value: T) => {
+    const values = index.get(key)
+    if (values) values.push(value)
+    else index.set(key, [value])
+  }
+  const indexKey = (...parts: (string | number | null)[]) => JSON.stringify(parts)
   let reactionError: string | undefined
-  if (reactionEntries.some(({ parsed }) => parsed?.format === 'meshcore')) {
-    try {
-      await Promise.all(candidates.map(async ({ message, target }) => {
-        const stamps = [...new Set([target!.timestamp, ...(message.reactionTimestamps ?? [])])]
-        nativeHashes.set(message.id, (await Promise.all(variants.get(message.id)!.map((variant) =>
-          Promise.all(stamps.map(async (stamp) => ({ hash: await messageReactionHash(variant.text, stamp), sender: variant.sender }))),
-        ))).flat())
-      }))
-    } catch (error) {
-      reactionError = `Reaction matching failed: ${error instanceof Error ? error.message : 'Could not hash the target messages.'} Wire receipts are still saved.`
+  await Promise.all(candidates.map(async (candidate) => {
+    const { message, target, conversation } = candidate
+    if (candidate.ambiguousContact) return
+    const stamps = [...new Set([target!.timestamp, ...(message.reactionTimestamps ?? [])])]
+    for (const variant of variants.get(message.id)!) {
+      const sender = variant.sender?.normalize('NFC') ?? null
+      if (nativeConversations.has(conversation)) {
+        for (const stamp of stamps) {
+          const hashKey = JSON.stringify([variant.text, stamp])
+          const previous = previousHashes.get(hashKey)
+          if (previous && !currentHashes.has(hashKey)) currentHashes.set(hashKey, previous)
+          try {
+            const hash = await messageReactionHash(variant.text, stamp, currentHashes)
+            add(native, indexKey(conversation, hash, sender), candidate)
+          } catch (error) {
+            reactionError = `Reaction matching failed: ${error instanceof Error ? error.message : 'Could not hash the target messages.'} Wire receipts are still saved.`
+          }
+        }
+      }
+      if (v1Conversations.has(conversation)) {
+        const key = indexKey(conversation, dartStringHash(variant.text),
+          variant.sender === null ? null : dartStringHash(variant.sender))
+        for (const stamp of stamps) add(openV1, key, { candidate, timestamp: stamp })
+      }
+      if (v3Conversations.has(conversation)) {
+        for (const stamp of stamps) {
+          const key = indexKey(conversation, openReactionHash(variant.text, stamp, variant.sender))
+          add(openV3, key, { candidate, timestamp: stamp })
+        }
+      }
+    }
+  }))
+  for (const index of [openV1, openV3]) {
+    for (const values of index.values()) values.sort((a, b) => a.timestamp - b.timestamp)
+  }
+  const distinct = (candidates: Iterable<Candidate>) => {
+    const matches = new Map<string, Candidate>()
+    for (const candidate of candidates) {
+      matches.set(candidate.message.id, candidate)
+      if (matches.size === 2) break
+    }
+    return [...matches.values()]
+  }
+  function* inWindow(candidates: TimedCandidate[], anchor: number) {
+    let low = 0
+    let high = candidates.length
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2)
+      if (candidates[middle].timestamp < anchor - 300) low = middle + 1
+      else high = middle
+    }
+    for (let index = low; index < candidates.length && candidates[index].timestamp <= anchor + 300; index++) {
+      yield candidates[index].candidate
     }
   }
   const resolved = new Map<string, MessageReaction>()
   const summaries = new Map<string, Map<string, { emoji: string; senders: Map<string, string>; earliest: number }>>()
+  const blocked = new Set(data.blockedChannelSenders ?? [])
   for (const entry of reactionEntries) {
     const parsed = entry.parsed!
-    const matches = candidates.filter((candidate) => {
-      if (candidate.conversation !== entry.conversation || candidate.ambiguousContact || entry.ambiguousContact) return false
-      const target = candidate.target!
-      if (parsed.format === 'meshcore') return (nativeHashes.get(candidate.message.id) ?? []).some(({ hash, sender }) =>
-        hash === parsed.hash && (parsed.targetSender === null || sender?.normalize('NFC') === parsed.targetSender.normalize('NFC')))
-      const stamps = [...new Set([target.timestamp, ...(candidate.message.reactionTimestamps ?? [])])]
-      if (parsed.format === 'open-v1') return stamps.some((stamp) => Math.abs(stamp - parsed.timestamp) <= 300)
-        && variants.get(candidate.message.id)!.some((variant) => dartStringHash(variant.text) === parsed.textHash
-          && (variant.sender === null || dartStringHash(variant.sender) === parsed.senderHash))
-      const anchor = Math.floor((entry.message.receivedAt ?? entry.message.timestamp ?? 0) / 1000)
-      return stamps.some((stamp) => Math.abs(stamp - anchor) <= 300
-        && variants.get(candidate.message.id)!.some((variant) => openReactionHash(variant.text, stamp, variant.sender) === parsed.hash))
-    })
+    let matches: Candidate[]
+    if (parsed.format === 'meshcore') {
+      matches = distinct(native.get(indexKey(entry.conversation, parsed.hash, parsed.targetSender?.normalize('NFC') ?? null)) ?? [])
+    } else {
+      const anchor = parsed.format === 'open-v1' ? parsed.timestamp
+        : Math.floor((entry.message.receivedAt ?? entry.message.timestamp ?? 0) / 1000)
+      const indexed = parsed.format === 'open-v1'
+        ? openV1.get(indexKey(entry.conversation, parsed.textHash, entry.target!.sender === null ? null : parsed.senderHash))
+        : openV3.get(indexKey(entry.conversation, parsed.hash))
+      matches = distinct(inWindow(indexed ?? [], anchor))
+    }
+    if (entry.ambiguousContact) matches = []
     const state = parsed.format === 'meshcore' && reactionError ? 'unavailable'
       : entry.ambiguousContact ? 'ambiguous' : matches.length === 1 ? 'matched' : matches.length > 1 ? 'ambiguous' : 'unmatched'
     resolved.set(entry.message.id, { parsed, state, ...(state === 'matched' ? { targetId: matches[0].message.id } : {}) })
-    if (state !== 'matched' || entry.target!.sender !== null && data.blockedChannelSenders?.includes(entry.target!.sender)
+    if (state !== 'matched' || isBlockedChannelMessage(entry.message, blocked)
       || entry.message.outgoing && !['sent', 'delivered'].includes(entry.message.outgoing.status)
       || entry.message.channelOutgoing && entry.message.channelOutgoing.status !== 'accepted') continue
     const own = Boolean(entry.message.outgoing || entry.message.channelOutgoing)

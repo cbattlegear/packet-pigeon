@@ -92,13 +92,13 @@ export function openReactionHash(text: string, timestamp: number, sender: string
 
 const hashes = new Map<string, Promise<string>>()
 
-export function messageReactionHash(text: string, timestamp: number): Promise<string> {
+export function messageReactionHash(text: string, timestamp: number, cache = hashes): Promise<string> {
   if (!Number.isInteger(timestamp) || timestamp < 0 || timestamp > 0xffffffff) {
     throw new Error('The reaction target has no valid wire timestamp.')
   }
   if (!globalThis.crypto?.subtle) throw new Error('Reaction matching needs Web Crypto in a secure browser context.')
   const key = JSON.stringify([text, timestamp])
-  const cached = hashes.get(key)
+  const cached = cache.get(key)
   if (cached) return cached
   const bytes = new TextEncoder().encode(text)
   const input = new Uint8Array(bytes.length + 4)
@@ -109,9 +109,9 @@ export function messageReactionHash(text: string, timestamp: number): Promise<st
     let bits = 0n
     for (const byte of bytes) bits = (bits << 8n) | BigInt(byte)
     return Array.from({ length: 8 }, (_, index) => alphabet[Number((bits >> BigInt(35 - index * 5)) & 31n)]).join('')
-  }).catch((error: unknown) => { hashes.delete(key); throw error })
-  if (hashes.size >= 2000) hashes.delete(hashes.keys().next().value!)
-  hashes.set(key, result)
+  }).catch((error: unknown) => { cache.delete(key); throw error })
+  if (cache === hashes && cache.size >= 2000) cache.delete(cache.keys().next().value!)
+  cache.set(key, result)
   return result
 }
 

@@ -153,6 +153,40 @@ test('duplicate target wire identities stop a reaction before radio transmission
   assert.equal(source.channelSends.length, 0)
 })
 
+test('draft saves reuse the reaction projection while preserving external message updates', async () => {
+  const { direct, openStorage } = await fixture()
+  const storage = await openStorage()
+  const stamp = 1704067200
+  const makeReceipt = (id, text) => ({
+    id, conversationId: `direct:${recipient}`, sender: recipient, text, timestamp: stamp * 1000,
+    receipt: { kind: 'direct-text', receiptId: id, senderKeyPrefix: recipient.slice(0, 12), signatureHex: null,
+      textType: 0, senderTimestamp: stamp, text, pathLength: 255, snrDb: null },
+  })
+  try {
+    await storage.update(key, {
+      contacts: [{ publicKey: recipient, name: 'Friend', details: { type: 1 } }],
+      messages: [makeReceipt('target', 'ok'), makeReceipt('reaction', await buildReaction('👍', 'ok', stamp, null))],
+    })
+    await direct.load(key)
+    const segment = Intl.Segmenter.prototype.segment
+    let segments = 0
+    try {
+      Intl.Segmenter.prototype.segment = function (...args) { segments++; return segment.apply(this, args) }
+      await Promise.all(['a', 'ab', 'abc'].map((text) => direct.saveDraft(key, `direct:${recipient}`, text)))
+      assert.equal(segments, 0, 'draft keystrokes must not reparse reaction history')
+      assert.equal(direct.getSnapshot().pending, 0)
+      assert.equal(direct.draft(key, `direct:${recipient}`), 'abc')
+      await storage.update(key, { messages: [makeReceipt('new', 'new message')] })
+      await direct.saveDraft(key, `direct:${recipient}`, 'abcd')
+      assert.ok(segments > 0, 'an external receipt must invalidate the projection')
+      const data = direct.getSnapshot().data
+      assert.equal(data.messages.find(({ id }) => id === 'new').text, 'new message')
+      assert.equal(data.messages.find(({ id }) => id === 'target').reactions[0].count, 1)
+      assert.equal(direct.draft(key, `direct:${recipient}`), 'abcd')
+    } finally { Intl.Segmenter.prototype.segment = segment }
+  } finally { storage.close() }
+})
+
 test('reports cache read failures separately, retains prior data, and retries without losing other errors', async () => {
   let fail = false
   const { direct, source } = await fixture(async (factory) => {
