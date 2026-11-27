@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -67,8 +68,7 @@ test('uses the local bridge for a TCP companion session, durable message sync an
             finishEmpty = () => socket.write(frame([10]))
             queueEvents.dispatchEvent(new Event('empty'))
           } else socket.write(frame([10]))
-        }
-        else assert.fail(`Unexpected companion command ${code}`)
+        } else assert.fail(`Unexpected companion command ${code}`)
       }
     })
   })
@@ -91,15 +91,18 @@ test('uses the local bridge for a TCP companion session, durable message sync an
   const unavailable = page.waitForResponse((response) => response.url() === probe && response.status() === 404)
   await page.goto(`${bridge.url}/#chats`)
   await unavailable
+  await openWorkspaceMenu(page, 'Radio connection')
   const connect = page.getByRole('button', { name: 'Connect local network' })
   assert.equal(await connect.count(), 0)
   await page.unroute(probe)
   await page.reload()
   assert.equal(connections, 0)
+  await openWorkspaceMenu(page, 'Radio connection')
   await connect.click()
   const ready = page.getByRole('banner').getByText('Connected over local network', { exact: true })
   await ready.waitFor()
-  await page.getByText('Hello over the network', { exact: true }).waitFor()
+  const conversation = page.getByRole('region', { name: 'Conversation with Public' })
+  await conversation.getByText('Hello over the network', { exact: true }).waitFor()
   const saved = await page.evaluate(async (key) => {
     const opened = indexedDB.open('packet-pigeon')
     const db = await new Promise((resolve, reject) => {
@@ -128,7 +131,7 @@ test('uses the local bridge for a TCP companion session, durable message sync an
   queued.push([...receipt.slice(0, 11), ...Buffer.from('North: Prompt reply')])
   for (const socket of connected) socket.write(Buffer.concat(Array.from({ length: 10 }, () => frame([0x83]))))
   await empty
-  await page.getByText('Prompt reply', { exact: true }).waitFor({ timeout: 1500 })
+  await conversation.getByText('Prompt reply', { exact: true }).waitFor({ timeout: 1500 })
   finishEmpty()
   await page.getByRole('button', { name: 'Sync messages', exact: true }).waitFor()
   queued.push([...receipt.slice(0, 11), ...Buffer.from('North: Queued during reconnect')])
@@ -136,10 +139,12 @@ test('uses the local bridge for a TCP companion session, durable message sync an
   for (const socket of connected) socket.destroy()
   await reconnected
   await ready.waitFor()
-  await page.getByText('Queued during reconnect', { exact: true }).waitFor()
+  await conversation.getByText('Queued during reconnect', { exact: true }).waitFor()
   assert.equal(connections, 2)
   assert.ok(commands.filter((code) => code === 22).length === 2)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+  await openWorkspaceMenu(page, 'Radio connection')
   await connect.waitFor()
   await page.setViewportSize({ width: 390, height: 820 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))

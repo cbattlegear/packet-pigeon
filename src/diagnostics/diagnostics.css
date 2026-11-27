@@ -2,7 +2,8 @@
   display: grid;
   gap: 14px;
   min-width: 0;
-  padding: 20px 28px;
+  width: min(100%, 84rem);
+  padding: 20px var(--page-gutter);
 }
 
 .rx-controls,
@@ -25,7 +26,8 @@
   margin: 0;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
+  background: var(--canvas);
 }
 
 .rx-filters label {
@@ -37,8 +39,8 @@
   min-width: 0;
   max-width: 100%;
   padding: 7px 10px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: inherit;
   font: inherit;
@@ -74,8 +76,10 @@
 .rx-table-wrap th {
   position: sticky;
   top: 0;
-  background: var(--surface);
+  background: var(--canvas);
 }
+
+.rx-table-wrap tbody tr:hover { background: var(--hover-surface); }
 
 .rx-details dl {
   display: grid;

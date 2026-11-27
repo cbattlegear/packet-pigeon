@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { createPrivateKey, createPublicKey, randomBytes } from 'node:crypto'
 import { test } from 'node:test'
@@ -188,6 +189,7 @@ test('backs up selected settings, restores data and identity, and guards mainten
   }
 
   await page.goto(server.resolvedUrls.local[0] + '#settings')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const panel = page.getByRole('region', { name: 'Backup and recovery' })
   await panel.getByText(/Connected radio Backup fixture/).waitFor()
@@ -288,6 +290,7 @@ test('backs up selected settings, restores data and identity, and guards mainten
   page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
   await prepare.click()
   await panel.getByText(/Radio reboot requested to save pending contacts/).waitFor()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await panel.getByText(/Connected radio Restored node/).waitFor()
   page.once('dialog', (dialog) => dialog.accept(current.publicKey.slice(0, 12)))
@@ -311,6 +314,7 @@ test('backs up selected settings, restores data and identity, and guards mainten
   })
   await panel.getByText(/Radio reboot requested to save pending contacts/).waitFor()
   assert.equal(await page.evaluate(() => window.backupCommands.includes(24)), false)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await panel.getByText(/Connected radio Restored node/).waitFor()
   assert.equal(await page.evaluate(() => window.readExistingContact()), 'Edit while reboot is pending')
@@ -325,6 +329,7 @@ test('backs up selected settings, restores data and identity, and guards mainten
   await panel.getByText(/Reconnect and verify the public key/).waitFor()
   assert.ok(await page.evaluate(() => window.backupCommands.lastIndexOf(9) > window.backupCommands.lastIndexOf(24)))
   assert.ok(await page.evaluate(() => window.backupCommands.lastIndexOf(19) > window.backupCommands.lastIndexOf(9)))
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await panel.getByText(/Restored identity verified/).waitFor()
   assert.deepEqual(await page.evaluate(() => window.savedContactKeys()), [existingKey, contactKey])

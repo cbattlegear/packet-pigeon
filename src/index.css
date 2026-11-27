@@ -1,27 +1,36 @@
 :root {
-  font-family: system-ui, 'Segoe UI', sans-serif;
-  color: light-dark(#20313a, #e2ecef);
-  background: light-dark(#f3f6f7, #182127);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--surface);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   color-scheme: light dark;
 
-  --surface: light-dark(#ffffff, #202c32);
-  --muted: light-dark(#53656f, #aabec6);
-  --border: light-dark(#d0dce1, #51636c);
-  --accent: light-dark(#17636c, #87d8df);
-  --on-accent: light-dark(#ffffff, #182127);
-  --hover-surface: light-dark(#e9f2f3, #2c4149);
-  --accent-hover: light-dark(#124e56, #afe3e8);
-  --accent-text: light-dark(#124e56, #b5e4e8);
-  --selection: light-dark(#e6f0f1, #2c4149);
-  --message-background: light-dark(#eef6f6, #29434a);
-  --error: light-dark(#a02b2b, #ffb2a7);
-  --notice-text: light-dark(#702b20, #f5c3bb);
-  --notice-background: light-dark(#fff2ef, #3c2d2c);
-  --notice-border: light-dark(#dcbab4, #7d554d);
+  --ink: light-dark(#20231f, #f4f3ef);
+  --canvas: light-dark(#f8f7f3, #141820);
+  --surface: light-dark(#ffffff, #101317);
+  --raised: light-dark(#ffffff, #1b2028);
+  --muted: light-dark(#575d66, #b3bac5);
+  --border: light-dark(#e3e0d9, #2c333f);
+  --control-border: light-dark(#abaeb5, #626e80);
+  --accent: light-dark(#1747b6, #a7bfff);
+  --on-accent: light-dark(#ffffff, #121b30);
+  --accent-hover: light-dark(#113992, #c4d3ff);
+  --accent-text: light-dark(#1747b6, #b5c9ff);
+  --hover-surface: light-dark(#eeefef, #232b37);
+  --selection: light-dark(#e2ebff, #263654);
+  --incoming-background: light-dark(#f3f1ed, #222730);
+  --message-background: light-dark(#dce8ff, #22375b);
+  --success: light-dark(#27754c, #83ce9d);
+  --error: light-dark(#a02029, #ffb6bb);
+  --notice-text: light-dark(#743522, #f3c4b4);
+  --notice-background: light-dark(#fff4ed, #31211d);
+  --notice-border: light-dark(#e8c9ba, #634336);
+  --shadow: 0 12px 30px light-dark(#201b161a, #0008);
+  --radius-control: 8px;
+  --page-gutter: clamp(16px, 3vw, 36px);
 }
 
 :root[data-appearance='light'] {
@@ -41,6 +50,15 @@ body {
   min-width: 320px;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 h1,
 h2,
 p {
@@ -48,8 +66,9 @@ p {
 }
 
 h1 {
-  font-size: 2rem;
+  font-size: 1.75rem;
   line-height: 1.2;
+  letter-spacing: -0.025em;
 }
 
 h2 {
@@ -67,6 +86,28 @@ a {
 }
 
 :focus-visible {
-  outline: 3px solid var(--accent);
-  outline-offset: 4px;
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
+
+:is(button, input, select, textarea) { color: inherit; font: inherit; }
+
+:where(button), input::file-selector-button {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+}
+
+:where(button:not(:disabled)), input::file-selector-button { cursor: pointer; }
+
+:where(button:not(:disabled):hover), input::file-selector-button:hover { background: var(--hover-surface); }
+
+:is(input[type='radio'], input[type='checkbox']) { accent-color: var(--accent); }
+
+:is(input, textarea)::placeholder { color: var(--muted); opacity: 1; }
+
+::selection { background: var(--selection); }

@@ -34,8 +34,8 @@ To test a Wi-Fi or Ethernet companion, create a `.env` file beside
 MESHCORE_RADIO_IP=192.168.1.40
 ```
 
-Run `docker compose up -d` again and choose **Connect local network** in the
-app. The container must be able to reach the radio on your LAN. The radio
+Run `docker compose up -d` again and choose **Connect local network** from the
+radio menu in the header. The container must be able to reach the radio on your LAN. The radio
 defaults to TCP port `5000`. Set `MESHCORE_RADIO_PORT` if it uses a different
 port. If the browser port is taken, set `PACKET_PIGEON_PORT` and open
 `http://127.0.0.1` on that port. The web app is published on the host's
@@ -147,8 +147,8 @@ or UI code. The Open v3 index-to-emoji mapping is protocol data.
 
 ## USB companion session
 
-In a secure context with Web Serial available, use **Connect USB** to choose a
-port and **Disconnect** to release it. The shell reports connection, sync and
+In a secure context with Web Serial available, open the radio menu in the header.
+Use **Connect USB** to choose a port and **Disconnect** to release it. The shell reports connection, sync and
 cache errors. After an unexpected disconnect, the same tab retries the
 previously authorized port with delays of 1, 2, 4, 8 and 16 seconds. The
 radio's full public key is checked before syncing. If multiple authorized ports
@@ -215,8 +215,8 @@ needed here. The session does not cache channel secrets.
 
 ## Bluetooth companion session
 
-On HTTPS or localhost in a browser with Web Bluetooth, use **Connect Bluetooth**
-to choose a radio advertising the MeshCore companion service. Browser support,
+On HTTPS or localhost in a browser with Web Bluetooth, use **Connect Bluetooth** in
+the radio menu to choose a radio advertising the MeshCore companion service. Browser support,
 Bluetooth adapter availability, and pairing permissions depend on the browser
 and operating system.
 
@@ -252,7 +252,7 @@ npm run build
 npm run companion:lan -- 192.168.1.40
 ```
 
-Open the printed URL in Chrome or Edge and choose **Connect local network**.
+Open the printed URL in Chrome or Edge and choose **Connect local network** in the radio menu.
 The defaults are TCP port `5000` on the radio and `http://127.0.0.1:4175` in
 the browser. Supply the radio port and then the browser port after the address
 to change them. The bridge accepts a private, link-local, or loopback IPv4
@@ -426,8 +426,8 @@ change by another application may not be detected until observation restarts.
 
 ## App preferences
 
-**Settings** saves the appearance, app language and chat clock format for this
-browser. Appearance can follow the operating system. English is the current
+Open **More → Settings** to save the appearance, app language and chat clock format for this
+browser. Choose **Light**, **Dark** or **Follow system** under **Appearance**. English is the current
 interface language and the fallback when the browser prefers an unavailable
 language.
 
@@ -1222,7 +1222,7 @@ remains unchanged.
 
 ## Discovered adverts
 
-Open **Discovery** from Contacts or the sidebar. Use USB to record live adverts
+Open **Discovery** from Contacts or the **More** menu. Use USB to record live adverts
 and look up paths in the radio's local cache. Bluetooth notifications can split
 a firmware frame, so Bluetooth uses saved discovery history. Search and filter
 by role, path hash width, or whether a node is already a contact. The firmware
@@ -1289,9 +1289,8 @@ content types. Share the directory URL or direct links such as
 For USB radio connections, use desktop Chrome or Edge over HTTPS or
 localhost.
 
-Open the production build online and wait for **App available offline** in the
-header. The service worker caches the built HTML and assets for its deployment
-directory.
+Open the production build online to let its service worker cache the built HTML
+and assets for its deployment directory.
 Keep `sw.js` revalidatable (for example, `Cache-Control: no-cache`). An update
 waits until all tabs using the previous version are closed. If a new cache fails
 to install, the previous version stays active. Cache cleanup is limited to old
@@ -1300,9 +1299,9 @@ browser storage available to the app. Use the same origin and subfolder when
 opening the app offline. Deployments on different origins each have their own
 browser storage.
 
-To smoke-test the production cache locally, open the URL from `npm run preview`,
-wait for **App available offline**, switch the browser offline, and open
-the same URL in another tab. After building, run
+To smoke-test the production cache locally, open the URL from `npm run preview`.
+Once the service worker is active in browser developer tools, switch the browser
+offline and open the same URL in another tab. After building, run
 `node --test tests/offline-worker.test.mjs` to check cache scope and fallback.
 
 ## Workstream boundaries

@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -62,6 +63,7 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
   })
 
   await page.goto(server.resolvedUrls.local[0] + '#map')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByText('Node data and public map', { exact: true }).click()
   await page.getByLabel('Import local or discovered nodes').setInputFiles({
@@ -88,6 +90,7 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
   await mapped.getByText('Relay B', { exact: true }).waitFor()
   assert.equal(await mapped.getByText('Relay A', { exact: true }).count(), 0)
   assert.equal(await page.locator('.leaflet-overlay-pane path[stroke="#6047a6"][stroke-width="4"]').count(), 0)
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Diagnostics' }).click()
   const width = page.getByRole('combobox', { name: 'Trace hash width' })
   const send = page.getByRole('button', { name: 'Send trace' })
@@ -115,6 +118,7 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
   assert.equal(await page.evaluate(() => window.copiedPath), 'bc021111,bc011111')
   await result.getByRole('button', { name: 'Show path on map' }).click()
   await page.getByRole('region', { name: 'Displayed route' }).getByText('Relay A', { exact: true }).waitFor()
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Diagnostics' }).click()
   await page.getByRole('combobox', { name: 'Route source' }).selectOption('manual')
   await page.getByRole('textbox', { name: 'Repeater hashes in order' }).fill('bc021111')
@@ -124,4 +128,12 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
   await page.getByRole('button', { name: 'Reset trace' }).click()
   assert.equal(await page.getByRole('textbox', { name: 'Repeater hashes in order' }).inputValue(), '')
   assert.deepEqual(await page.evaluate(() => window.traces), [mapTrace, [0xbc, 2, 0x11, 0x11]])
+
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Map' }).click()
+  await nodes.getByRole('button', { name: /Unselected collision/ }).click()
+  const openContact = page.getByRole('button', { name: 'Open contact' })
+  assert.equal(await openContact.count(), 0)
+  await nodes.getByRole('button', { name: /Relay B/ }).click()
+  await openContact.click()
+  await page.getByRole('heading', { name: 'Relay B', exact: true }).waitFor()
 })

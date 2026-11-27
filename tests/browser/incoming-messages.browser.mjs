@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { chromium } from 'playwright-core'
 import { createServer } from 'vite'
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 
 let server
 let browser
@@ -176,7 +177,12 @@ for (const transport of ['usb', 'bluetooth']) {
       const page = await context.newPage()
       page.setDefaultTimeout(8000)
       await page.goto(`${url}#chats`)
+      await openWorkspaceMenu(page, 'Radio connection')
       await page.getByRole('button', { name: transport === 'usb' ? 'Connect USB' : 'Connect Bluetooth' }).click()
+      const disconnect = async () => {
+        await openWorkspaceMenu(page, 'Radio connection')
+        await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+      }
       const pane = page.getByRole('region', { name: 'Conversation with D3skt Pong' })
       await pane.waitFor()
       await page.getByRole('button', { name: 'Sync messages', exact: true }).waitFor()
@@ -250,19 +256,20 @@ for (const transport of ['usb', 'bluetooth']) {
         await page.getByRole('button', { name: 'Retry saving', exact: true }).waitFor()
         assert.equal(await pane.getByText('deferred pong', { exact: true }).count(), 0)
         await page.getByText(/Could not save radio data/).waitFor()
-        await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+        await disconnect()
         const selectedRadio = page.getByRole('combobox', { name: /Cached radio/ })
         await selectedRadio.selectOption(otherKey)
         await page.getByText('Other radio message', { exact: true }).last().waitFor()
         await page.evaluate(() => { window.receiveFixture.failSave = false })
-        await page.locator('.message-controls').getByRole('button', { name: 'Retry saving', exact: true }).click()
+        await page.getByRole('region', { name: 'Conversation with Other companion' })
+          .getByRole('button', { name: 'Retry saving', exact: true }).click()
         await page.getByRole('button', { name: 'Sync messages', exact: true }).waitFor()
         assert.equal(await selectedRadio.inputValue(), otherKey)
         assert.equal(await page.getByText('deferred pong', { exact: true }).count(), 0)
         await selectedRadio.selectOption('ab'.repeat(32))
         await pane.getByText('deferred pong', { exact: true }).waitFor()
         assert.equal(await pane.getByText('deferred pong', { exact: true }).count(), 1)
-      } else await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+      } else await disconnect()
     })
   }
 }

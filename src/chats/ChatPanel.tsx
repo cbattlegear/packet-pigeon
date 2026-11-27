@@ -161,6 +161,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const [loadError, setLoadError] = useState('')
   const [selection, setSelection] = useState<{ key: RadioKey; id: string; searchTarget?: SearchTarget } | null>(null)
   const [unreadOnly, setUnreadOnly] = useState(false)
+  const [inboxCollapsed, setInboxCollapsed] = useState(false)
   const radioKey = live ?? (offlineChoice === null ? last : offlineChoice || null)
   const data = status.key === radioKey ? status.data : null
   const cacheLoad = status.key === radioKey ? status.cacheLoad : null
@@ -171,6 +172,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
   const formatTime = useMemo(() => clockFormatter(locale, preferences.clock).format, [locale, preferences.clock])
   const formatClock = useMemo(() => clockFormatter(locale, preferences.clock, false).format, [locale, preferences.clock])
   const formatDate = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format, [locale])
+  const listDate = useMemo(() => new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }).format, [locale])
   const radioSelection = selection?.key === radioKey ? selection : null
   const preferred = radioSelection?.id ?? data?.preferences?.selectedConversationId
   const selected = items.find((item) => item.id === preferred) ?? items[0]
@@ -182,6 +184,17 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
     ]
   const ownContact = snapshot.device && last === radioKey
     ? contactShareLink(snapshot.device.name, snapshot.device.publicKey, snapshot.device.type) : null
+  const chooseConversation = (id: string, messageId?: string) => {
+    if (!radioKey) return
+    setSelection({ key: radioKey, id, searchTarget: messageId ? { id: messageId } : undefined })
+    setInboxCollapsed(true)
+  }
+  const syncControl = <button className="chat-sync" type="button" onClick={() => void messageSync.sync()}
+    title="Messages sync automatically while connected. Select to recheck."
+    disabled={messageStatus.syncing || (!canSync && !messageStatus.pending)}>
+    {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
+      ? canSync ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
+  </button>
 
   useEffect(() => {
     if (!navigationRequest) return
@@ -222,45 +235,47 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
 
   return (
     <div className="chats-layout chat-workspace">
-      <section className="conversation-list" aria-labelledby="chats-heading">
+      <section className="conversation-list" aria-labelledby="chats-heading" data-collapsed={Boolean(selected) && inboxCollapsed}>
         <div className="pane-heading">
           <h1 id="chats-heading">Chats</h1>
+          {selected && <button className="chat-inbox-toggle" type="button" aria-expanded={!inboxCollapsed}
+            aria-controls="chat-inbox" onClick={() => setInboxCollapsed(!inboxCollapsed)}>
+            {inboxCollapsed ? 'Show chats' : 'Hide chats'}
+          </button>}
+          {radioKey && data && <NewChat items={items} onChoose={(id) => {
+            setUnreadOnly(false)
+            chooseConversation(id)
+          }} />}
         </div>
-        <div className="message-controls">
-          {live ? <p>Radio <code>{live.slice(0, 12)}…</code></p> : (
-            <label className="chat-radio">Cached radio
-              <select value={radioKey ?? ''} onChange={(event) => {
-                setOfflineChoice(keys.find((key) => key === event.currentTarget.value) ?? '')
-              }}>
-                <option value="">Select a saved radio</option>
-                {keys.map((key) => <option key={key} value={key}>{key}</option>)}
-              </select>
-            </label>
-          )}
-          {loadError && <p role="alert">{loadError}</p>}
-          <button type="button" onClick={() => void messageSync.sync()}
-            title="Messages sync automatically while connected. Select to recheck."
-            disabled={messageStatus.syncing || (!canSync && !messageStatus.pending)}>
-            {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
-              ? canSync ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
-          </button>
-          {snapshot.transport === 'bluetooth' && (
-            <details className="chat-sync-limits"><summary>Bluetooth sync limits</summary>
-              <p>Bluetooth may truncate or drop messages. The radio removes each message from its queue before replying, so
-                missing content cannot be recovered from the radio. Use USB or the local network for safer sync.</p>
-            </details>
-          )}
+        <div id="chat-inbox">
+          {(!live || !selected || loadError || snapshot.transport === 'bluetooth') && <div className="message-controls">
+            {!live && (
+              <label className="chat-radio">Cached radio
+                <select value={radioKey ?? ''} onChange={(event) => {
+                  setOfflineChoice(keys.find((key) => key === event.currentTarget.value) ?? '')
+                }}>
+                  <option value="">Select a saved radio</option>
+                  {keys.map((key) => <option key={key} value={key}>{key}</option>)}
+                </select>
+              </label>
+            )}
+            {loadError && <p role="alert">{loadError}</p>}
+            {!selected && syncControl}
+            {snapshot.transport === 'bluetooth' && (
+              <details className="chat-sync-limits"><summary>Bluetooth sync limits</summary>
+                <p>Bluetooth may truncate or drop messages. The radio removes each message from its queue before replying, so
+                  missing content cannot be recovered from the radio. Use USB or the local network for safer sync.</p>
+              </details>
+            )}
+          </div>}
+          {radioKey && data && <>
+            <ChatSearch key={radioKey} items={items} onOpen={chooseConversation} />
+            <ConversationList items={items} selectedId={selected?.id} status={status} read={read} unreadOnly={unreadOnly}
+              showPreviews={preferences.chatPreviews} formatDate={listDate} formatTime={formatTime}
+              onUnreadOnlyChange={setUnreadOnly}
+              onSelect={chooseConversation} />
+          </>}
         </div>
-        {radioKey && data && <>
-          <ChatSearch key={radioKey} items={items} onOpen={(id, messageId) => {
-            setSelection({ key: radioKey, id, searchTarget: { id: messageId } })
-          }} />
-          <ConversationList items={items} selectedId={selected?.id} status={status} read={read} unreadOnly={unreadOnly}
-            showPreviews={preferences.chatPreviews}
-            onUnreadOnlyChange={setUnreadOnly}
-            onSelect={(id) => setSelection({ key: radioKey, id })}
-            onNewChat={(id) => { setUnreadOnly(false); setSelection({ key: radioKey, id }) }} />
-        </>}
       </section>
       {!radioKey ? (
         <section className="conversation-pane" aria-label="Conversation">
@@ -295,7 +310,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
           {!reactionEmojiSupport && <p className="chat-cache-error" role="alert">
             This browser cannot segment emoji. Native and channel reaction recognition and sending are unavailable; wire text is preserved.
           </p>}
-          <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} searchTarget={searchTarget}
+          <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status}
+            searchTarget={searchTarget} syncControl={syncControl}
             senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
             display={{
               active, preferences, read, formatTime, formatClock, formatDate, mapPosition, ownContact,
@@ -323,34 +339,40 @@ type WorkspaceProps = {
   senderName: string | null
   display: ChatDisplay
   searchTarget?: SearchTarget
+  syncControl: ReactNode
 }
 
-function ConversationList({ items, selectedId, status, read, showPreviews, unreadOnly, onUnreadOnlyChange, onSelect, onNewChat }: {
+function NewChat({ items, onChoose }: { items: Conversation[]; onChoose: (id: string) => void }) {
+  const destinations = items.filter((item) => item.recipient || item.channel)
+  return <label className="chat-new" title="New chat">
+    <span aria-hidden="true">+</span>
+    <select aria-label="New chat" value="" disabled={!destinations.length} onChange={(event) => {
+      if (event.currentTarget.value) onChoose(event.currentTarget.value)
+    }}>
+      <option value="">Choose a contact or channel</option>
+      {destinations.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
+    </select>
+  </label>
+}
+
+function ConversationList({ items, selectedId, status, read, showPreviews, unreadOnly, onUnreadOnlyChange, onSelect, formatTime, formatDate }: {
   items: Conversation[]
   selectedId?: string
   status: DirectStatus
   read: ReadonlySet<string>
   showPreviews: boolean
   unreadOnly: boolean
+  formatTime: ChatDisplay['formatTime']
+  formatDate: ChatDisplay['formatDate']
   onUnreadOnlyChange: (value: boolean) => void
   onSelect: (id: string) => void
-  onNewChat: (id: string) => void
 }) {
   const filtered = unreadOnly ? items.filter((item) => unreadReceipts(item.messages, read).length > 0) : items
-  const destinations = items.filter((item) => item.recipient || item.channel)
   return (
     <nav aria-label="Conversations">
       <div className="chat-list-controls">
-        <label><input type="checkbox" checked={unreadOnly}
-          onChange={(event) => onUnreadOnlyChange(event.currentTarget.checked)} /> Unread only</label>
-        <label>New chat
-          <select value="" disabled={!destinations.length} onChange={(event) => {
-            if (event.currentTarget.value) onNewChat(event.currentTarget.value)
-          }}>
-            <option value="">Choose a contact or channel</option>
-            {destinations.map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-          </select>
-        </label>
+        <button type="button" aria-pressed={!unreadOnly} onClick={() => onUnreadOnlyChange(false)}>All</button>
+        <button type="button" aria-label="Unread only" aria-pressed={unreadOnly} onClick={() => onUnreadOnlyChange(true)}>Unread</button>
       </div>
       {filtered.length ? (
         <ul className="chat-conversation-list">
@@ -358,14 +380,16 @@ function ConversationList({ items, selectedId, status, read, showPreviews, unrea
             const last = item.messages.findLast((message) => message.timestamp !== null && Number.isFinite(message.timestamp))
               ?? item.messages.at(-1)
             const unread = unreadReceipts(item.messages, read).length
+            const day = messageDay(last?.timestamp ?? null)
+            const date = day ? new Date(last!.timestamp!) : null
             return (
               <li key={item.id}>
                 <button type="button" aria-current={selectedId === item.id ? 'page' : undefined}
                   onClick={() => onSelect(item.id)}>
                   <strong>{item.title}</strong>
+                  {date && <time dateTime={date.toISOString()} title={formatTime(date)}>{formatDate(date)}</time>}
+                  {showPreviews && <span>{last ? channelMessageBody(last) || 'Received entry' : 'No messages yet'}</span>}
                   {unread > 0 && <small>{unread} unread</small>}
-                  {showPreviews && <span>{last?.text || (last ? 'Received entry' : 'No messages yet')}</span>}
-                  {showPreviews && last?.outgoing && <small>{deliveryLabel(last.outgoing)}</small>}
                 </button>
               </li>
             )
@@ -377,7 +401,7 @@ function ConversationList({ items, selectedId, status, read, showPreviews, unrea
   )
 }
 
-function ConversationPane({ radioKey, data, selected, direct, status, senderName, display, searchTarget }: WorkspaceProps & { selected?: Conversation }) {
+function ConversationPane({ radioKey, data, selected, direct, status, senderName, display, searchTarget, syncControl }: WorkspaceProps & { selected?: Conversation }) {
   if (!selected) {
     return (
       <section className="conversation-pane" aria-label="Conversation">
@@ -387,7 +411,7 @@ function ConversationPane({ radioKey, data, selected, direct, status, senderName
   }
   return <ConversationView key={`${radioKey}:${selected.id}`} conversation={selected}
     radioKey={radioKey} options={data.directSendOptions ?? defaultOptions} direct={direct} status={status}
-    senderName={senderName} display={display} searchTarget={searchTarget}
+    senderName={senderName} display={display} searchTarget={searchTarget} syncControl={syncControl}
     muted={data.mutedDirectConversations?.includes(selected.id.slice(0, 19)) ?? false} />
 }
 
@@ -401,6 +425,7 @@ type ConversationProps = {
   senderName: string | null
   display: ChatDisplay
   searchTarget?: SearchTarget
+  syncControl: ReactNode
 }
 
 function deliveryLabel(outgoing: StoredOutgoing) {
@@ -422,7 +447,7 @@ const idleObservation = { phase: 'idle' as const, error: null, dropped: 0, evict
 const noSubscription = () => () => {}
 const noObservation = () => idleObservation
 
-function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted, searchTarget }: ConversationProps) {
+function ConversationView({ conversation, radioKey, options, direct, status, senderName, display, muted, searchTarget, syncControl }: ConversationProps) {
   const { active, preferences, read, formatTime, formatClock, formatDate, ownContact, contacts, channels, readChannelKey, mapPosition,
     observationSource, canObserve, regionNames, onPathMap, nodeSession, nodeReady, nodeBusy } = display
   const room = conversation.node?.type === 'room' ? conversation.node : undefined
@@ -708,6 +733,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     <section className="conversation-pane" aria-label={`Conversation with ${conversation.title}`}>
       <header className="conversation-heading">
         <h2>{conversation.title}</h2>
+        {syncControl}
         <input type="search" className="chat-search" aria-label="Search messages" placeholder="Search messages"
           value={search} onChange={(event) => setSearch(event.currentTarget.value)} />
         {isChannel && observer && (observed.phase === 'active' || observed.phase === 'starting'
@@ -772,7 +798,9 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             const previousDay = index ? messageDay(shown[index - 1].timestamp) : undefined
             return (
               <Fragment key={message.id}>
-                {day !== previousDay && <li className="chat-divider">{day === null ? 'Unknown date' : formatDate(new Date(message.timestamp!))}</li>}
+                {day !== previousDay && <li className="chat-divider">
+                  {day === null ? 'Unknown date' : formatDate(new Date(message.timestamp!))}
+                </li>}
                 {message.id === unreadBoundary.current && <li className="chat-divider chat-divider--unread">New messages</li>}
                 <li data-receipt-id={message.id} tabIndex={-1}
                   onContextMenu={(event) => {
@@ -882,7 +910,8 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                 </div> : <p>No names available. Type <code>@[name]</code> to mention someone.</p>}
               </div>
             </details>}
-            <textarea id="chat-draft" ref={composer} rows={1} value={draft} aria-label="Message" placeholder="Message"
+            <textarea id="chat-draft" ref={composer} rows={1} value={draft} aria-label="Message"
+              placeholder={`Message ${conversation.title}`}
               aria-describedby={draft ? 'chat-byte-count chat-draft-error' : 'chat-draft-error'}
               onChange={(event) => updateDraft(event.currentTarget.value)} onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && !event.repeat) {

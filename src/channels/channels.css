@@ -1,7 +1,8 @@
 .channel-workspace {
   display: grid;
   gap: 20px;
-  padding: 22px clamp(16px, 3vw, 28px) 28px;
+  max-width: 84rem;
+  padding: 22px var(--page-gutter) 28px;
 }
 
 .channel-workspace label { display: grid; gap: 5px; min-width: 0; font-size: .875rem; font-weight: 600; }
@@ -10,8 +11,8 @@
   max-width: 100%;
   min-height: 38px;
   padding: 7px 11px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: inherit;
   font: inherit;
@@ -54,8 +55,8 @@
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface);
-  box-shadow: 0 8px 24px #0003;
+  background: var(--raised);
+  box-shadow: var(--shadow);
 }
 .channel-menu button { text-align: left; border-color: transparent; }
 .channel-workspace .channel-danger, .channel-workspace [role='alert'] { color: var(--error); }
@@ -64,11 +65,11 @@
   max-height: calc(100dvh - 32px);
   padding: 22px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+  border-radius: 12px;
+  background: var(--raised);
   color: inherit;
   overflow-y: auto;
-  box-shadow: 0 12px 48px #0004;
+  box-shadow: var(--shadow);
 }
 .channel-dialog::backdrop { background: #0007; }
 .channel-dialog[open], .channel-dialog form { display: grid; gap: 16px; }

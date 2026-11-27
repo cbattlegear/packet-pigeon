@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -178,6 +179,7 @@ test('exports a radio preset and confirms setup writes while reporting a partial
   })
   const page = await context.newPage()
   await page.goto(`${url}#settings`)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const exportPreset = page.getByRole('button', { name: 'Share current radio preset' })
   await exportPreset.click()

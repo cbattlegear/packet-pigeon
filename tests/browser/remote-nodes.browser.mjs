@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { chromium } from 'playwright-core'
@@ -141,6 +142,7 @@ test('joins rooms with explicit roles, posts, shows sensor alerts, and gates nod
 
   await page.goto(`${server.resolvedUrls.local[0]}#settings`)
   await page.getByLabel('Alert for synced messages').check()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('banner').getByText('Connected', { exact: true }).waitFor()
   await page.getByRole('link', { name: 'Chats', exact: true }).click()
@@ -192,7 +194,9 @@ test('joins rooms with explicit roles, posts, shows sensor alerts, and gates nod
     assert.equal(await access.getByText(/Administrator access/).count(), 0)
     assert.equal(await post.isDisabled(), true)
 
+    await openWorkspaceMenu(page, 'Radio connection')
     await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+    await openWorkspaceMenu(page, 'Radio connection')
     await page.getByRole('button', { name: 'Connect USB' }).click()
     await page.getByRole('banner').getByText('Connected', { exact: true }).waitFor()
   }
@@ -289,8 +293,10 @@ test('joins rooms with explicit roles, posts, shows sensor alerts, and gates nod
   ])
   for (const command of sent.slice(1, 4)) assert.deepEqual(command.prefix, new Array(6).fill(0xbc))
 
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
   await page.evaluate(() => { window.fixtureRadioByte = 0xef })
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('banner').getByText('Connected', { exact: true }).waitFor()
   await contacts.getByRole('button', { name: /Study room/ }).click()
@@ -298,8 +304,10 @@ test('joins rooms with explicit roles, posts, shows sensor alerts, and gates nod
   await roomDetails.getByRole('button', { name: 'Sign in' }).click()
   await roomDetails.getByText(/Read-only access/).waitFor()
   assert.equal(await roomDetails.getByText('Room administration', { exact: true }).count(), 0)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
   await page.evaluate(() => { window.fixtureRadioByte = 0xee })
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('banner').getByText('Connected', { exact: true }).waitFor()
   await contacts.getByRole('button', { name: /Study room/ }).click()

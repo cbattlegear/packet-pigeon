@@ -1,20 +1,41 @@
 .preferences {
   display: grid;
   gap: 16px;
-  padding: 22px clamp(16px, 3vw, 28px) 28px;
-  max-width: 54rem;
+  padding: 22px var(--page-gutter) 28px;
+  max-width: 72rem;
+}
+
+.app-preferences {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 24px 32px;
+}
+
+.app-preferences > p { grid-column: 1 / -1; }
+.app-preferences > p:empty { display: none; }
+
+@media (max-width: 720px) {
+  .app-preferences { grid-template-columns: minmax(0, 1fr); }
 }
 
 .preferences fieldset {
   min-width: 0;
-  padding: 12px 16px 16px;
+  margin: 0;
+  padding: 12px 12px 16px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
+  border-radius: 10px;
+  background: var(--canvas);
 }
 
 .preferences legend {
   font-weight: 700;
+}
+
+.app-preferences fieldset {
+  padding-inline: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+  background: transparent;
 }
 
 .preference-check {
@@ -34,8 +55,8 @@
 .preference-field select {
   min-height: 40px;
   padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: inherit;
   font: inherit;
