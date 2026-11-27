@@ -151,13 +151,23 @@ In a secure context with Web Serial available, open the radio menu in the header
 Use **Connect USB** to choose a port and **Disconnect** to release it. The shell reports connection, sync and
 cache errors. After an unexpected disconnect, the same tab retries the
 previously authorized port with delays of 1, 2, 4, 8 and 16 seconds. The
-radio's full public key is checked before syncing. If multiple authorized ports
+radio's full public key is checked before syncing. A successful identifiable
+USB connection also saves its radio public key and USB vendor/product IDs in
+browser storage. On a later page load, Packet Pigeon asks the browser for
+previously authorized ports with `getPorts()` and restores only one exact
+descriptor match, then checks the radio key before reading contacts or other
+state. It does not invoke the device chooser during refresh restoration.
+Choosing a different transport or device replaces that saved target; choosing a
+device without stable browser identifiers disables refresh restoration for it.
+If multiple authorized ports
 match the original USB vendor and product, recovery stops rather than guessing;
 use **Connect USB** to select a port. A missing port, revoked permission, a
 failed identity check, or exhausted retries also requires manual recovery.
-**Disconnect** cancels recovery. Recovery is not persisted across a reload and
-requires the browser to expose the replugged port and USB identifiers. The
-public-key handshake is not cryptographic authentication.
+**Disconnect** cancels recovery and clears the saved refresh target. Refresh
+restoration still depends on the browser exposing the authorized port and USB
+identifiers; when it cannot, the shell remains disconnected and explains which
+connection action to use. The public-key handshake is not cryptographic
+authentication.
 
 Web Locks reserve one USB session per origin across cooperating Packet Pigeon
 tabs, including during retries; a second tab must wait for the owner to release
@@ -222,9 +232,14 @@ and operating system.
 
 Bluetooth uses the same companion handshake, sync, ownership lock, and bounded
 reconnect schedule as USB. Reconnection reuses the authorized Bluetooth device
-and checks its radio public key before syncing. **Disconnect** cancels recovery
-and releases the connection. Pairing, GATT data exchange and disconnect recovery
-are covered by simulated transport tests. Physical BLE hardware has not been tested.
+and checks its radio public key before syncing. A successful connection saves
+the browser-assigned Bluetooth device ID and radio public key. Where the
+browser exposes `getDevices()`, refresh restoration reuses that one permitted
+device without opening the chooser; otherwise the shell asks for **Connect
+Bluetooth**. **Disconnect** cancels recovery, clears the saved refresh target
+and releases the connection. Pairing, GATT data exchange, refresh restoration
+and disconnect recovery are covered by simulated transport tests. Physical BLE
+hardware has not been tested.
 
 Bluetooth syncs queued messages automatically, using the same message-waiting
 notification as USB. **Sync messages** is available for a recheck or retry.
