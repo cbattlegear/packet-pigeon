@@ -88,6 +88,7 @@ function fixture({
       if (state.noiseReply) notify(Uint8Array.from(state.noiseReply))
     } else if (command[0] === 2 && directMessaging) {
       notify(Uint8Array.of(0x82, 1, 2, 3, 4, 42, 0, 0, 0))
+      if (queue.length) notify(Uint8Array.of(0x83))
       notify(Uint8Array.of(6, 0, 1, 2, 3, 4, 0xe8, 3, 0, 0))
     } else if (command[0] === 13 && directMessaging) {
       notify(Uint8Array.of(0))
@@ -157,7 +158,7 @@ function fixture({
       },
     },
   }
-  return { environment, device, notify, drop, state, writes }
+  return { environment, device, notify, drop, state, writes, queue }
 }
 
 async function until(session, condition) {
@@ -205,6 +206,37 @@ test('uses raw notification frames, prefers writes with response, and shares syn
   assert.equal(locks.held, false)
   assert.equal(radio.state.closes, 1)
   unsubscribe()
+})
+
+test('Bluetooth automatically syncs initial messages, notification bursts and messages queued during reconnect', async (t) => {
+  const radio = fixture({ queuedMessages: [[directReceipt('Initial')]], directMessaging: true })
+  const session = new CompanionSession({
+    bluetoothEnvironment: radio.environment, locks: ownership(), retryDelays: [1],
+  })
+  const factory = new IDBFactory()
+  const cache = new SessionCache(session, () => openRadioStorage(factory))
+  const sync = new MessageSync(session, () => openRadioStorage(factory), () => {
+    const status = cache.getSnapshot()
+    return !status.error && !status.saving && status.pending === 0
+  })
+  const stop = sync.startAutomaticSync(cache.subscribe)
+  t.after(async () => { stop(); await session.disconnect() })
+  await session.connectBluetooth()
+  await until(sync, (status) => status.data?.messages.length === 1 && !status.syncing)
+  radio.queue.push([directReceipt('Later')], [directReceipt('Burst')])
+  for (let i = 0; i < 10; i++) radio.notify(Uint8Array.of(0x83))
+  await until(sync, (status) => status.data?.messages.length === 3 && !status.syncing)
+  radio.queue.push([directReceipt('Reply while sending')])
+  await session.sendDirect(session.getSnapshot().device.publicKey, 'bc'.repeat(32), 42, 0, 'Outgoing fixture')
+  await until(sync, (status) => status.data?.messages.length === 4 && !status.syncing)
+  radio.drop()
+  radio.queue.push([directReceipt('Reconnected')])
+  await until(sync, (status) => status.data?.messages.length === 5 && !status.syncing)
+  assert.equal(radio.state.connects, 2)
+  assert.equal(radio.state.chooses, 1)
+  assert.deepEqual(sync.getSnapshot().data.messages.map(({ text }) => text),
+    ['Initial', 'Later', 'Burst', 'Reply while sending', 'Reconnected'])
+  assert.equal(sync.getSnapshot().error, null)
 })
 
 test('Bluetooth noise-floor reads stay local, reject incomplete replies, and respect firmware support', async () => {

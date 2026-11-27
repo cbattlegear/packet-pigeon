@@ -110,6 +110,49 @@ function selfInfo() {
   return Uint8Array.of(5, 1, 0, 0, ...new Uint8Array(32).fill(0xab), ...new Uint8Array(22), ...encode('Pigeon'))
 }
 
+test('USB automatically drains on connection and defers message-waiting pushes until a radio command finishes', async (t) => {
+  const queued = [Uint8Array.of(7, 1, 2, 3, 4, 5, 6, 0, 0, 42, 0, 0, 0, ...encode('Initial'))]
+  let contactsPending = false
+  const port = new FixturePort(([code], serial) => {
+    if (code === 22) serial.emit(...deviceInfo())
+    else if (code === 1) serial.emit(...selfInfo())
+    else if (code === 4) {
+      if (!contactsPending) { serial.emit(2, 0, 0, 0, 0); serial.emit(4, 0, 0, 0, 0) }
+    } else if (code === 10) {
+      assert.equal(contactsPending, false)
+      serial.emit(...(queued.shift() ?? [10]))
+    } else assert.fail(`Unexpected command ${code}`)
+  })
+  const session = sessionWith(port)
+  const factory = new IDBFactory()
+  const cache = new SessionCache(session, () => openRadioStorage(factory))
+  const sync = new MessageSync(session, () => openRadioStorage(factory), () => {
+    const status = cache.getSnapshot()
+    return !status.error && !status.saving && status.pending === 0
+  })
+  const stop = sync.startAutomaticSync(cache.subscribe)
+  t.after(async () => { stop(); await session.disconnect() })
+  await session.connect()
+  await waitFor(() => sync.getSnapshot().data?.messages.length === 1 && !sync.getSnapshot().syncing)
+  const reads = () => port.commands.filter(([code]) => code === 10).length
+  assert.equal(reads(), 2)
+
+  contactsPending = true
+  const refresh = session.refreshContacts(session.getSnapshot().device.publicKey)
+  await waitFor(() => port.commands.filter(([code]) => code === 4).length === 2)
+  queued.push(Uint8Array.of(7, 1, 2, 3, 4, 5, 6, 0, 0, 43, 0, 0, 0, ...encode('Later')))
+  for (let i = 0; i < 10; i++) port.emit(0x83)
+  await setImmediate()
+  assert.equal(reads(), 2)
+  contactsPending = false
+  port.emit(2, 0, 0, 0, 0)
+  port.emit(4, 0, 0, 0, 0)
+  await refresh
+  await waitFor(() => sync.getSnapshot().data?.messages.length === 2 && !sync.getSnapshot().syncing)
+  assert.deepEqual(sync.getSnapshot().data.messages.map(({ text }) => text), ['Initial', 'Later'])
+  assert.equal(sync.getSnapshot().error, null)
+})
+
 test('noise-floor reads are local, capability gated, and decode signed radio stats', async () => {
   let version = 14
   let reply = [24, 1, 0x85, 0xff, ...new Uint8Array(10)]

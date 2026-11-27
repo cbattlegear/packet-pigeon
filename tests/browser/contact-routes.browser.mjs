@@ -46,7 +46,8 @@ test('saves a selected repeater route, confirms CLI access and guards a zero-hop
           emit([2, 2, 0, 0, 0])
           table.forEach(emit)
           emit([4, 0, 0, 0, 0])
-        } else if (data[0] === 30) emit(found())
+        } else if (data[0] === 10) emit([10])
+        else if (data[0] === 30) emit(found())
         else if (data[0] === 5) {
           const reply = Uint8Array.of(9, 0, 0, 0, 0)
           new DataView(reply.buffer).setUint32(1, time++, true)

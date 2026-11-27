@@ -186,6 +186,8 @@ function App() {
   const cacheDetail = cacheStatus.error ? 'Cache needs attention' : cacheStatus.pending ? `Saving ${cacheStatus.pending} update(s)` : null
   const chatView = activeSection === 'Chats'
 
+  useEffect(() => messageSync.startAutomaticSync(cache.subscribe), [])
+
   useEffect(() => {
     if (!import.meta.env.PROD) return
     const probe = new AbortController()

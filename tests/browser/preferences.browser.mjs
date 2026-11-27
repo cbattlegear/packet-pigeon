@@ -109,11 +109,7 @@ test('sync progress follows saved receipts and a saved message alerts once', asy
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('link', { name: 'Chats' }).click()
   const sync = page.getByRole('button', { name: 'Sync messages' })
-  await sync.waitFor()
-  await page.waitForFunction(() => !Array.from(document.querySelectorAll('button'))
-    .find((button) => button.textContent === 'Sync messages')?.disabled)
   const status = page.getByRole('status', { name: 'Sync status' })
-  await sync.click()
   await status.filter({ hasText: 'messages: 0 saved' }).waitFor()
   await page.waitForFunction(() => window.syncFixture.calls === 1 && window.syncFixture.waiting)
   await page.evaluate(() => window.syncFixture.reply())
@@ -257,6 +253,7 @@ test('discovery and full-storage alerts retain their radio across a switch and o
           else if (frame[3] === 4) {
             emit([2, 2, 0, 0, 0]); emit(contact(1)); emit(contact(2)); emit([4, 0, 0, 0, 0])
           } else if (frame[3] === 31) emit(slot)
+          else if (frame[3] === 10) emit([10])
           else throw Error(`Unexpected command ${frame[3]}`)
         } }),
         async open() {}, async close() {},

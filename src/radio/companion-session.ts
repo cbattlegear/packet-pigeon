@@ -388,6 +388,11 @@ export class CompanionSession {
     return this.reserveReceipt(link, publicKey)
   }
 
+  readonly canSyncQueuedMessages = () => (
+    this.snapshot.phase === 'ready' && Boolean(this.attempt?.link) && !this.attempt?.maintenance
+    && !this.contactWritePending && !this.directCommandPending && this.receiptHolds.size === 0
+  )
+
   private reserveReceipt(link: SerialLink, publicKey: string): QueuedMessageLease {
     if (this.receiptHolds.size) {
       throw new CompanionError('protocol', 'Save the previous received message before requesting another.')
@@ -403,6 +408,7 @@ export class CompanionSession {
         for (const resolve of this.receiptWaiters) resolve()
         this.receiptWaiters.clear()
       }
+      this.update({})
     }
     return {
       request: async (receive) => {
@@ -453,6 +459,7 @@ export class CompanionSession {
       return result
     } finally {
       this.contactWritePending = false
+      this.update({})
     }
   }
 
@@ -1546,6 +1553,7 @@ export class CompanionSession {
       return await command(link, matches[0])
     } finally {
       this.directCommandPending = false
+      this.update({})
     }
   }
 

@@ -38,6 +38,7 @@ test('observes channel packets without merging ambiguous receipts or exposing ke
         else if (command === 1) emit(settings)
         else if (command === 4) { emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]) }
         else if (command === 31) emit(slot)
+        else if (command === 10) emit([10])
         else throw Error('Unexpected radio command')
       } }),
       async open() {}, async close() {},
@@ -124,5 +125,5 @@ test('observes channel packets without merging ambiguous receipts or exposing ke
   await stop.click()
   await openDetails()
   assert.equal(await details.getByText(/matching RX observations/).count(), 0)
-  assert.deepEqual(await page.evaluate(() => window.radioCommands), [22, 1, 4, 31, 31])
+  assert.deepEqual(await page.evaluate(() => window.radioCommands), [22, 1, 4, 31, 10, 31])
 })

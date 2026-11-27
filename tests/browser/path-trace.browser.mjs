@@ -43,7 +43,8 @@ test('traces map-selected repeaters, verifies the final hop, and handles manual 
           emit([2, 2, 0, 0, 0])
           contacts.forEach(emit)
           emit([4, 0, 0, 0, 0])
-        } else if (data[0] === 36) {
+        } else if (data[0] === 10) emit([10])
+        else if (data[0] === 36) {
           const tag = data.slice(1, 5)
           const hashes = data.slice(10)
           window.traces.push([...hashes])

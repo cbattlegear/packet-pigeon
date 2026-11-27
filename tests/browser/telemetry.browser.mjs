@@ -36,7 +36,8 @@ test('refreshes and caches telemetry, polls only on request, and cancels when le
           emit([2, 1, 0, 0, 0])
           emit(node)
           emit([4, 0, 0, 0, 0])
-        } else if (command[0] === 39 && command.length === 4) {
+        } else if (command[0] === 10) emit([10])
+        else if (command[0] === 39 && command.length === 4) {
           fixture.local++
           telemetry(radio, [1, 116, 1, 132, 2, 103, 0, 192])
         } else if (command[0] === 39 && command.length === 36 && command.slice(4).every((byte) => byte === 0xbc)) {

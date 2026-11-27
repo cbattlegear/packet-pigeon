@@ -239,6 +239,7 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
           )}
           {loadError && <p role="alert">{loadError}</p>}
           <button type="button" onClick={() => void messageSync.sync()}
+            title="Messages sync automatically while connected. Select to recheck."
             disabled={messageStatus.syncing || (!canSync && !messageStatus.pending)}>
             {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
               ? canSync ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
