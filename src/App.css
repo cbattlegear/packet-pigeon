@@ -34,12 +34,25 @@
 }
 
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  justify-self: start;
   color: var(--ink);
   font-size: 1.3rem;
   font-weight: 750;
   letter-spacing: -0.035em;
   text-decoration: none;
   white-space: nowrap;
+}
+
+.brand::before {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  background: var(--accent);
+  mask: url('./assets/field-stamp.png') center / contain no-repeat;
+  content: '';
 }
 
 .workspace-nav {
@@ -289,7 +302,7 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
 
 @media (max-width: 780px) {
   .app-header {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: max-content minmax(0, 1fr);
     column-gap: 10px;
     padding-top: 9px;
   }
@@ -303,11 +316,13 @@ button:disabled { cursor: not-allowed; opacity: 0.6; }
   }
 
   .workspace-nav :is(a, summary) { font-size: 0.875rem; }
+  .connection-area { max-width: 100%; }
   .radio-summary { max-width: 39vw; }
 }
 
 @media (max-width: 600px) {
   .brand { font-size: 1.1rem; }
+  .brand::before { width: 24px; height: 24px; }
   .connection-area summary { min-height: 36px; font-size: 0.8125rem; }
   .chats-layout { grid-template-columns: minmax(0, 1fr); }
   .conversation-list { border-right: 0; border-bottom: 1px solid var(--border); }
