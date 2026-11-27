@@ -31,7 +31,8 @@ type Props = {
 export function ComposerTools(props: Props) {
   const [open, setOpen] = useState(false)
   return <>
-    <button type="button" onClick={() => setOpen(true)}>Share or use quick message</button>
+    <button className="chat-compose-tool" type="button" aria-label="Share or use quick message" title="Add to message"
+      onClick={() => setOpen(true)}>+</button>
     {open && <ComposerShareDialog {...props} close={() => setOpen(false)} />}
   </>
 }

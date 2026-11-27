@@ -78,11 +78,13 @@ regressions. The tests use cached fixtures and simulated radios.
 
 ## Message reactions
 
-Use **React** on an ordinary DM or channel message, or its right-click actions,
-to choose a quick emoji or enter one emoji (including skin tones, flags and
-joined families). The picker is keyboard-accessible and leaves the composer
-draft unchanged. Room/management messages are excluded. Sending requires the
-selected radio to be connected and other message actions to be finished.
+Use **Message actions** → **React** on an ordinary DM or channel message, or
+its right-click actions, to choose a quick emoji or enter one emoji (including
+skin tones, flags and joined families). The picker is keyboard-accessible and
+leaves the composer draft unchanged. Room/management messages are excluded.
+Sending requires the selected radio to be connected and other message actions
+to be finished. Reaction matching details and wire text are available under
+**Message actions** → **Message details**.
 Reaction summaries show emoji counts and expandable sender names. Counts group
 canonically equivalent emoji and deduplicate each sender/emoji pair; channel
 names are unverified and can be impersonated. Blocking a channel sender hides
