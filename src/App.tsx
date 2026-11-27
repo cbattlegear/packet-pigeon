@@ -189,6 +189,7 @@ function App() {
   const chatView = activeSection === 'Chats'
 
   useEffect(() => messageSync.startAutomaticSync(cache.subscribe), [])
+  useEffect(() => { void session.restore() }, [])
 
   useEffect(() => {
     if (!import.meta.env.PROD) return
