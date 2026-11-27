@@ -31,6 +31,9 @@ import type { RemoteNodeLoginSession } from '../contacts/RemoteNodePanel.tsx'
 import { canPostToRoom, maxRoomTextBytes } from '../radio/node-access.ts'
 import { imageLinkParts } from './image-links.ts'
 import type { ImageLinkPart } from './image-links.ts'
+import { canReactTo } from './reactions.ts'
+import { reactionEmojiSupport } from '../radio/reactions.ts'
+import { ReactionPicker } from './ReactionPicker.tsx'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
@@ -86,10 +89,11 @@ function errorText(error: unknown) {
   return error instanceof Error ? error.message : 'The message action failed.'
 }
 
-function MessageContextActions({ context, onClose, children }: {
+function MessageContextActions({ context, onClose, children, channel }: {
   context: MessageContext
   onClose: () => void
   children: ReactNode
+  channel: boolean
 }) {
   const menu = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -125,7 +129,8 @@ function MessageContextActions({ context, onClose, children }: {
       window.removeEventListener('scroll', scroll, true)
     }
   }, [context, onClose])
-  return createPortal(<div ref={menu} className="chat-context-actions" role="group" aria-label="Channel message context actions"
+  return createPortal(<div ref={menu} className="chat-context-actions" role="group"
+    aria-label={channel ? 'Channel message context actions' : 'Direct message context actions'}
     onBlur={(event) => {
       if (!event.currentTarget.contains(event.relatedTarget)) onClose()
     }}>
@@ -273,6 +278,10 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             <p>Could not refresh cached chats: {cacheLoad.message} Showing previously loaded data.</p>
             <button type="button" onClick={() => void direct.load(radioKey)}>Retry loading chats</button>
           </div>}
+          {data.reactionError && <p className="chat-cache-error" role="alert">{data.reactionError}</p>}
+          {!reactionEmojiSupport && <p className="chat-cache-error" role="alert">
+            This browser cannot segment emoji. Native and channel reaction recognition and sending are unavailable; wire text is preserved.
+          </p>}
           <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} searchTarget={searchTarget}
             senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
             display={{
@@ -415,6 +424,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   const [previousSearchTarget, setPreviousSearchTarget] = useState(searchTarget)
   const [awayFromBottom, setAwayFromBottom] = useState(false)
   const [messageContext, setMessageContext] = useState<MessageContext | null>(null)
+  const [reactionMessage, setReactionMessage] = useState<string | null>(null)
   const composer = useRef<HTMLTextAreaElement>(null)
   const mentionPicker = useRef<HTMLDetailsElement>(null)
   const messageList = useRef<HTMLOListElement>(null)
@@ -631,6 +641,20 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
     await direct.sendChannel(radioKey, conversation.channel.index, conversation.channel.name, message.text, preferences.saveDrafts, true)
   }
 
+  function reactionAction(message: StoredMessage, inContext = false) {
+    if (conversation.node || !canReactTo(message)) return null
+    return <button type="button" disabled={!reactionEmojiSupport || senderName === null || nodeBusy || status.pending > 0}
+      title={senderName === null ? 'Connect this radio to react' : undefined}
+      aria-label={`React to message: ${channelMessageBody(message).slice(0, 40)}`}
+      onClick={() => {
+        if (inContext) {
+          messageContext?.row.focus({ preventScroll: true })
+          setMessageContext(null)
+        }
+        setReactionMessage(message.id)
+      }}>React</button>
+  }
+
   function channelActions(message: StoredMessage, inContext = false) {
     const sender = channelSender(message)
     const body = channelMessageBody(message)
@@ -642,6 +666,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       action()
     }
     return <>
+      {reactionAction(message, inContext)}
       {message.text && <button type="button" onClick={() => run(() => void copy(message))}
         aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
       {conversation.channel && sender && (mentionableName(sender)
@@ -756,7 +781,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
             {message.id === unreadBoundary.current && <li className="chat-divider chat-divider--unread">New messages</li>}
             <li data-receipt-id={message.id} tabIndex={-1}
               onContextMenu={(event) => {
-                if (!isChannel || (event.target as Element).closest('button, a, input, select, textarea, summary')
+                if (conversation.node || (event.target as Element).closest('button, a, input, select, textarea, summary')
                   || window.getSelection()?.isCollapsed === false) return
                 event.preventDefault()
                 setMessageContext({ id: message.id, x: event.clientX, y: event.clientY, row: event.currentTarget })
@@ -767,7 +792,20 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                   : nodeMessageSender(conversation, message, contacts)}</strong>
                 {timestamp(message.timestamp, formatTime)}
               </div>
-              {message.text && <MessageText text={body} channel={isChannel} ownName={senderName} />}
+              {message.reaction ? <>
+                <p>Reaction {message.reaction.parsed.emoji}</p>
+                <p className="chat-meta">{message.reaction.state === 'matched' ? 'Matched to a message in this conversation.'
+                  : message.reaction.state === 'ambiguous' ? 'Ambiguous reaction: multiple target messages match. Not counted.'
+                    : message.reaction.state === 'unavailable' ? 'Reaction matching unavailable. Wire receipt retained.'
+                      : 'Unmatched reaction: target not yet available. Retained for later matching.'}</p>
+                <details><summary>Wire reaction text</summary><pre>{body}</pre></details>
+              </> : message.text && <MessageText text={body} channel={isChannel} ownName={senderName} />}
+              {message.reactions?.length ? <div className="chat-reaction-summary" role="group" aria-label="Message reactions">
+                {message.reactions.map(({ emoji, count, senders }) => <details key={emoji}>
+                  <summary aria-label={`${emoji}: ${count} reaction${count === 1 ? '' : 's'}`}>{emoji} {count}</summary>
+                  <p>{senders.join(', ')}</p>
+                </details>)}
+              </div> : null}
               {message.receipt?.kind === 'channel-data' && <p>Channel data (type {message.receipt.dataType}): {message.receipt.dataHex}</p>}
               {message.conversationId === 'unsupported' && <p>Unrecognized response or device error; raw bytes are preserved below.</p>}
               {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
@@ -831,6 +869,9 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                   {channelActions(message)}
                 </div>
               )}
+              {!isChannel && <div className="chat-message-actions" role="group" aria-label="Direct message actions">
+                {reactionAction(message)}
+              </div>}
               {message.rawHex && <details><summary>Raw receipt</summary><code>{message.rawHex}</code></details>}
             </li>
             </Fragment>
@@ -838,9 +879,15 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
           {!shown.length && <li className="chat-divider">No matching messages.</li>}
         </ol>
       ) : <div className="state-message"><h2>No messages yet</h2><p>Messages in this conversation will appear here.</p></div>}
-      {messageContext && contextMessage && <MessageContextActions context={messageContext} onClose={() => setMessageContext(null)}>
-        {channelActions(contextMessage, true)}
+      {messageContext && contextMessage && <MessageContextActions context={messageContext} channel={isChannel} onClose={() => setMessageContext(null)}>
+        {isChannel ? channelActions(contextMessage, true) : <>
+          {reactionAction(contextMessage, true)}
+          <button type="button" onClick={() => { setMessageContext(null); void copy(contextMessage) }}>Copy</button>
+        </>}
       </MessageContextActions>}
+      {reactionMessage && <ReactionPicker disabled={senderName === null || nodeBusy || status.pending > 0} error={status.error}
+        onClose={() => setReactionMessage(null)}
+        onSend={(emoji) => direct.react(radioKey, reactionMessage, emoji, options)} />}
       {conversation.messages.length > 0 && awayFromBottom && <button className="chat-jump" type="button" onClick={() => {
         const list = messageList.current
         if (!list) return

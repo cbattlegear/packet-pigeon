@@ -4,6 +4,8 @@ import { channelTextBytes } from '../radio/channel-message.ts'
 import { assertScopeSupported, validateChannelScope } from '../radio/channel-scope.ts'
 import type { ChannelScope } from '../radio/channel-scope.ts'
 import { maxTelemetryPayloadLength } from '../radio/telemetry.ts'
+import { resolveReactions } from '../chats/reactions.ts'
+import type { MessageReaction, ReactionSummary } from '../chats/reactions.ts'
 
 declare const radioKeyBrand: unique symbol
 export type RadioKey = string & { readonly [radioKeyBrand]: true }
@@ -62,6 +64,12 @@ export type StoredMessage = {
   rawHex?: string
   outgoing?: StoredOutgoing
   channelOutgoing?: StoredChannelOutgoing
+  receivedAt?: number
+  /** Earlier wire timestamps retained when a failed DM is retried. */
+  reactionTimestamps?: number[]
+  /** Derived from the saved receipts, never trusted as input to a cache write. */
+  reaction?: MessageReaction
+  reactions?: ReactionSummary[]
 }
 
 export type StoredChannelOutgoing = {
@@ -94,7 +102,7 @@ export type StoredOutgoing = {
 }
 
 export type DirectChange =
-  | { kind: 'begin'; id: string; recipient: string; text: string; options: DirectSendOptions; now: number }
+  | { kind: 'begin'; id: string; recipient: string; text: string; options: DirectSendOptions; now: number; clearDraft?: boolean }
   | { kind: 'retry'; id: string; options: DirectSendOptions; now: number }
   | { kind: 'attempt'; id: string; wireTimestamp: number; attempt: number; code: string }
   | { kind: 'accepted'; id: string; wireTimestamp: number; attempt: number; code: string; route: 'direct' | 'flood' }
@@ -150,6 +158,7 @@ export type RadioData = {
   lastDirectTimestamp?: number
   lastChannelTimestamp?: number
   readMessages?: string[]
+  reactionError?: string
 }
 
 export type RadioUpdate = {
@@ -302,7 +311,7 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
   if (messages?.length) {
     const seen = new Set(current.messages.map(({ id }) => id))
     next.messages = [...current.messages]
-    for (const { id, conversationId, sender, timestamp, text, region, receipt, rawHex, outgoing, channelOutgoing } of messages) {
+    for (const { id, conversationId, sender, timestamp, text, region, receipt, rawHex, outgoing, channelOutgoing, receivedAt, reactionTimestamps } of messages) {
       if (!id.trim()) {
         throw new RadioStorageError('update', 'A stable message identifier is required.')
       }
@@ -315,6 +324,8 @@ function mergeUpdate(current: RadioData, update: RadioUpdate): RadioData {
         ...(rawHex !== undefined ? { rawHex } : {}),
         ...(outgoing ? { outgoing: copyOutgoing(outgoing) } : {}),
         ...(channelOutgoing ? { channelOutgoing: { ...channelOutgoing } } : {}),
+        ...(receivedAt !== undefined ? { receivedAt } : {}),
+        ...(reactionTimestamps ? { reactionTimestamps: [...reactionTimestamps] } : {}),
       })
     }
   }
@@ -589,7 +600,8 @@ function directChange(current: RadioData, change: DirectChange): DirectChangeRes
         ...current,
         lastDirectTimestamp: wireTimestamp,
         messages: [...current.messages, message],
-        drafts: current.drafts.filter((draft) => draft.conversationId !== conversationId || draft.text !== change.text),
+        drafts: change.clearDraft === false ? current.drafts
+          : current.drafts.filter((draft) => draft.conversationId !== conversationId || draft.text !== change.text),
       }
     } else {
       const existing = current.messages.find((entry) => entry.id === change.id)
@@ -599,6 +611,7 @@ function directChange(current: RadioData, change: DirectChange): DirectChangeRes
       next = { ...current, lastDirectTimestamp: wireTimestamp }
       replace({
         ...existing,
+        reactionTimestamps: [...new Set([...(existing.reactionTimestamps ?? []), existing.outgoing.wireTimestamp])],
         outgoing: {
           ...copyOutgoing(existing.outgoing), status: 'sending', wireTimestamp, attempt: 0,
           options, route: null, error: null, roundTripMs: null,
@@ -782,7 +795,7 @@ export async function openRadioStorage(factory?: IDBFactory) {
     read: (key: RadioKey) => runTransaction<RadioData | null>(db, 'readonly', (store, finish) => {
       const request = store.get(radioKeyFromPublicKey(key))
       request.onsuccess = () => finish(request.result ?? null)
-    }),
+    }).then((data) => data ? resolveReactions(data, key) : null),
     purge: (key: RadioKey) => runTransaction<void>(db, 'readwrite', (store, finish) => {
       const request = store.delete(radioKeyFromPublicKey(key))
       request.onsuccess = () => finish(undefined)
@@ -846,7 +859,7 @@ export async function openRadioStorage(factory?: IDBFactory) {
           }
         }
       },
-    ),
+    ).then(async (result) => ({ ...result, data: await resolveReactions(result.data, key) })),
     changeChannelMessage: (key: RadioKey, change: ChannelMessageChange) => runTransaction<DirectChangeResult>(
       db,
       'readwrite',
@@ -866,6 +879,6 @@ export async function openRadioStorage(factory?: IDBFactory) {
           }
         }
       },
-    ),
+    ).then(async (result) => ({ ...result, data: await resolveReactions(result.data, key) })),
   }
 }

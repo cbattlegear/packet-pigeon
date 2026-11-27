@@ -4,6 +4,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import { expectedDirectAck } from '../radio/direct-message.ts'
 import { openRadioStorage, radioKeyFromPublicKey, RadioStorageError } from '../storage/index.ts'
 import { DirectMessages } from './direct-messages.ts'
+import { buildReaction } from '../radio/reactions.ts'
 
 const publicKey = 'ab'.repeat(32)
 const key = radioKeyFromPublicKey(publicKey)
@@ -66,6 +67,91 @@ async function fixture(open) {
   await direct.load(publicKey)
   return { factory, source, direct, openStorage }
 }
+
+test('DM reactions use native wire text and normal ACK/retry tracking without touching drafts', async () => {
+  const { direct, source, openStorage } = await fixture()
+  const storage = await openStorage()
+  const stamp = 1704067200
+  try {
+    await storage.update(key, {
+      contacts: [{ publicKey: recipient, name: 'Friend', details: { type: 1 } }],
+      draft: { conversationId: `direct:${recipient}`, text: 'Keep composing' },
+      messages: [{ id: 'target', conversationId: `direct:${recipient}`, sender: recipient, text: 'ok', timestamp: stamp * 1000,
+        receipt: { kind: 'direct-text', receiptId: 'target', senderKeyPrefix: recipient.slice(0, 12), signatureHex: null,
+          textType: 0, senderTimestamp: stamp, text: 'ok', pathLength: 255, snrDb: null } }],
+    })
+  } finally { storage.close() }
+  await direct.load(key)
+  source.onSend = async (send) => {
+    if (source.sends.length === 2) setTimeout(() => source.ack(send.code), 0)
+    return { route: 'direct', expectedAck: send.code, timeoutMs: 1 }
+  }
+  assert.equal(await direct.react(key, 'target', '👍', options), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  assert.equal(source.sends.length, 2)
+  assert.ok(source.sends.every(({ text }) => text === '👍\nzgya0xt2'))
+  const data = direct.getSnapshot().data
+  assert.equal(data.messages.find(({ outgoing }) => outgoing).outgoing.status, 'delivered')
+  assert.deepEqual(data.messages.find(({ id }) => id === 'target').reactions, [{ emoji: '👍', count: 1, senders: ['You'] }])
+  assert.equal(direct.draft(key, `direct:${recipient}`), 'Keep composing')
+})
+
+test('channel reaction acceptance failures remain visible and late outcome saving does not retransmit', async () => {
+  let fail = false
+  const { direct, source, openStorage } = await fixture(async (factory) => {
+    const storage = await openRadioStorage(factory)
+    const change = storage.changeChannelMessage
+    storage.changeChannelMessage = async (key, update) => {
+      if (fail && update.kind === 'accepted') throw new Error('Write failed')
+      return change(key, update)
+    }
+    return storage
+  })
+  const storage = await openStorage()
+  try {
+    await storage.update(key, {
+      channels: [{ index: 1, name: 'Public' }], draft: { conversationId: 'channel:1', text: 'Keep composing' },
+      messages: [{ id: 'target', conversationId: 'channel:1', sender: '', text: 'Alice: ok', timestamp: 1704067200000,
+        receipt: { kind: 'channel-text', receiptId: 'target', channelIndex: 1, textType: 0, senderTimestamp: 1704067200,
+          text: 'Alice: ok', pathLength: 255, snrDb: null } }],
+    })
+  } finally { storage.close() }
+  await direct.load(key)
+  fail = true
+  assert.equal(await direct.react(key, 'target', '❤️', options), true)
+  await waitFor(() => direct.getSnapshot().activeId === null)
+  assert.equal(source.channelSends[0].text, await buildReaction('❤️', 'ok', 1704067200, 'Alice'))
+  assert.equal(source.channelSends[0].senderName, 'Pigeon')
+  assert.equal(direct.getSnapshot().pending, 1)
+  assert.equal(direct.getSnapshot().data.messages.find(({ id }) => id === 'target').reactions, undefined)
+  assert.equal(direct.draft(key, 'channel:1'), 'Keep composing')
+  fail = false
+  await direct.retrySaving()
+  assert.equal(source.channelSends.length, 1)
+  assert.deepEqual(direct.getSnapshot().data.messages.find(({ id }) => id === 'target').reactions,
+    [{ emoji: '❤️', count: 1, senders: ['You'] }])
+  source.phase('idle')
+  assert.equal(await direct.react(key, 'target', '👍', options), false)
+  assert.match(direct.getSnapshot().error, /Connect the selected radio/)
+  assert.equal(source.channelSends.length, 1)
+})
+
+test('duplicate target wire identities stop a reaction before radio transmission', async () => {
+  const { direct, source, openStorage } = await fixture()
+  const storage = await openStorage()
+  const text = 'Alice: ok'
+  try {
+    await storage.update(key, { channels: [{ index: 1, name: 'Public' }], messages: ['one', 'two'].map((id) => ({
+      id, conversationId: 'channel:1', sender: '', text, timestamp: 1704067200000,
+      receipt: { kind: 'channel-text', receiptId: id, channelIndex: 1, textType: 0, senderTimestamp: 1704067200,
+        text, pathLength: 255, snrDb: null },
+    })) })
+  } finally { storage.close() }
+  await direct.load(key)
+  assert.equal(await direct.react(key, 'one', '👍', options), false)
+  assert.match(direct.getSnapshot().error, /share this reaction identifier/)
+  assert.equal(source.channelSends.length, 0)
+})
 
 test('reports cache read failures separately, retains prior data, and retries without losing other errors', async () => {
   let fail = false
