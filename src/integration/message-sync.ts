@@ -34,7 +34,7 @@ function makeReceipt(frame: Uint8Array, id: string): StoredMessage {
     try {
       const receipt = { ...decodeQueuedMessage(frame), receiptId: id }
       return {
-        id, rawHex, receipt,
+        id, rawHex, receipt, receivedAt: Date.now(),
         conversationId: receipt.kind === 'direct-text'
           ? `direct:${receipt.senderKeyPrefix}` : `channel:${receipt.channelIndex}`,
         sender: receipt.kind === 'direct-text' ? receipt.senderKeyPrefix : '',
