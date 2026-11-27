@@ -1354,6 +1354,8 @@ included at `node_modules/ws/LICENSE` after installation.
 
 Use **Map** to pan, zoom, and search nodes by name or public key. The base map
 starts with public-domain [Natural Earth land data](https://www.naturalearthdata.com/downloads/110m-physical-vectors/110m-land/).
+Scroll the wheel or use a trackpad over the map to zoom around the pointer;
+wheel scrolling over adjacent controls continues to scroll that control or page.
 Selecting OpenStreetMap requests tiles for the viewed area.
 **Show my location** requests browser permission and keeps that position in
 the current visit. The Local contacts view includes the current radio session's
