@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { CompanionSession, detectLanBridge, getWebBluetoothSupport, getWebSerialSupport } from './radio/index.ts'
-import { framedTransport } from './radio/transport.ts'
+import { framedTransport, transportName } from './radio/transport.ts'
 import { SessionCache } from './integration/session-cache.ts'
 import { MessageSync } from './integration/message-sync.ts'
 import { DirectMessages } from './integration/direct-messages.ts'
@@ -15,7 +15,9 @@ import { storedContact } from './integration/contact-record.ts'
 import { mapRadioContacts, readSavedMapNodes } from './map/nodes.ts'
 import type { Coordinates, MapNode, MapNodeData } from './map/nodes.ts'
 import './App.css'
-import { OfflineStatus } from './offline/OfflineStatus.tsx'
+import { WorkspaceHeader } from './WorkspaceHeader.tsx'
+import { sections } from './workspace-navigation.ts'
+import type { Section } from './workspace-navigation.ts'
 import { PreferencesPanel } from './preferences/PreferencesPanel.tsx'
 import { useAppPreferences } from './preferences/use-app-preferences.ts'
 import { useScreenWakeLock } from './preferences/use-screen-wake-lock.ts'
@@ -50,9 +52,6 @@ function applyStartupRetention() {
   return startupRetention
 }
 
-const sections = ['Chats', 'Contacts', 'Discovery', 'Channels', 'Map', 'Tools', 'Diagnostics', 'Settings'] as const
-type Section = (typeof sections)[number]
-
 function sectionFromHash(): Section {
   const hash = window.location.hash.slice(1).toLowerCase()
   return sections.find((section) => section.toLowerCase() === hash) ?? 'Chats'
@@ -86,7 +85,9 @@ function App() {
   const settings = useAppPreferences()
   const activeChat = useRef<{ key: RadioKey | null; id: string | null }>({ key: null, id: null })
   const [navigationRequest, setNavigationRequest] = useState<{ key: RadioKey; id: string; sequence: number } | null>(null)
-  const [radioNavigation, setRadioNavigation] = useState<{ key: RadioKey; section: 'Contacts' | 'Channels'; sequence: number } | null>(null)
+  const [radioNavigation, setRadioNavigation] = useState<{
+    key: RadioKey; section: 'Contacts' | 'Channels'; sequence: number; contactKey?: string
+  } | null>(null)
   const navigationSequence = useRef(0)
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermission | 'unsupported'>(
     () => typeof Notification === 'undefined' ? 'unsupported' : Notification.permission,
@@ -145,6 +146,7 @@ function App() {
     return true
   }, [selectDiscoveryRadio])
   const radioContacts = useMemo(() => snapshot.contacts.map(storedContact), [snapshot.contacts])
+  const savedContactKeys = useMemo(() => new Set(radioContacts.map(({ publicKey }) => publicKey.toLowerCase())), [radioContacts])
   const adverts = useMemo(() => discoveryEntries(discovery.data,
     discoveryConnected && snapshot.progress?.stage !== 'contacts' ? radioContacts : undefined),
   [discovery.data, discoveryConnected, radioContacts, snapshot.progress?.stage])
@@ -336,76 +338,29 @@ function App() {
         Skip to content
       </a>
 
-      <header className="app-header">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">PP</span>
-          <div>
-            <p className="brand-name">Packet Pigeon</p>
-            <p className="brand-description">MeshCore workspace</p>
-          </div>
-        </div>
-        <div className="connection-area">
-          <div className="connection-controls">
-            <div className="header-status" role="status">
-              <span className={`status-dot${snapshot.phase === 'ready' ? ' status-dot--connected' : ''}`} aria-hidden="true" />
-              <span>{connection}</span>
-            </div>
-            <button
-              type="button"
-              disabled={controlsDisabled || (!canDisconnect && !usbSupport.supported)}
-              aria-describedby={chatView ? undefined : 'connection-warning'}
-              onClick={() => void (canDisconnect ? session.disconnect() : session.connect())}
-            >
-              {canDisconnect ? 'Disconnect' : 'Connect USB'}
-            </button>
-            {!canDisconnect && (
-              <button type="button" disabled={controlsDisabled || !bluetoothSupport.supported}
-                aria-describedby={chatView ? undefined : 'connection-warning'} onClick={() => void session.connectBluetooth()}>
-                Connect Bluetooth
-              </button>
-            )}
-            {!canDisconnect && lanAvailable && (
-              <button type="button" disabled={controlsDisabled} aria-describedby={chatView ? undefined : 'connection-warning'}
-                onClick={() => void session.connectLan()}>
-                Connect local network
-              </button>
-            )}
-          </div>
-          {!chatView && <p className="connection-warning" id="connection-warning">
-            Message sync is manual.
-          </p>}
-          <OfflineStatus quiet={chatView} />
-        </div>
-      </header>
-
-      <nav className="sidebar" aria-label="Main navigation">
-        <p className="nav-label">Workspace</p>
-        <ul className="nav-list">
-          {sections.map((section) => (
-            <li key={section}>
-              <a
-                href={`#${section.toLowerCase()}`}
-                aria-current={activeSection === section ? 'page' : undefined}
-              >
-                <span className="nav-marker" aria-hidden="true">
-                  {section.slice(0, 1)}
-                </span>
-                {section}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      <WorkspaceHeader section={activeSection} connection={connection} connected={snapshot.phase === 'ready'}
+        deviceLabel={canDisconnect && snapshot.device && snapshot.transport
+          ? `${snapshot.device.name || 'Radio'} · ${transportName(snapshot.transport)}` : canDisconnect ? connection : 'Connect radio'}
+        controls={<>
+          <button type="button" disabled={controlsDisabled || (!canDisconnect && !usbSupport.supported)}
+            onClick={() => void (canDisconnect ? session.disconnect() : session.connect())}>
+            {canDisconnect ? 'Disconnect' : 'Connect USB'}
+          </button>
+          {!canDisconnect && <button type="button" disabled={controlsDisabled || !bluetoothSupport.supported}
+            onClick={() => void session.connectBluetooth()}>Connect Bluetooth</button>}
+          {!canDisconnect && lanAvailable && <button type="button" disabled={controlsDisabled}
+            onClick={() => void session.connectLan()}>Connect local network</button>}
+          {!canDisconnect && !usbSupport.supported && <p role="status">{usbSupport.error.message}</p>}
+          {!canDisconnect && !bluetoothSupport.supported && <p role="status">{bluetoothSupport.error.message}</p>}
+        </>} />
 
       <main className="main-content" id="main-content" tabIndex={-1}>
-        {(!usbSupport.supported || !bluetoothSupport.supported || snapshot.error || retention.error || retention.removed > 0
+        {(snapshot.error || retention.error || retention.removed > 0
           || cacheStatus.error || messageStatus.error || messageStatus.pending || directStatus.error
           || directStatus.cacheLoad.state === 'error' || notificationError) && (
           <div className="notices">
             {retention.error && <p role="alert">Channel retention could not finish: {retention.error} Check the radio cache and channel settings, then reload to retry.</p>}
             {retention.removed > 0 && <p role="status">Channel retention removed {retention.removed} cached message{retention.removed === 1 ? '' : 's'}.</p>}
-            {!usbSupport.supported && <p role="status">{usbSupport.error.message}</p>}
-            {!bluetoothSupport.supported && <p role="status">{bluetoothSupport.error.message}</p>}
             {snapshot.error && <p role="alert">{snapshot.error.message}</p>}
             {messageStatus.error && <p role="alert">Message sync: {messageStatus.error}</p>}
             {notificationError && <p role="alert">{notificationError}</p>}
@@ -560,6 +515,13 @@ function App() {
               <Suspense fallback={<StateMessage kind="loading" title="Loading map" description="Opening the map and terrain tools." />}>
                 <MapWorkspace radioNodes={radioNodes} showTerrain={activeSection === 'Tools'}
                   mapData={mapData} setMapData={setMapData}
+                  savedContactKeys={savedContactKeys}
+                  onOpenContact={(contactKey) => {
+                    if (!snapshot.device || !savedContactKeys.has(contactKey)) return
+                    setRadioNavigation({ key: radioKeyFromPublicKey(snapshot.device.publicKey), contactKey,
+                      section: 'Contacts', sequence: ++navigationSequence.current })
+                    window.location.hash = 'contacts'
+                  }}
                   contactFocus={contactFocus} discoveryRequest={discoveryMapRequest}
                   displayPath={displayPath} clearPath={() => setDisplayPath(null)}
                   traceSelection={mapTrace} changeTraceSelection={setMapTrace}
@@ -579,16 +541,9 @@ function App() {
       {shareDialog?.kind === 'import' && <ImportShare snapshot={snapshot} session={session} close={() => setShareDialog(null)} />}
       {shareDialog?.kind === 'export' && <ShareCode link={shareDialog.link} close={() => setShareDialog(null)} />}
 
-      {(!chatView || syncStatus || cacheDetail) && <footer className="status-bar" aria-label="Workspace status">
-        {!chatView && <>
-          <div><span>Device</span><strong>{snapshot.device
-            ? `${snapshot.phase === 'syncing' || snapshot.phase === 'ready' ? '' : 'Last: '}${snapshot.device.name || 'Unnamed radio'}`
-            : 'None'}</strong></div>
-          <div><span>Connection</span><strong>{connection}</strong></div>
-        </>}
-        {(!chatView || syncStatus) && <div><span>Sync</span><strong role="status" aria-label="Sync status">
-          {syncStatus || (snapshot.phase === 'ready' ? 'Idle' : 'Not syncing')}</strong></div>}
-        {(!chatView || cacheDetail) && <p>{cacheDetail || 'Local cache idle'}</p>}
+      {(syncStatus || cacheDetail) && <footer className="status-bar" aria-label="Workspace status">
+        {syncStatus && <strong role="status" aria-label="Sync status">{syncStatus}</strong>}
+        {cacheDetail && <p>{cacheDetail}</p>}
       </footer>}
     </div>
   )

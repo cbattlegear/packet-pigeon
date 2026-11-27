@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -18,6 +19,12 @@ after(async () => {
   await browser?.close()
   await server?.close()
 })
+
+async function openChannelEditor(scope, channel, action = 'Settings') {
+  await scope.getByRole('button', { name: `Actions for ${channel}`, exact: true }).click()
+  await scope.getByRole('menuitem', { name: action, exact: true }).click()
+  return scope.getByRole('dialog', { name: `${channel} · ${action}`, exact: true })
+}
 
 test('notification permission and per-channel mode persist independently', async (t) => {
   const context = await browser.newContext()
@@ -43,11 +50,15 @@ test('notification permission and per-channel mode persist independently', async
   }, radio)
   await page.getByRole('link', { name: 'Channels' }).click()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
-  await page.getByLabel('Browser alerts for Public').selectOption('mentions')
-  await page.getByText('Notification mode saved for this browser and radio.').waitFor()
+  let editor = await openChannelEditor(page, 'Public')
+  await editor.getByLabel('Browser alerts for Public').selectOption('mentions')
+  await editor.getByText('Alerts saved.', { exact: true }).waitFor()
   await page.reload()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
-  assert.equal(await page.getByLabel('Browser alerts for Public').inputValue(), 'mentions')
+  editor = await openChannelEditor(page, 'Public')
+  assert.equal(await editor.getByLabel('Browser alerts for Public').inputValue(), 'mentions')
+  await editor.getByRole('button', { name: 'Close', exact: true }).click()
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Settings' }).click()
   assert.equal(await page.getByLabel('Alert for synced messages').isChecked(), true)
 })
@@ -106,6 +117,7 @@ test('sync progress follows saved receipts and a saved message alerts once', asy
   page.setDefaultTimeout(8000)
   await page.goto(`${url}#settings`)
   await page.getByLabel('Alert for synced messages').check()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('link', { name: 'Chats' }).click()
   const sync = page.getByRole('button', { name: 'Sync messages' })
@@ -191,6 +203,7 @@ test('reconnect progress does not hide an unsaved receipt', async (t) => {
   const page = await context.newPage()
   page.setDefaultTimeout(8000)
   await page.goto(url)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   const status = page.getByRole('status', { name: 'Sync status' })
   await page.getByRole('button', { name: 'Sync messages' }).click()
@@ -269,11 +282,14 @@ test('discovery and full-storage alerts retain their radio across a switch and o
   await page.goto(`${url}#settings`)
   await page.getByLabel('Alert for newly discovered contacts (USB)').check()
   await page.getByLabel('Alert when radio contact or channel storage is full').check()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.waitForFunction(() => window.alerts.filter((entry) => entry.options.tag.includes('ab'.repeat(32))).length === 2)
   await page.evaluate(() => window.emitDiscovery())
   await page.waitForFunction(() => window.alerts.filter((entry) => entry.options.tag.includes('ab'.repeat(32))).length === 3)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Disconnect' }).click()
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.waitForFunction(() => window.alerts.some((entry) => entry.options.tag.includes('cd'.repeat(32))))
   for (const kind of ['discovery', 'full:' + 'ab'.repeat(32) + ':contacts', 'full:' + 'ab'.repeat(32) + ':channels']) {
@@ -282,6 +298,7 @@ test('discovery and full-storage alerts retain their radio across a switch and o
     await page.getByRole('alert').filter({ hasText: 'The alert belongs to a different radio' }).first().waitFor()
     assert.equal(new URL(page.url()).hash, '#settings')
   }
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Disconnect' }).click()
   for (const [kind, label] of [['discovery', 'Discovery cache radio'], ['contacts', 'Cached radio'], ['channels', 'Cached radio']]) {
     await page.evaluate((kind) => window.alerts.find((entry) => entry.options.tag.includes('ab'.repeat(32))
@@ -373,6 +390,7 @@ test('enabling oldest unread repositions the open conversation and preserves its
   })
   const input = page.getByRole('textbox', { name: 'Message', exact: true })
   await input.fill('Keep this draft')
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Settings' }).click()
   await page.getByLabel('Open conversations at the oldest unread message').check()
   await page.getByRole('link', { name: 'Chats' }).click()
@@ -414,10 +432,12 @@ test('sender blocks preserve chat preferences and unread receipts until restored
   }, radio)
   await page.reload()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
-  await page.getByText('Observed sender names').click()
-  await page.getByRole('button', { name: 'Block sender name Alice' }).click()
-  await page.getByText('Sender name blocked on this radio.').waitFor()
+  const senders = await openChannelEditor(page, 'Public', 'Sender names')
+  await senders.getByRole('button', { name: 'Block sender name Alice' }).click()
+  await senders.getByText('Sender name blocked on this radio.').waitFor()
+  await senders.getByRole('button', { name: 'Close', exact: true }).click()
 
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Settings' }).click()
   await page.getByLabel('Show conversation previews').uncheck()
   await page.getByRole('link', { name: 'Chats' }).click()
@@ -425,7 +445,7 @@ test('sender blocks preserve chat preferences and unread receipts until restored
   const conversation = page.getByRole('region', { name: 'Conversation with Public' })
   await conversation.locator('[data-receipt-id="Bob"]').getByText('Bob', { exact: true }).waitFor()
   assert.equal(await conversation.getByText('Alice', { exact: true }).count(), 0)
-  assert.equal(await page.getByRole('navigation', { name: 'Conversations' }).getByText('Bob: hello').count(), 0)
+  assert.equal(await page.getByRole('navigation', { name: 'Conversations' }).getByText('hello', { exact: true }).count(), 0)
   const readWhileBlocked = await page.evaluate(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()
@@ -436,8 +456,11 @@ test('sender blocks preserve chat preferences and unread receipts until restored
 
   await page.getByRole('link', { name: 'Channels' }).click()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
-  await page.getByRole('button', { name: 'Unblock sender name Alice' }).click()
-  await page.getByText('Sender name unblocked on this radio.').waitFor()
+  await page.getByRole('button', { name: 'Blocked names (1)', exact: true }).click()
+  const blockedNames = page.getByRole('dialog', { name: 'Blocked sender names' })
+  await blockedNames.getByRole('button', { name: 'Unblock sender name Alice' }).click()
+  await blockedNames.getByText('Sender name unblocked on this radio.').waitFor()
+  await blockedNames.getByRole('button', { name: 'Close', exact: true }).click()
   await page.getByRole('link', { name: 'Chats' }).click()
   await conversation.locator('[data-receipt-id="Alice"]').getByText('Alice', { exact: true }).waitFor()
   await page.waitForFunction(async (radio) => {
@@ -446,6 +469,7 @@ test('sender blocks preserve chat preferences and unread receipts until restored
     try { return (await storage.read(radioKeyFromPublicKey(radio))).readMessages?.includes('Alice') }
     finally { storage.close() }
   }, radio)
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Settings' }).click()
   assert.equal(await page.getByLabel('Show conversation previews').isChecked(), false)
 })
@@ -478,6 +502,7 @@ test('channel retention confirms deletion and pauses when a slot changes names',
   }, { radio, otherRadio })
   await page.reload()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await openChannelEditor(page, 'Public')
   const retention = page.getByRole('combobox', { name: 'Message retention for Public' })
   assert.equal(await retention.inputValue(), 'forever')
 
@@ -522,6 +547,7 @@ test('channel retention confirms deletion and pauses when a slot changes names',
   assert.deepEqual(after.current.readMessages, ['recent'])
   assert.deepEqual(after.other.messages.map(({ id }) => id), ['old'])
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await openChannelEditor(page, 'Public')
   assert.equal(await retention.inputValue(), '1')
 
   await page.evaluate(async (radio) => {
@@ -537,9 +563,10 @@ test('channel retention confirms deletion and pauses when a slot changes names',
   }, radio)
   await page.reload()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await openChannelEditor(page, 'Replacement')
   const replacement = page.getByRole('combobox', { name: 'Message retention for Replacement' })
   assert.equal(await replacement.inputValue(), 'paused')
-  await page.getByText('Retention is paused because this slot changed names. Choose a setting for this channel.').waitFor()
+  await page.getByText('Slot changed. Choose retention again.').waitFor()
   const saved = await page.evaluate(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
     const storage = await openRadioStorage()
@@ -555,6 +582,7 @@ test('channel retention confirms deletion and pauses when a slot changes names',
   }, radio)
   await page.reload()
   await page.getByRole('combobox', { name: 'Cached radio' }).selectOption(radio)
+  await openChannelEditor(page, 'Public')
   assert.equal(await retention.inputValue(), 'paused')
   const afterReturn = await page.evaluate(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
@@ -665,6 +693,7 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
     render()
   }, radio)
   const fixture = page.locator('#channel-rename-fixture')
+  const settings = await openChannelEditor(fixture, 'Public')
   const retention = fixture.getByRole('combobox', { name: 'Message retention for Public' })
   await retention.waitFor({ state: 'visible' })
   await page.waitForFunction(() => {
@@ -675,11 +704,14 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
   await scope.selectOption('region')
   await fixture.getByRole('textbox', { name: 'Region name for Public' }).fill('North')
   await fixture.getByRole('button', { name: 'Save sending scope' }).click()
-  await fixture.getByText('Sending scope saved for this browser and radio. No radio settings were changed.').waitFor()
+  await fixture.getByText('Sending scope saved locally.', { exact: true }).waitFor()
   assert.equal(await fixture.getByRole('textbox', { name: 'Region name for Public' }).inputValue(), '#North')
-  await fixture.getByRole('textbox', { name: 'Rename' }).fill('Renamed')
-  await fixture.getByRole('button', { name: 'Save name' }).click()
-  await fixture.getByText('Channel renamed on the radio.').waitFor()
+  await settings.getByRole('button', { name: 'Close', exact: true }).click()
+  const rename = await openChannelEditor(fixture, 'Public', 'Rename')
+  await rename.getByRole('textbox', { name: 'Rename' }).fill('Renamed')
+  await rename.getByRole('button', { name: 'Save name' }).click()
+  await fixture.getByText('Channel renamed.', { exact: true }).waitFor()
+  await openChannelEditor(fixture, 'Renamed')
   assert.equal(await fixture.getByRole('combobox', { name: 'Message retention for Renamed' }).inputValue(), '30')
   const saved = await page.evaluate(async (radio) => {
     const { openRadioStorage, radioKeyFromPublicKey } = await import('/src/storage/index.ts')
@@ -692,10 +724,10 @@ test('a locally renamed channel keeps its retention setting', async (t) => {
   }, radio)
   assert.deepEqual(saved.retention, [{ index: 0, channelName: 'Renamed', days: 30 }])
   assert.deepEqual(saved.scopes, [{ index: 0, channelName: 'Public', scope: { mode: 'region', name: '#North' }, paused: true }])
-  await fixture.getByText('Sending scope is paused because this slot changed names. Save a scope before sending.').waitFor()
+  await fixture.getByText('Slot changed. Save a scope before sending.', { exact: true }).waitFor()
   await fixture.getByRole('combobox', { name: 'Sending scope for Renamed' }).selectOption('default')
   await fixture.getByRole('button', { name: 'Save sending scope' }).click()
-  await fixture.getByText('Sending scope is paused because this slot changed names. Save a scope before sending.').waitFor({ state: 'hidden' })
+  await fixture.getByText('Slot changed. Save a scope before sending.', { exact: true }).waitFor({ state: 'hidden' })
   await page.setViewportSize({ width: 390, height: 844 })
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth) <= 1)
 })

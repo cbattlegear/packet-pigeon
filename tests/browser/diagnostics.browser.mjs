@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
@@ -41,6 +42,7 @@ test('captures received packets, filters the log and redacts clipboard and file 
   await page.goto(server.resolvedUrls.local[0] + '#diagnostics')
   const start = page.getByRole('button', { name: 'Start capture' })
   assert(await start.isDisabled())
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.waitForFunction(() => !Array.from(document.querySelectorAll('button')).find(
     (button) => button.textContent === 'Start capture')?.disabled)
@@ -54,6 +56,7 @@ test('captures received packets, filters the log and redacts clipboard and file 
     window.fixtureRx([0x88, 4])
     window.fixtureRx([0x88, 15, 210, 0x0e, 0, 1, 2, 3, 4])
   })
+  await openWorkspaceMenu(page, 'More')
   await page.getByRole('link', { name: 'Diagnostics' }).click()
   await page.getByText('3 of 3 packets').waitFor()
   await page.getByLabel('Decode status').selectOption('malformed')

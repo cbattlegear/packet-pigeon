@@ -63,11 +63,11 @@ test('cached chat navigation, search, unread markers, scrolling and keyboard dra
   await page.getByRole('button', { name: /Alpha/ }).waitFor()
   assert.equal(await page.getByRole('button', { name: /Alpha.*unread/ }).count(), 0)
   await page.getByRole('link', { name: 'Chats' }).click()
-  await page.getByLabel('Unread only').check()
+  await page.getByRole('button', { name: 'Unread only' }).click()
   assert.equal(await page.getByRole('button', { name: /Bravo/ }).count(), 1)
   assert.equal(await page.getByRole('button', { name: /Alpha/ }).count(), 0)
   await page.getByLabel('New chat').selectOption(`direct:${bravo}`)
-  assert.equal(await page.getByLabel('Unread only').isChecked(), false)
+  assert.equal(await page.getByRole('button', { name: 'Unread only' }).getAttribute('aria-pressed'), 'false')
   const pane = page.getByRole('region', { name: 'Conversation with Bravo' })
   await pane.waitFor()
   await pane.getByText('New messages', { exact: true }).waitFor()
@@ -264,15 +264,19 @@ test('searches across the selected radio and focuses the exact cached message', 
   assert.equal(await archived.locator('[data-receipt-id="repeat"]').evaluate((element) => element === document.activeElement), true)
 
   await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: 'Show chats' }).click()
   await results.getByRole('button', { name: /Orchard marker/ }).click()
   const narrow = await found.evaluate((element) => {
     const { top, bottom } = element.getBoundingClientRect()
     return { focused: element === document.activeElement, activeId: document.activeElement?.id, top, bottom, height: innerHeight }
   })
   assert.ok(narrow.focused && narrow.top >= -1 && narrow.bottom <= narrow.height, JSON.stringify(narrow))
+  const composerBounds = await draft.boundingBox()
+  assert.ok(composerBounds.y + composerBounds.height <= narrow.height)
   assert.equal(await draft.inputValue(), 'Keep this draft')
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth))
 
+  await page.getByRole('button', { name: 'Show chats' }).click()
   await radios.selectOption(otherRadio)
   await page.getByText('Search all chats', { exact: true }).click()
   assert.equal(await allChats.inputValue(), '')

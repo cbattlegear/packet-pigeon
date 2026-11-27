@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -145,6 +146,7 @@ test('administrator CLI uses explicit sends and safely correlates synced replies
     Object.defineProperty(navigator, 'serial', { value: { async requestPort() { return port } } })
   })
   await page.goto(server.resolvedUrls.local[0] + '#contacts')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByRole('button', { name: /^Fixture repeater/ }).click()
   await page.getByText('Repeater login and status', { exact: true }).click()

@@ -38,7 +38,7 @@ function formatPosition(position: Coordinates) {
 export default function MapWorkspace({
   radioNodes = emptyNodes, radioPosition = null, showTerrain = false, contactFocus = null, discoveryRequest = 0, onSharePosition,
   displayPath = null, clearPath, traceSelection = emptyNodes, changeTraceSelection, reviewTrace,
-  mapData, setMapData,
+  mapData, setMapData, savedContactKeys, onOpenContact,
 }: {
   radioNodes?: readonly MapNode[]; radioPosition?: Coordinates | null; showTerrain?: boolean
   contactFocus?: { position: Coordinates; terrain: boolean } | null
@@ -51,6 +51,8 @@ export default function MapWorkspace({
   reviewTrace?: () => void
   mapData: MapNodeData
   setMapData: (update: (previous: MapNodeData) => MapNodeData) => void
+  savedContactKeys?: ReadonlySet<string>
+  onOpenContact?: (publicKey: string) => void
 }) {
   const { local: localNodes, public: publicNodes } = mapData
   const [favorites, setFavorites] = useState(savedFavorites)
@@ -102,6 +104,7 @@ export default function MapWorkspace({
     search: deferredSearch, role, favoritesOnly,
   }), [nodes, deferredSearch, role, favoritesOnly])
   const selected = selection ? nodes.get(selection) : undefined
+  const positions = useMemo(() => filtered.flatMap(({ position }) => mapPosition(position) ? [position] : []), [filtered])
   const pageSize = 30
   const page = Math.min(resultPage, Math.max(0, Math.ceil(filtered.length / pageSize) - 1))
   const reportTileError = useCallback(() => setTileError(true), [])
@@ -213,9 +216,9 @@ export default function MapWorkspace({
   }
 
   return (
-    <section className="map-workspace" id="map" aria-labelledby="map-heading">
-      <h2 id="map-heading">Map and terrain</h2>
+    <section className="map-workspace" id="map" aria-label="Map and terrain">
       <div className="map-toolbar">
+        <button type="button" onClick={() => setFocus([...positions])} disabled={!positions.length}>Fit points</button>
         <label><span id="map-source-label">Node source</span>
           <select value={source} aria-labelledby="map-source-label" onChange={(event) => {
             setSource(event.currentTarget.value as NodeSource)
@@ -227,7 +230,8 @@ export default function MapWorkspace({
         </label>
         <label><span id="map-basemap-label">Base map</span>
           <select value={useTiles ? 'osm' : 'grid'} aria-labelledby="map-basemap-label"
-            aria-describedby="tile-privacy" onChange={(event) => {
+            aria-describedby="tile-privacy"
+            title="OpenStreetMap receives requests for the area you view." onChange={(event) => {
             setTileError(false)
             setUseTiles(event.currentTarget.value === 'osm')
           }}>
@@ -235,6 +239,7 @@ export default function MapWorkspace({
             <option value="osm">OpenStreetMap</option>
           </select>
         </label>
+        <details className="map-tool-menu"><summary>Map actions</summary><div className="map-tool-items">
         <button type="button" onClick={locate} disabled={locating}>
           {locating ? 'Finding location…' : 'Show my location'}
         </button>
@@ -243,8 +248,9 @@ export default function MapWorkspace({
           setMyLocation(null)
           setLocationMessage('')
         }}>Clear my location</button>}
+        </div></details>
       </div>
-      <p className="map-help" id="tile-privacy">Selecting OpenStreetMap sends the viewed area to its tile service.</p>
+      <p className="visually-hidden" id="tile-privacy">Selecting OpenStreetMap sends the viewed area to its tile service.</p>
       {source === 'discovery' && <p className="map-help"><a href="#discovery">Browse discovery history and radio paths</a></p>}
       {tileError && <p role="status" className="map-notice">Map tiles could not load. Node and terrain layers are still available.</p>}
       {locationMessage && <p role="status" className="map-help">{locationMessage}</p>}
@@ -256,6 +262,7 @@ export default function MapWorkspace({
           </div>}
           <MapCanvas
             nodes={filtered}
+            selectedKey={selection}
             self={self}
             focus={focus}
             useTiles={useTiles}
@@ -290,6 +297,36 @@ export default function MapWorkspace({
               <button type="button" onClick={() => changeTraceSelection([])}>Clear trace selection</button>
             </div>
           </section>}
+          {selected && <div className="map-node-detail">
+            <h4>{selected.name}</h4>
+            <p>{roles[selected.role]} · {sourceTitles[selected.source]}</p>
+            {savedContactKeys?.has(selected.publicKey) && onOpenContact && <button type="button" className="map-primary"
+              onClick={() => onOpenContact(selected.publicKey)}>Open contact</button>}
+            <details>
+              <summary>Node details</summary>
+              <code>{selected.publicKey}</code>
+              <p>{mapPosition(selected.position) ? formatPosition(selected.position)
+                : selected.position ? 'Outside supported map latitude' : 'No coordinates available'}</p>
+              {mapPosition(selected.position) && self && (
+                <p>{(distanceBetween(self, selected.position) / 1_000).toFixed(1)} km from my location</p>
+              )}
+            </details>
+            <div className="map-actions">
+              <button type="button" onClick={() => toggleFavorite(selected)}>
+                {selected.favorite ? 'Remove favorite' : 'Add favorite'}
+              </button>
+              {onSharePosition && mapPosition(selected.position) && <button type="button"
+                onClick={() => onSharePosition(selected.position!)}>Use location in Chats</button>}
+              {selected.role === 2 && mapPosition(selected.position) && <>
+                {changeTraceSelection && <button type="button" disabled={traceSelection.length >= 63}
+                  onClick={() => changeTraceSelection([...traceSelection, selected])}>Add repeater to trace</button>}
+                <button type="button" onClick={() => putCoordinate('start', selected.position!)}>Use as start</button>
+                <button type="button" onClick={() => putCoordinate('end', selected.position!)}>Use as end</button>
+              </>}
+              {selected.source === 'public' && <a target="_blank" rel="noreferrer"
+                href={`${publicMapUrl}?public_key=${selected.publicKey}&delete=1`}>Open official removal request</a>}
+            </div>
+          </div>}
           <div className="map-filters">
             <label>Search name or key
               <input type="search" value={search} onChange={(event) => {
@@ -312,31 +349,6 @@ export default function MapWorkspace({
               setResultPage(0)
             }} /> Favorites only</label>
           </div>
-          {selected && <div className="map-node-detail">
-            <h4>{selected.name}</h4>
-            <p>{roles[selected.role]} · {sourceTitles[selected.source]}</p>
-            <code>{selected.publicKey}</code>
-            <p>{mapPosition(selected.position) ? formatPosition(selected.position)
-              : selected.position ? 'Outside supported map latitude' : 'No coordinates available'}</p>
-            {mapPosition(selected.position) && self && (
-              <p>{(distanceBetween(self, selected.position) / 1_000).toFixed(1)} km from my location</p>
-            )}
-            <div className="map-actions">
-              <button type="button" onClick={() => toggleFavorite(selected)}>
-                {selected.favorite ? 'Remove favorite' : 'Add favorite'}
-              </button>
-              {onSharePosition && mapPosition(selected.position) && <button type="button"
-                onClick={() => onSharePosition(selected.position!)}>Use location in Chats</button>}
-              {selected.role === 2 && mapPosition(selected.position) && <>
-                {changeTraceSelection && <button type="button" disabled={traceSelection.length >= 63}
-                  onClick={() => changeTraceSelection([...traceSelection, selected])}>Add repeater to trace</button>}
-                <button type="button" onClick={() => putCoordinate('start', selected.position!)}>Use as start</button>
-                <button type="button" onClick={() => putCoordinate('end', selected.position!)}>Use as end</button>
-              </>}
-              {selected.source === 'public' && <a target="_blank" rel="noreferrer"
-                href={`${publicMapUrl}?public_key=${selected.publicKey}&delete=1`}>Open official removal request</a>}
-            </div>
-          </div>}
           <p className="map-help">{filtered.length.toLocaleString()} matching nodes</p>
           {filtered.length > 0 && <>
             <ul className="map-node-list">

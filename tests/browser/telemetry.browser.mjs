@@ -1,3 +1,4 @@
+import { openWorkspaceMenu } from './workspace-menu.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { chromium } from 'playwright-core'
@@ -59,6 +60,7 @@ test('refreshes and caches telemetry, polls only on request, and cancels when le
   const refresh = page.getByRole('button', { name: 'Refresh telemetry', exact: true })
   const poll = page.getByLabel('Poll every minute while this view is open')
   await page.goto(server.resolvedUrls.local[0] + '#diagnostics')
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Connect USB' }).click()
   await page.getByText('Radio telemetry', { exact: true }).click()
   await page.getByText('No telemetry has been saved for this device.').waitFor()
@@ -85,6 +87,7 @@ test('refreshes and caches telemetry, polls only on request, and cancels when le
   await page.clock.fastForward(61_000)
   await page.getByText('Waiting for telemetry…', { exact: true }).waitFor()
   assert.deepEqual(await requests(), { local: 1, remote: 3 })
+  await openWorkspaceMenu(page, 'More')
   await diagnostics.click()
   await page.getByText('Cached reading from', { exact: false }).waitFor()
   await refresh.click()
@@ -96,10 +99,12 @@ test('refreshes and caches telemetry, polls only on request, and cancels when le
   await contacts.click()
   await page.getByText('3.78 V', { exact: true }).waitFor()
   assert.equal(await poll.isChecked(), false)
+  await openWorkspaceMenu(page, 'Radio connection')
   await page.getByRole('button', { name: 'Disconnect' }).click()
   await page.getByText('Cached reading from', { exact: false }).waitFor()
   assert.equal(await refresh.isDisabled(), true)
   await page.reload()
+  await openWorkspaceMenu(page, 'More')
   await diagnostics.click()
   await page.getByText('Radio telemetry', { exact: true }).click()
   await page.getByRole('combobox', { name: 'Telemetry cache radio' }).selectOption('ab'.repeat(32))
