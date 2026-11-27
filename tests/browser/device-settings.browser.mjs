@@ -48,7 +48,8 @@ test('edits radio settings, reports partial saves, and writes credentials withou
         else if (code === 4) {
           emit([2, 0, 0, 0, 0])
           emit([4, 0, 0, 0, 0])
-        } else if (code === 5) {
+        } else if (code === 10) emit([10])
+        else if (code === 5) {
           const body = new Uint8Array(5)
           body[0] = 9
           new DataView(body.buffer).setUint32(1, clock, true)

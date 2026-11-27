@@ -183,7 +183,8 @@ function App() {
   const receiptSyncStatus = messageStatus.syncing ? `messages: ${messageStatus.receiptsSaved} saved`
     : messageStatus.pending || messageStatus.error ? 'Needs attention' : null
   const syncStatus = [radioSyncStatus, receiptSyncStatus].filter(Boolean).join(' · ')
-    || (snapshot.phase === 'ready' ? 'Idle' : 'Not syncing')
+  const cacheDetail = cacheStatus.error ? 'Cache needs attention' : cacheStatus.pending ? `Saving ${cacheStatus.pending} update(s)` : null
+  const chatView = activeSection === 'Chats'
 
   useEffect(() => messageSync.startAutomaticSync(cache.subscribe), [])
 
@@ -323,7 +324,7 @@ function App() {
   if (retention.checking) return <div role="status">Applying channel retention…</div>
 
   return (
-    <div className={`app-shell${activeSection === 'Chats' ? ' app-shell--chats' : ''}`}>
+    <div className={`app-shell${chatView ? ' app-shell--chats' : ''}`}>
       <a
         className="skip-link"
         href="#main-content"
@@ -352,28 +353,28 @@ function App() {
             <button
               type="button"
               disabled={controlsDisabled || (!canDisconnect && !usbSupport.supported)}
-              aria-describedby="connection-warning"
+              aria-describedby={chatView ? undefined : 'connection-warning'}
               onClick={() => void (canDisconnect ? session.disconnect() : session.connect())}
             >
               {canDisconnect ? 'Disconnect' : 'Connect USB'}
             </button>
             {!canDisconnect && (
               <button type="button" disabled={controlsDisabled || !bluetoothSupport.supported}
-                aria-describedby="connection-warning" onClick={() => void session.connectBluetooth()}>
+                aria-describedby={chatView ? undefined : 'connection-warning'} onClick={() => void session.connectBluetooth()}>
                 Connect Bluetooth
               </button>
             )}
             {!canDisconnect && lanAvailable && (
-              <button type="button" disabled={controlsDisabled} aria-describedby="connection-warning"
+              <button type="button" disabled={controlsDisabled} aria-describedby={chatView ? undefined : 'connection-warning'}
                 onClick={() => void session.connectLan()}>
                 Connect local network
               </button>
             )}
           </div>
-          <p className="connection-warning" id="connection-warning">
+          {!chatView && <p className="connection-warning" id="connection-warning">
             Message sync is manual.
-          </p>
-          <OfflineStatus />
+          </p>}
+          <OfflineStatus quiet={chatView} />
         </div>
       </header>
 
@@ -578,14 +579,17 @@ function App() {
       {shareDialog?.kind === 'import' && <ImportShare snapshot={snapshot} session={session} close={() => setShareDialog(null)} />}
       {shareDialog?.kind === 'export' && <ShareCode link={shareDialog.link} close={() => setShareDialog(null)} />}
 
-      <footer className="status-bar" aria-label="Workspace status">
-        <div><span>Device</span><strong>{snapshot.device
-          ? `${snapshot.phase === 'syncing' || snapshot.phase === 'ready' ? '' : 'Last: '}${snapshot.device.name || 'Unnamed radio'}`
-          : 'None'}</strong></div>
-        <div><span>Connection</span><strong>{connection}</strong></div>
-        <div><span>Sync</span><strong role="status" aria-label="Sync status">{syncStatus}</strong></div>
-        <p>{cacheStatus.error ? 'Cache needs attention' : cacheStatus.pending ? `Saving ${cacheStatus.pending} update(s)` : 'Local cache idle'}</p>
-      </footer>
+      {(!chatView || syncStatus || cacheDetail) && <footer className="status-bar" aria-label="Workspace status">
+        {!chatView && <>
+          <div><span>Device</span><strong>{snapshot.device
+            ? `${snapshot.phase === 'syncing' || snapshot.phase === 'ready' ? '' : 'Last: '}${snapshot.device.name || 'Unnamed radio'}`
+            : 'None'}</strong></div>
+          <div><span>Connection</span><strong>{connection}</strong></div>
+        </>}
+        {(!chatView || syncStatus) && <div><span>Sync</span><strong role="status" aria-label="Sync status">
+          {syncStatus || (snapshot.phase === 'ready' ? 'Idle' : 'Not syncing')}</strong></div>}
+        {(!chatView || cacheDetail) && <p>{cacheDetail || 'Local cache idle'}</p>}
+      </footer>}
     </div>
   )
 }

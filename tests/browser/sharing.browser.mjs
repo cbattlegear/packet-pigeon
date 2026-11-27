@@ -164,6 +164,7 @@ test('exports a radio preset and confirms setup writes while reporting a partial
           case 22: emit(capability); break
           case 1: emit(settings); break
           case 4: emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]); break
+          case 10: emit([10]); break
           case 31: emit([18, 0, ...new Uint8Array(48)]); break
           case 61: commands.push([...data]); emit([1, 5]); break
           case 9: case 11: case 32: commands.push([...data]); emit([0]); break

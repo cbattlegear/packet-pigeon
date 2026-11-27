@@ -79,9 +79,9 @@ export function resolveAppLanguage(
   return 'en'
 }
 
-export function clockFormatter(locale: string, clock: AppPreferences['clock']) {
+export function clockFormatter(locale: string, clock: AppPreferences['clock'], includeDate = true) {
   return new Intl.DateTimeFormat(locale, {
-    dateStyle: 'medium',
+    ...(includeDate ? { dateStyle: 'medium' } : {}),
     timeStyle: 'short',
     ...(clock === 'system' ? {} : { hour12: clock === '12-hour' }),
   })

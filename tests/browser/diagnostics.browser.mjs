@@ -30,6 +30,7 @@ test('captures received packets, filters the log and redacts clipboard and file 
         if (command === 22) emit(capability)
         else if (command === 1) emit(self)
         else if (command === 4) { emit([2, 0, 0, 0, 0]); emit([4, 0, 0, 0, 0]) }
+        else if (command === 10) emit([10])
         else throw Error('Unexpected radio command')
       } }),
       async open() {}, async close() {},
@@ -97,5 +98,5 @@ test('captures received packets, filters the log and redacts clipboard and file 
   await page.getByRole('button', { name: 'Clear log' }).click()
   await page.evaluate(() => window.fixtureRx([0x88, 4]))
   await page.getByText('No packets captured.').waitFor()
-  assert.deepEqual(await page.evaluate(() => window.radioCommands), [22, 1, 4])
+  assert.deepEqual(await page.evaluate(() => window.radioCommands), [22, 1, 4, 10])
 })
