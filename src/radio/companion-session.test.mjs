@@ -3373,3 +3373,112 @@ test('ownership and port enumeration failures give actionable errors', async () 
   assert.equal(session.getSnapshot().error.code, 'reconnect-failed')
   assert.match(session.getSnapshot().error.message, /permissions/)
 })
+
+test('refresh restoration reuses an authorized USB port without invoking its chooser', async () => {
+  let saved = null
+  const originalPersistence = {
+    load: () => saved,
+    save: (target) => { saved = target },
+    clear: () => { saved = null },
+  }
+  const original = sessionWith(workingPort(), 1000, { connectionPersistence: originalPersistence })
+  await original.connect()
+  assert.deepEqual(saved, {
+    version: 1, transport: 'usb', publicKey: 'ab'.repeat(32), vendorId: 1, productId: 2,
+  })
+  await original.disconnect()
+  assert.equal(saved, null)
+
+  const target = {
+    version: 1, transport: 'usb', publicKey: 'ab'.repeat(32), vendorId: 1, productId: 2,
+  }
+  saved = target
+  const restoredPort = workingPort()
+  let choices = 0
+  let scans = 0
+  const restoredPersistence = {
+    load: () => saved,
+    save: (value) => { saved = value },
+    clear: () => { saved = null },
+  }
+  const restored = sessionWith(restoredPort, 1000, {
+    connectionPersistence: restoredPersistence,
+    environment: {
+      secureContext: true,
+      serial: {
+        requestPort: async () => { choices++; return restoredPort },
+        getPorts: async () => { scans++; return [restoredPort] },
+      },
+    },
+  })
+  await restored.restore()
+  assert.equal(restored.getSnapshot().phase, 'ready')
+  assert.equal(scans, 1)
+  assert.equal(choices, 0)
+  assert.deepEqual(restoredPort.commands.map(([code]) => code), [22, 1, 4])
+
+  await restored.disconnect()
+  assert.equal(saved, null)
+  scans = 0
+  const afterDeliberateDisconnect = sessionWith(workingPort(), 1000, {
+    connectionPersistence: restoredPersistence,
+    environment: { secureContext: true, serial: { getPorts: async () => { scans++; return [] } } },
+  })
+  await afterDeliberateDisconnect.restore()
+  assert.equal(afterDeliberateDisconnect.getSnapshot().phase, 'idle')
+  assert.equal(scans, 0)
+})
+
+test('refresh restoration refuses missing, ambiguous and different USB radios', async () => {
+  const target = {
+    version: 1, transport: 'usb', publicKey: 'ab'.repeat(32), vendorId: 1, productId: 2,
+  }
+  const persistence = { load: () => target, save: () => {}, clear: () => {} }
+
+  const missing = sessionWith(workingPort(), 1000, {
+    connectionPersistence: persistence,
+    environment: { secureContext: true, serial: { getPorts: async () => [] } },
+  })
+  await missing.restore()
+  assert.equal(missing.getSnapshot().error.code, 'reconnect-failed')
+  assert.match(missing.getSnapshot().error.message, /Use Connect USB/)
+
+  const candidates = [workingPort(), workingPort()]
+  const ambiguous = sessionWith(workingPort(), 1000, {
+    connectionPersistence: persistence,
+    environment: { secureContext: true, serial: { getPorts: async () => candidates } },
+  })
+  await ambiguous.restore()
+  assert.equal(ambiguous.getSnapshot().error.code, 'identity')
+  assert.deepEqual(candidates.map((port) => port.commands), [[], []])
+
+  const wrong = workingPort(0xcd)
+  const different = sessionWith(wrong, 1000, {
+    connectionPersistence: persistence,
+    environment: { secureContext: true, serial: { getPorts: async () => [wrong] } },
+  })
+  await different.restore()
+  assert.equal(different.getSnapshot().error.code, 'identity')
+  assert.deepEqual(wrong.commands.map(([code]) => code), [22, 1])
+  assert.equal(wrong.closed, true)
+})
+
+test('a blocked manual connection cannot clear another tab saved radio target', async () => {
+  let clears = 0
+  const port = workingPort()
+  const persistence = {
+    load: () => ({
+      version: 1, transport: 'usb', publicKey: 'cd'.repeat(32), vendorId: 3, productId: 4,
+    }),
+    save: () => assert.fail('A blocked connection must not be saved'),
+    clear: () => { clears++ },
+  }
+  const session = sessionWith(port, 1000, {
+    connectionPersistence: persistence,
+    locks: { request: async (_name, _options, callback) => callback(null) },
+  })
+  await session.connect()
+  assert.equal(session.getSnapshot().error.code, 'ownership')
+  assert.equal(clears, 0)
+  assert.deepEqual(port.commands, [])
+})

@@ -41,6 +41,8 @@ import type { RepeaterLogin, RepeaterNeighborOrder, RepeaterStatus } from './rep
 import { allocateRepeaterCliTag, isRepeaterRebootCommand, repeaterCliCommand, sendRepeaterCli, UncertainRepeaterCliError } from './repeater-cli.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { IdentityRecoveryPreparation } from './identity-backup.ts'
+import { browserCompanionConnectionPersistence } from './companion-connection.ts'
+import type { CompanionConnectionPersistence, CompanionConnectionTarget } from './companion-connection.ts'
 
 export interface SyncProgress {
   readonly stage: 'contacts' | 'channels' | 'messages'
@@ -138,6 +140,7 @@ export class CompanionSession {
   readonly #repeaterPasswords = new Map<string, Uint8Array>()
   readonly #repeaterPasswordRevisions = new Map<string, number>()
   private readonly openScopeStorage: typeof openRadioStorage
+  private readonly connectionPersistence: CompanionConnectionPersistence | null
   private scopeTail: Promise<void> = Promise.resolve()
 
   constructor(options: {
@@ -147,6 +150,7 @@ export class CompanionSession {
     locks?: LockProvider
     retryDelays?: readonly number[]
     openScopeStorage?: typeof openRadioStorage
+    connectionPersistence?: CompanionConnectionPersistence | null
   } = {}) {
     this.environment = options.environment
     this.bluetoothEnvironment = options.bluetoothEnvironment
@@ -154,6 +158,9 @@ export class CompanionSession {
     this.locks = options.locks ?? globalThis.navigator?.locks
     this.retryDelays = options.retryDelays ?? [1000, 2000, 4000, 8000, 16000]
     this.openScopeStorage = options.openScopeStorage ?? openRadioStorage
+    this.connectionPersistence = options.connectionPersistence === undefined
+      ? browserCompanionConnectionPersistence
+      : options.connectionPersistence
   }
 
   readonly getSnapshot = (): CompanionSnapshot => this.snapshot
@@ -258,12 +265,29 @@ export class CompanionSession {
     return { kind: 'lan', url }
   })
 
-  private async connectUsing(choose: () => Promise<SelectedTransport | null>) {
+  readonly restore = async () => {
+    if (this.attempt || this.ownership || this.snapshot.phase !== 'idle') return
+    let target: CompanionConnectionTarget | null
+    try {
+      target = this.connectionPersistence?.load() ?? null
+    } catch (error) {
+      this.update({ phase: 'error', error: error instanceof CompanionError ? error : new CompanionError(
+        'reconnect-failed', 'Could not read the saved radio connection. Choose the radio again.', { cause: error },
+      ) })
+      return
+    }
+    if (target) await this.connectUsing(() => this.restoreConnection(target), target)
+  }
+
+  private async connectUsing(
+    choose: () => Promise<SelectedTransport | null>,
+    restoration?: CompanionConnectionTarget,
+  ) {
     if (this.attempt || this.ownership || this.snapshot.phase === 'closing' || this.snapshot.phase === 'reconnecting') return
     const generation = ++this.generation
     const attempt: Attempt = {}
     this.attempt = attempt
-    this.update({ phase: 'choosing', transport: null, error: null, progress: null })
+    this.update({ phase: restoration ? 'reconnecting' : 'choosing', transport: null, error: null, progress: null })
 
     try {
       const connection = await choose()
@@ -280,8 +304,18 @@ export class CompanionSession {
       attempt.locking = this.acquireLock()
       await attempt.locking
       if (this.attempt !== attempt) return
+      if (!restoration) {
+        try {
+          this.connectionPersistence?.clear()
+        } catch (error) {
+          throw error instanceof CompanionError ? error : new CompanionError(
+            'reconnect-failed', 'Could not replace the saved radio connection. Check browser storage and try again.',
+            { cause: error },
+          )
+        }
+      }
       this.connection = connection
-      this.expectedKey = undefined
+      this.expectedKey = restoration?.publicKey
       attempt.opening = this.openConnection(attempt, connection)
       const link = await attempt.opening
       if (!link || this.attempt !== attempt) return
@@ -348,13 +382,22 @@ export class CompanionSession {
     this.expectedKey = undefined
     this.connection = undefined
     this.update({ phase: 'closing', progress: null, error: null })
+    let persistenceError: CompanionError | undefined
+    try {
+      this.connectionPersistence?.clear()
+    } catch (error) {
+      persistenceError = error instanceof CompanionError ? error : new CompanionError(
+        'reconnect-failed', 'The radio was disconnected, but its saved connection could not be cleared.', { cause: error },
+      )
+    }
     try {
       if (attempt?.locking) await attempt.locking.catch(() => {})
       if (attempt?.link) this.cleanup = attempt.link.close()
       else if (attempt?.opening) await attempt.opening
       await this.cleanup
       await this.releaseLock()
-      this.update({ phase: 'idle', transport: null })
+      if (persistenceError) this.update({ phase: 'error', transport: null, error: persistenceError })
+      else this.update({ phase: 'idle', transport: null })
     } catch (error) {
       this.update({
         phase: 'error',
@@ -1639,6 +1682,97 @@ export class CompanionSession {
     if (this.attempt !== attempt) return
     this.update({ channels })
     this.update({ phase: 'ready', progress: null })
+    this.rememberConnection(device.publicKey)
+  }
+
+  private rememberConnection(publicKey: string) {
+    if (!this.connectionPersistence) return
+    const connection = this.connection
+    let target: CompanionConnectionTarget | undefined
+    if (connection?.kind === 'usb') {
+      const info = connection.device.getInfo?.()
+      if (info?.usbVendorId !== undefined && info.usbProductId !== undefined) {
+        target = {
+          version: 1, transport: 'usb', publicKey,
+          vendorId: info.usbVendorId, productId: info.usbProductId,
+        }
+      }
+    } else if (connection?.kind === 'bluetooth' && connection.device.id) {
+      target = {
+        version: 1, transport: 'bluetooth', publicKey,
+        deviceId: connection.device.id,
+      }
+    }
+    try {
+      if (target) this.connectionPersistence.save(target)
+      else this.connectionPersistence.clear()
+    } catch (error) {
+      this.update({ error: error instanceof CompanionError ? error : new CompanionError(
+        'reconnect-failed', 'The radio is connected, but refresh recovery could not be saved.', { cause: error },
+      ) })
+    }
+  }
+
+  private async restoreConnection(target: CompanionConnectionTarget): Promise<SelectedTransport> {
+    if (target.transport === 'usb') {
+      const serial = (this.environment ?? browserSerialEnvironment()).serial
+      if (!serial?.getPorts) {
+        throw new CompanionError(
+          'reconnect-failed', 'This browser cannot restore the saved USB radio. Use Connect USB to reconnect.',
+        )
+      }
+      let ports: CompanionSerialPort[]
+      try {
+        ports = await serial.getPorts()
+      } catch (cause) {
+        throw new CompanionError(
+          'reconnect-failed', 'Could not access previously authorized USB radios. Use Connect USB to reconnect.',
+          { cause },
+        )
+      }
+      const matches = ports.filter((port) => {
+        const info = port.getInfo?.()
+        return info?.usbVendorId === target.vendorId && info.usbProductId === target.productId
+      })
+      if (matches.length === 0) {
+        throw new CompanionError(
+          'reconnect-failed', 'The saved USB radio is unavailable or its permission was revoked. Use Connect USB to reconnect.',
+        )
+      }
+      if (matches.length > 1) {
+        throw new CompanionError(
+          'identity', 'Multiple matching USB radios are authorized. Use Connect USB to choose the correct radio.',
+        )
+      }
+      return { kind: 'usb', device: matches[0] }
+    }
+    const bluetooth = (this.bluetoothEnvironment ?? browserBluetoothEnvironment()).bluetooth
+    if (!bluetooth?.getDevices) {
+      throw new CompanionError(
+        'reconnect-failed', 'This browser cannot restore the saved Bluetooth radio. Use Connect Bluetooth to reconnect.',
+      )
+    }
+    let devices: CompanionBluetoothDevice[]
+    try {
+      devices = await bluetooth.getDevices()
+    } catch (cause) {
+      throw new CompanionError(
+        'reconnect-failed', 'Could not access the previously authorized Bluetooth radio. Use Connect Bluetooth to reconnect.',
+        { cause },
+      )
+    }
+    const matches = devices.filter((device) => device.id === target.deviceId)
+    if (matches.length === 0) {
+      throw new CompanionError(
+        'reconnect-failed', 'The saved Bluetooth radio is unavailable or its permission was revoked. Use Connect Bluetooth to reconnect.',
+      )
+    }
+    if (matches.length > 1) {
+      throw new CompanionError(
+        'identity', 'Multiple matching Bluetooth radios are authorized. Use Connect Bluetooth to choose the correct radio.',
+      )
+    }
+    return { kind: 'bluetooth', device: matches[0] }
   }
 
   private async reconnectConnection(): Promise<SelectedTransport | undefined> {
