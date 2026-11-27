@@ -40,7 +40,7 @@ export function MapCanvas({
     if (!container.current) return
     const limits = latLngBounds([-mercatorLatitude, -180], [mercatorLatitude, 180])
     const map = createMap(container.current, {
-      center: [28, 0], zoom: 2, minZoom: 2, maxZoom: 19,
+      center: [28, 0], zoom: 2, minZoom: 0, maxZoom: 19,
       maxBounds: limits, maxBoundsViscosity: 1, scrollWheelZoom: false, trackResize: false,
     })
     mapRef.current = map
@@ -68,7 +68,7 @@ export function MapCanvas({
     if (!map || !useTiles) return
     const tiles = tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>',
-      noWrap: true, maxZoom: 19, minZoom: 2, referrerPolicy: 'strict-origin-when-cross-origin',
+      noWrap: true, maxZoom: 19, referrerPolicy: 'strict-origin-when-cross-origin',
     }).on('tileerror', onTileError).addTo(map)
     return () => { tiles.remove() }
   }, [useTiles, onTileError])
@@ -79,13 +79,9 @@ export function MapCanvas({
     if ('lat' in focus) {
       if (mapPosition(focus)) map.setView(point(focus), Math.max(map.getZoom(), 11), { animate: false })
     } else {
-      const positions = focus.filter(mapPosition)
-      const first = positions[0]
-      if (!first) return
-      const bounds = latLngBounds(positions.map(point))
-      if (bounds.getEast() - bounds.getWest() > 180) {
-        map.setView(point(first), 8, { animate: false })
-      } else {
+      const bounds = latLngBounds(focus.filter(mapPosition).map(point))
+      if (bounds.isValid()) {
+        map.invalidateSize({ pan: false })
         map.fitBounds(bounds, { animate: false, maxZoom: 16, padding: [24, 24] })
       }
     }
