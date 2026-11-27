@@ -68,10 +68,82 @@ Run message sync fixtures with `node --test src/integration/message-sync.test.js
 Run direct-message fixtures with
 `node --test src/radio/direct-message.test.mjs src/integration/direct-messages.test.js src/chats/model.test.js`.
 Run channel-message framing fixtures with `node --test src/radio/channel-message.test.mjs`.
+Run reaction protocol and persistence fixtures with
+`node --test src/radio/reactions.test.mjs src/chats/reactions.test.mjs src/integration/direct-messages.test.js`.
+Run the reaction picker regression with `node --test tests/browser/reactions.browser.mjs`.
 These checks use mocks and do not need a radio.
 
 With Google Chrome installed, run `npm run test:browser` for the browser
 regressions. The tests use cached fixtures and simulated radios.
+
+## Message reactions
+
+Use **Message actions** → **React** on an ordinary DM or channel message, or
+its right-click actions, to choose a quick emoji or enter one emoji (including
+skin tones, flags and joined families). The picker is keyboard-accessible and
+leaves the composer draft unchanged. Room/management messages are excluded.
+Sending requires the selected radio to be connected and other message actions
+to be finished. Reaction matching details and wire text are available under
+**Message actions** → **Message details**.
+Reaction summaries show emoji counts and expandable sender names. Counts group
+canonically equivalent emoji and deduplicate each sender/emoji pair; channel
+names are unverified and can be impersonated. Blocking a channel sender hides
+their reactions from summaries without deleting the saved receipts.
+
+Outgoing reactions use MeshCoreOne's native format: `emoji\nhash` for DMs and
+`@[target sender]emoji\nhash` for channels. The eight lowercase Crockford symbols
+encode the first five SHA-256 bytes of the target's UTF-8 body followed by its
+unsigned 32-bit little-endian **wire timestamp**, not the browser display date.
+Channel envelopes are split at the first colon and whitespace is handled like
+the reference client. Previously used DM timestamps remain matchable after a
+manual retry; outgoing channel sender names are captured, not replaced when
+the radio is renamed. Incoming native emoji-first channel reactions are also
+accepted, as are Crockford case and O/I/L aliases.
+
+MeshCore Open v1 (`r:millis_senderHash_textHash:emoji`) and v3
+(`r:four-hex-hash:two-hex-index`) are receive-only. Dart hashing uses UTF-16 code
+units; v3 covers timestamp, channel sender (omitted for DMs) and the first five
+text code units. Like MeshCoreOne, Open matching uses a five-minute timestamp
+window: v1 around its target timestamp, v3 around local receipt time (sender
+time for older cached receipts). Delayed queues or clock differences can leave
+Open reactions unmatched.
+
+All reaction wire receipts remain in the same per-radio cache as normal
+messages. Summaries are rebuilt from those durable receipts on reads, so native
+and Open reactions arriving before their targets survive reloads; unmatched
+and ambiguous payloads remain visible with their wire text. No TTL or fixed
+pending-reaction queue silently discards them. Hash collisions, identical target
+receipts and ambiguous DM key prefixes are not resolved by guessing. Sending
+also refuses an ambiguous target. Local deletion, retention cleanup or browser
+storage eviction can remove targets or reaction receipts and therefore counts.
+Malformed/unsupported formats stay visible as ordinary text.
+An in-memory per-radio projection cache avoids rematching unchanged histories
+after draft/read-marker edits, and indexed candidate matching avoids scanning
+every message for each reaction. It detects relevant writes from other tabs;
+the durable receipts, not the cache, remain the source of truth.
+
+DM reactions use the existing acknowledgement, cancel and retry handling.
+Channel reactions have only radio acceptance, not delivery confirmation; an
+uncertain outcome can be deliberately resent. Our own reaction is counted once
+the radio accepts it (DM sent/delivered, channel accepted), which does not prove
+every peer received it. Failed/uncertain sends keep their delivery state visible.
+This has been verified with protocol vectors and mocked radios/browser storage,
+not a physical cross-client exchange; no live radio traffic was sent.
+Native recognition/sending requires `Intl.Segmenter`, and hashing requires Web
+Crypto in a secure context. Emoji classification follows the browser's Unicode
+tables, which may differ from MeshCoreOne's frozen Unicode version for newly
+introduced emoji. Sender names containing `]` cannot be emitted; unusual colon
+or whitespace names can also disagree with the peer's channel-envelope parsing.
+The existing Bluetooth truncation and firmware dequeue-before-save limitations
+still apply.
+
+The wire contract and vectors were checked against
+[MeshCoreOne-Android reaction services and tests](https://github.com/cbattlegear/MeshCoreOne-Android/tree/6baa75b98b44a53cc28a221cf7ca6d028692e547/android/core/services/src/main/kotlin/com/meshcoreone/android/core/services/reactions),
+including `ReactionHashIndependentVectorsTest`, `ReactionParserTest`,
+`MeshCoreOpenReactionParserTest`, `SyncCoordinatorReactionHandlers` and the
+actual app `react` send path. That repository is GPL-3.0; this is an independent
+TypeScript implementation of the wire contract, not copied Kotlin/Swift source
+or UI code. The Open v3 index-to-emoji mapping is protocol data.
 
 ## USB companion session
 

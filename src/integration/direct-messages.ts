@@ -2,6 +2,8 @@ import type { CompanionPush, CompanionSession } from '../radio/companion-session
 import { decodeDirectAck, directTextBytes, expectedDirectAck } from '../radio/direct-message.ts'
 import { channelTextBytes } from '../radio/channel-message.ts'
 import { messageAcknowledged } from '../radio/protocol.ts'
+import { buildReaction, reactionChannelContent } from '../radio/reactions.ts'
+import { canReactTo, reactionTarget, resolveReactions } from '../chats/reactions.ts'
 import {
   openRadioStorage, radioKeyFromPublicKey, RadioStorageError, validateDirectOptions,
 } from '../storage/index.ts'
@@ -425,6 +427,76 @@ export class DirectMessages {
       const draftKey = `${key}:${conversationId}`
       if (!resend && this.draftEditsThisVisit.get(draftKey) === text) this.setVisitDraft(draftKey, '')
       void this.runChannel(active, index, result.message)
+      return true
+    } catch (error) {
+      if (active) this.finish(active)
+      this.update({ error: messageOf(error) })
+      return false
+    }
+  }
+
+  readonly react = async (key: RadioKey, id: string, emoji: string, options: DirectSendOptions) => {
+    let active: ActiveSend | undefined
+    try {
+      active = this.start(key, crypto.randomUUID())
+      if (!this.isConnected(key)) throw new Error('Connect the selected radio before reacting.')
+      if (this.pendingCount()) throw new Error('Retry saving pending message changes before reacting.')
+      const storage = await this.openStorage()
+      let data: RadioData | null
+      try { data = await storage.read(key) }
+      finally { storage.close() }
+      const message = data?.messages.find((entry) => entry.id === id)
+      if (!message || !canReactTo(message)) throw new Error('This message has no unambiguous reaction wire target.')
+      const original = reactionTarget(message)!
+      const peerContent = message.channelOutgoing
+        ? reactionChannelContent(`${message.channelOutgoing.senderName}: ${message.text}`) : null
+      const target = peerContent ? { ...original, ...peerContent } : original
+      const text = await buildReaction(emoji, target.text, target.timestamp, target.sender)
+      const channelIndex = message.conversationId.startsWith('channel:') ? Number(message.conversationId.slice(8)) : null
+      const probe: StoredMessage = {
+        id: active.id, conversationId: message.conversationId, sender: '', text, timestamp: Date.now(),
+        receipt: {
+          receiptId: active.id, pathLength: 255, snrDb: null, textType: 0, senderTimestamp: Math.floor(Date.now() / 1000),
+          ...(channelIndex === null ? {
+            kind: 'direct-text', senderKeyPrefix: message.conversationId.slice(7, 19), signatureHex: null, text,
+          } : { kind: 'channel-text', channelIndex, text: `Reaction probe: ${text}` }),
+        },
+      }
+      const preview = await resolveReactions({ ...data!, messages: [...data!.messages, probe] }, key)
+      if (preview.messages.find((entry) => entry.id === active!.id)?.reaction?.targetId !== message.id) {
+        throw new Error('Multiple or unavailable target messages share this reaction identifier. No reaction was sent.')
+      }
+      const snapshot = this.source.getSnapshot()
+      if (!this.isConnected(key) || !snapshot.device || active.cancelled) throw new Error('The reaction send was interrupted.')
+      if (message.conversationId.startsWith('channel:')) {
+        const index = Number(message.conversationId.slice(8))
+        const channel = data!.channels.find((entry) => entry.index === index)
+        if (!channel || message.channelOutgoing && message.channelOutgoing.channelName !== channel.name) {
+          throw new Error('The channel changed. Refresh the channel list before reacting.')
+        }
+        channelTextBytes(text, snapshot.device.name)
+        const result = await this.applyChannel(key, {
+          kind: 'begin', id: active.id, index, channelName: channel.name, senderName: snapshot.device.name,
+          text, now: Date.now(), clearDraft: false,
+          firmwareProtocolVersion: snapshot.device.capabilities.firmwareProtocolVersion,
+        }, false)
+        if (!result.message?.channelOutgoing) throw new Error('The reaction could not be saved.')
+        void this.runChannel(active, index, result.message)
+      } else {
+        const prefix = message.conversationId.slice(7).toLowerCase()
+        const matches = data!.contacts.filter(({ publicKey }) => publicKey.toLowerCase().startsWith(prefix.slice(0, 12)))
+        if (matches.length !== 1 || matches[0].details?.type !== 1
+          || prefix.length === 64 && matches[0].publicKey.toLowerCase() !== prefix) {
+          throw new Error('The DM contact is not uniquely identified or does not support reactions.')
+        }
+        directTextBytes(text)
+        const result = await this.apply(key, {
+          kind: 'begin', id: active.id, recipient: matches[0].publicKey, text,
+          options: validateDirectOptions(options), now: Date.now(), clearDraft: false,
+        }, false)
+        if (!result.message?.outgoing) throw new Error('The reaction could not be saved.')
+        void this.run(active, result.message)
+      }
       return true
     } catch (error) {
       if (active) this.finish(active)

@@ -32,6 +32,9 @@ import type { RemoteNodeLoginSession } from '../contacts/RemoteNodePanel.tsx'
 import { canPostToRoom, maxRoomTextBytes } from '../radio/node-access.ts'
 import { imageLinkParts } from './image-links.ts'
 import type { ImageLinkPart } from './image-links.ts'
+import { canReactTo } from './reactions.ts'
+import { reactionEmojiSupport } from '../radio/reactions.ts'
+import { ReactionPicker } from './ReactionPicker.tsx'
 import './chats.css'
 
 const defaultOptions: DirectSendOptions = { directAttempts: 4, floodAttempts: 4 }
@@ -287,6 +290,10 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             <p>Could not refresh cached chats: {cacheLoad.message} Showing previously loaded data.</p>
             <button type="button" onClick={() => void direct.load(radioKey)}>Retry loading chats</button>
           </div>}
+          {data.reactionError && <p className="chat-cache-error" role="alert">{data.reactionError}</p>}
+          {!reactionEmojiSupport && <p className="chat-cache-error" role="alert">
+            This browser cannot segment emoji. Native and channel reaction recognition and sending are unavailable; wire text is preserved.
+          </p>}
           <ConversationPane radioKey={radioKey} data={data} selected={selected} direct={direct} status={status} searchTarget={searchTarget}
             senderName={snapshot.phase === 'ready' && snapshot.device?.publicKey === radioKey ? snapshot.device.name : null}
             display={{
@@ -429,6 +436,7 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
   const [previousSearchTarget, setPreviousSearchTarget] = useState(searchTarget)
   const [awayFromBottom, setAwayFromBottom] = useState(false)
   const [messageContext, setMessageContext] = useState<MessageContext | null>(null)
+  const [reactionMessage, setReactionMessage] = useState<string | null>(null)
   const [detailId, setDetailId] = useState<string | null>(null)
   const composer = useRef<HTMLTextAreaElement>(null)
   const mentionPicker = useRef<HTMLDetailsElement>(null)
@@ -656,6 +664,11 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       action()
     }
     return <>
+      {!conversation.node && canReactTo(message) && <button type="button"
+        disabled={!reactionEmojiSupport || senderName === null || nodeBusy || status.pending > 0}
+        title={senderName === null ? 'Connect this radio to react' : undefined}
+        aria-label={`React to message: ${body.slice(0, 40)}`}
+        onClick={() => run(() => setReactionMessage(message.id))}>React</button>}
       {message.text && <button type="button" onClick={() => run(() => void copy(message))}
         aria-label={`Copy message: ${message.text.slice(0, 40)}`}>Copy</button>}
       {conversation.channel && sender && mentionableName(sender)
@@ -772,7 +785,20 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
                   <div className="chat-bubble">
                     {!outgoing && <strong className="chat-sender">{isChannel ? channelSender(message) ?? 'Unknown sender'
                       : nodeMessageSender(conversation, message, contacts)}</strong>}
-                    {message.text && <MessageText text={channelMessageBody(message)} channel={isChannel} ownName={senderName} />}
+                    {message.reaction ? <>
+                      <p>Reaction {message.reaction.parsed.emoji}</p>
+                      {message.reaction.state !== 'matched' && <p className="chat-reaction-state">
+                        {message.reaction.state === 'ambiguous' ? 'Ambiguous reaction; not counted.'
+                          : message.reaction.state === 'unavailable' ? 'Reaction matching unavailable.'
+                            : 'Unmatched reaction; retained for later matching.'}
+                      </p>}
+                    </> : message.text && <MessageText text={channelMessageBody(message)} channel={isChannel} ownName={senderName} />}
+                    {message.reactions?.length ? <div className="chat-reaction-summary" role="group" aria-label="Message reactions">
+                      {message.reactions.map(({ emoji, count, senders }) => <details key={emoji}>
+                        <summary aria-label={`${emoji}: ${count} reaction${count === 1 ? '' : 's'}`}>{emoji} {count}</summary>
+                        <p>{senders.join(', ')}</p>
+                      </details>)}
+                    </div> : null}
                     {message.receipt?.kind === 'channel-data' && <p>Channel data</p>}
                     {message.conversationId === 'unsupported' && <p>Unrecognized response</p>}
                     {!message.text && !message.receipt && !message.rawHex && <p>Empty message</p>}
@@ -818,6 +844,9 @@ function ConversationView({ conversation, radioKey, options, direct, status, sen
       {messageContext && contextMessage && <MessageContextActions context={messageContext} onClose={() => setMessageContext(null)}>
         {messageActions(contextMessage)}
       </MessageContextActions>}
+      {reactionMessage && <ReactionPicker disabled={senderName === null || nodeBusy || status.pending > 0} error={status.error}
+        onClose={() => setReactionMessage(null)}
+        onSend={(emoji) => direct.react(radioKey, reactionMessage, emoji, options)} />}
       {active && detailMessage && <ShareModal title="Message details" close={() => setDetailId(null)}>
         <MessageDetails message={detailMessage} matches={channelMatches.get(detailMessage.id)}
           correlation={correlations.get(detailMessage.id)} display={display}
@@ -891,6 +920,13 @@ function MessageDetails({ message, matches, correlation, display, onPathMap }: {
   const scope = channelOutgoing?.scope
   return <div className="chat-message-details">
     {time}
+    {message.reaction && <>
+      <p>{message.reaction.state === 'matched' ? 'Matched to a message in this conversation.'
+        : message.reaction.state === 'ambiguous' ? 'Ambiguous reaction: multiple target messages match. Not counted.'
+          : message.reaction.state === 'unavailable' ? 'Reaction matching unavailable. Wire receipt retained.'
+            : 'Unmatched reaction: target not yet available. Retained for later matching.'}</p>
+      <details><summary>Wire reaction text</summary><pre>{channelMessageBody(message)}</pre></details>
+    </>}
     {receipt?.kind === 'channel-data' && <p>Channel data (type {receipt.dataType}): <code>{receipt.dataHex}</code></p>}
     {preferences.pathMetadata && receipt && <ReceiptPath receipt={receipt} />}
     {preferences.regionMetadata && message.region && <p>Region {message.region}</p>}
