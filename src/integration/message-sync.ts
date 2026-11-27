@@ -1,11 +1,14 @@
-import type { QueuedMessageLease, SyncMaintenanceMessages } from '../radio/companion-session.ts'
-import { CompanionError, Response, decodeQueuedMessage } from '../radio/protocol.ts'
+import type { CompanionPush, QueuedMessageLease, SyncMaintenanceMessages } from '../radio/companion-session.ts'
+import { CompanionError, Response, decodeQueuedMessage, messageWaiting } from '../radio/protocol.ts'
 import { openRadioStorage, radioKeyFromPublicKey } from '../storage/index.ts'
 import type { RadioData, RadioKey, StoredMessage } from '../storage/index.ts'
 
 type MessageSource = {
   getSnapshot(): { phase: string; device: { publicKey: string } | null }
   reserveQueuedMessage(publicKey: string): QueuedMessageLease
+  subscribe?(listener: () => void): () => void
+  subscribeToPushes?(listener: (push: CompanionPush) => void): () => void
+  canSyncQueuedMessages?(): boolean
 }
 
 type PendingReceipt = { key: RadioKey; message: StoredMessage; release: () => void }
@@ -53,6 +56,7 @@ export class MessageSync {
   private readonly cacheReady: () => boolean
   private pendingReceipt?: PendingReceipt
   private loadVersion = 0
+  private stopAutomaticSync?: () => void
   private status: Status = { syncing: false, receiptsSaved: 0, error: null, pending: false, key: null, data: null }
 
   constructor(source: MessageSource, openStorage = openRadioStorage, cacheReady = () => true) {
@@ -67,6 +71,86 @@ export class MessageSync {
   }
 
   readonly getSnapshot = () => this.status
+
+  readonly startAutomaticSync = (subscribeToReadiness: (listener: () => void) => () => void) => {
+    const source = this.source
+    if (!source.subscribe || !source.subscribeToPushes || !source.canSyncQueuedMessages) {
+      throw new Error('Automatic message sync requires session notifications and command readiness.')
+    }
+    this.stopAutomaticSync?.()
+    let active = true
+    let requested = false
+    let scheduled = false
+    let running = false
+    let blocked = false
+    let generation = 0
+    let readyKey: string | undefined
+    let wasSyncing = this.status.syncing
+    const canDrain = () => this.cacheReady() && source.canSyncQueuedMessages?.() === true
+    const eligible = () => active && readyKey && requested && !blocked && !running
+      && !this.status.syncing && (this.pendingReceipt || canDrain())
+
+    const wake = () => {
+      if (scheduled || !eligible()) return
+      scheduled = true
+      queueMicrotask(() => {
+        scheduled = false
+        if (!eligible()) return
+        requested = false
+        running = true
+        const current = generation
+        const continueDraining = () => {
+          if (!active || generation !== current) return false
+          if (canDrain()) return true
+          requested = true
+          return false
+        }
+        void this.syncMessages(undefined, continueDraining).catch((error: unknown) => {
+          this.update({ error: error instanceof Error ? error.message : 'Could not sync messages.' })
+        }).finally(() => {
+          running = false
+          if (generation === current) blocked = this.status.error !== null
+          wake()
+        })
+      })
+    }
+    const sessionChanged = () => {
+      const snapshot = source.getSnapshot()
+      const key = snapshot.phase === 'ready' ? snapshot.device?.publicKey : undefined
+      if (key !== readyKey) {
+        readyKey = key
+        ++generation
+        requested = key !== undefined
+        blocked = false
+      }
+      wake()
+    }
+    const stopSession = source.subscribe(sessionChanged)
+    const stopPushes = source.subscribeToPushes((push) => {
+      if (push.code !== messageWaiting || !readyKey) return
+      requested = true
+      wake()
+    })
+    const stopReadiness = subscribeToReadiness(wake)
+    const stopStatus = this.subscribe(() => {
+      if (wasSyncing && !this.status.syncing && !running) {
+        blocked = this.status.error !== null
+      }
+      wasSyncing = this.status.syncing
+      wake()
+    })
+    sessionChanged()
+    const stop = () => {
+      active = false
+      stopSession()
+      stopPushes()
+      stopReadiness()
+      stopStatus()
+      if (this.stopAutomaticSync === stop) this.stopAutomaticSync = undefined
+    }
+    this.stopAutomaticSync = stop
+    return stop
+  }
 
   readonly subscribeToSavedReceipts = (listener: (key: RadioKey, message: StoredMessage, data: RadioData) => void) => {
     this.receiptListeners.add(listener)
@@ -120,7 +204,7 @@ export class MessageSync {
     }
   }
 
-  private async syncMessages(maintenance?: MaintenanceSync) {
+  private async syncMessages(maintenance?: MaintenanceSync, continueDraining?: () => boolean) {
     if (this.status.syncing) return
     ++this.loadVersion
     this.update({ syncing: true, receiptsSaved: 0, error: null })
@@ -130,6 +214,7 @@ export class MessageSync {
       if (this.pendingReceipt) {
         if (!await this.savePending(storage)) throw new Error(unsupportedError)
       }
+      if (continueDraining && !continueDraining()) return
       const snapshot = this.source.getSnapshot()
       const publicKey = maintenance?.publicKey ?? (snapshot.phase === 'ready' ? snapshot.device?.publicKey : undefined)
       if (!publicKey) throw new Error('Connect a radio before syncing messages.')
@@ -139,6 +224,7 @@ export class MessageSync {
       if (this.status.key === key) this.update({ data: cached })
       while (true) {
         maintenance?.signal.throwIfAborted()
+        if (continueDraining && !continueDraining()) break
         if (!this.cacheReady()) throw new Error('Resolve pending cache writes before syncing messages.')
         const id = crypto.randomUUID()
         const lease = maintenance ? maintenance.reserve() : this.source.reserveQueuedMessage(key)

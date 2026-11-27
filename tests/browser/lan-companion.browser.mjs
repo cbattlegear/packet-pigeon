@@ -84,7 +84,6 @@ test('uses the local bridge for a TCP companion session, durable message sync an
   await connect.click()
   const ready = page.getByRole('banner').getByText('Connected over local network', { exact: true })
   await ready.waitFor()
-  await page.getByRole('button', { name: 'Sync messages' }).click()
   await page.getByText('Hello over the network', { exact: true }).waitFor()
   const saved = await page.evaluate(async (key) => {
     const opened = indexedDB.open('packet-pigeon')
@@ -101,10 +100,15 @@ test('uses the local bridge for a TCP companion session, durable message sync an
     } finally { db.close() }
   }, 'ab'.repeat(32))
   assert.deepEqual(saved, ['North: Hello over the network'])
+  queued.push([...receipt.slice(0, 11), ...Buffer.from('North: Prompt reply')])
+  for (const socket of connected) socket.write(Buffer.concat(Array.from({ length: 10 }, () => frame([0x83]))))
+  await page.getByText('Prompt reply', { exact: true }).waitFor()
+  queued.push([...receipt.slice(0, 11), ...Buffer.from('North: Queued during reconnect')])
   const reconnected = once(radio, 'connection')
   for (const socket of connected) socket.destroy()
   await reconnected
   await ready.waitFor()
+  await page.getByText('Queued during reconnect', { exact: true }).waitFor()
   assert.equal(connections, 2)
   assert.ok(commands.filter((code) => code === 22).length === 2)
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()

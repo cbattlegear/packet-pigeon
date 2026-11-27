@@ -185,6 +185,8 @@ function App() {
   const syncStatus = [radioSyncStatus, receiptSyncStatus].filter(Boolean).join(' · ')
     || (snapshot.phase === 'ready' ? 'Idle' : 'Not syncing')
 
+  useEffect(() => messageSync.startAutomaticSync(cache.subscribe), [])
+
   useEffect(() => {
     if (!import.meta.env.PROD) return
     const probe = new AbortController()

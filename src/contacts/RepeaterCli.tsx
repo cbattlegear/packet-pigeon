@@ -721,7 +721,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
   return <details ref={panel}>
     <summary>Administrator CLI</summary>
     <p>Choose a supported query or confirmed management action. Commands are never retried automatically.
-      Replies are saved with other messages when you sync; history here lasts while this repeater stays selected.</p>
+      Replies sync automatically with other messages while connected; history here lasts while this repeater stays selected.</p>
     <p>Companion firmware v1.11 and earlier may cause CLI commands to be ignored. Upgrade the companion firmware if commands do not receive replies.</p>
     <p>Reply tags help match responses, but a delayed reply from an earlier browser session can still be mistaken for a new one.</p>
     <p>Enter a supported read-only query such as <code>get freq</code> or <code>region get #North</code>.
@@ -1544,7 +1544,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
     {error && <p role="alert">{error}</p>}
     <h4>CLI history</h4>
     {history.length > 0 && <p>Sending a read-only query again creates a new request over the mesh.
-      An earlier request or reply may still arrive; replies require a separate message sync.</p>}
+      An earlier request or reply may still arrive; replies sync automatically while connected.</p>}
     {!history.length ? <p>No commands sent in this view.</p> : !matchingHistory.length ? <p>No history matches.</p> :
       <ol className="repeater-cli-history">
         {[...matchingHistory].reverse().map((item) => <li key={item.tag}>
@@ -1557,7 +1557,7 @@ export function RepeaterCli({ session, messageSync, radioKey, contactKey, name, 
           </div>}
           {item.reply !== null ? <pre>{item.reply.text || '(empty reply)'}</pre> :
             <p>{now >= item.deadline ? 'No reply synced before the deadline. It may still arrive.' :
-              'Waiting for a reply. Sync messages to check.'}</p>}
+              'Waiting for a reply. Messages sync automatically while connected.'}</p>}
           {item.command === 'get public.key' && item.reply !== null &&
             <p className="contact-status">
               {{ match: 'Reported key matches the saved contact.', mismatch: 'Reported key differs from the saved contact.',

@@ -226,7 +226,8 @@ export function ChatPanel({ snapshot, messageSync, messageStatus, direct, status
             {messageStatus.syncing ? 'Syncing messages…' : messageStatus.pending
               ? canSync ? 'Retry saving and sync' : 'Retry saving' : 'Sync messages'}
           </button>
-          <p>Receipts are saved before requesting the next. Interruptions can still lose a message.</p>
+          <p>Messages sync automatically while connected. Receipts are saved before requesting the next.
+            Interruptions can still lose a message.</p>
           {snapshot.transport === 'bluetooth' && (
             <p>Bluetooth may truncate or drop messages; incomplete text can look complete. The radio removes each
               message from its queue before replying, so missing content cannot be recovered from the radio. Use USB or
