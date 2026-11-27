@@ -373,6 +373,7 @@ export class CompanionSession {
 
   readonly disconnect = async () => {
     if (this.snapshot.phase === 'closing') return
+    const owned = Boolean(this.releaseOwnership)
     ++this.generation
     if (this.retryTimer) clearTimeout(this.retryTimer)
     this.cancelDelay?.()
@@ -383,12 +384,14 @@ export class CompanionSession {
     this.connection = undefined
     this.update({ phase: 'closing', progress: null, error: null })
     let persistenceError: CompanionError | undefined
-    try {
-      this.connectionPersistence?.clear()
-    } catch (error) {
-      persistenceError = error instanceof CompanionError ? error : new CompanionError(
-        'reconnect-failed', 'The radio was disconnected, but its saved connection could not be cleared.', { cause: error },
-      )
+    if (owned) {
+      try {
+        this.connectionPersistence?.clear()
+      } catch (error) {
+        persistenceError = error instanceof CompanionError ? error : new CompanionError(
+          'reconnect-failed', 'The radio was disconnected, but its saved connection could not be cleared.', { cause: error },
+        )
+      }
     }
     try {
       if (attempt?.locking) await attempt.locking.catch(() => {})
@@ -396,6 +399,16 @@ export class CompanionSession {
       else if (attempt?.opening) await attempt.opening
       await this.cleanup
       await this.releaseLock()
+      if (!owned) {
+        try {
+          await this.clearSavedConnectionIfAvailable()
+        } catch (error) {
+          persistenceError = error instanceof CompanionError ? error : new CompanionError(
+            'reconnect-failed', 'The radio was disconnected, but its saved connection could not be cleared.',
+            { cause: error },
+          )
+        }
+      }
       if (persistenceError) this.update({ phase: 'error', transport: null, error: persistenceError })
       else this.update({ phase: 'idle', transport: null })
     } catch (error) {
@@ -404,6 +417,13 @@ export class CompanionSession {
         error: cleanupError(error),
       })
     }
+  }
+
+  private async clearSavedConnectionIfAvailable() {
+    if (!this.locks) return
+    await this.locks.request(companionOwnershipLock, { ifAvailable: true }, async (lock) => {
+      if (lock) this.connectionPersistence?.clear()
+    })
   }
 
   readonly whileRadioDisconnected = async (work: () => Promise<void>) => {

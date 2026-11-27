@@ -3482,3 +3482,99 @@ test('a blocked manual connection cannot clear another tab saved radio target', 
   assert.equal(clears, 0)
   assert.deepEqual(port.commands, [])
 })
+
+test('cancelling refresh restore coordinates clearing without erasing another tab saved target', async () => {
+  const target = {
+    version: 1, transport: 'usb', publicKey: 'ab'.repeat(32), vendorId: 1, productId: 2,
+  }
+  let saved = target
+  let clears = 0
+  const persistence = {
+    load: () => saved,
+    save: (value) => { saved = value },
+    clear: () => { clears++; saved = null },
+  }
+
+  let releaseEnumeration
+  const enumerating = sessionWith(workingPort(), 1000, {
+    connectionPersistence: persistence,
+    locks: {
+      async request(_name, _options, callback) {
+        return callback(null)
+      },
+    },
+    environment: {
+      secureContext: true,
+      serial: {
+        getPorts: () => new Promise((resolve) => { releaseEnumeration = () => resolve([workingPort()]) }),
+      },
+    },
+  })
+  const restore = enumerating.restore()
+  await waitFor(() => typeof releaseEnumeration === 'function')
+  assert.equal(enumerating.getSnapshot().phase, 'reconnecting')
+  await enumerating.disconnect()
+  assert.deepEqual(saved, target)
+  assert.equal(clears, 0)
+  releaseEnumeration()
+  await restore
+
+  let releaseLock
+  const lockStarted = new Promise((resolve) => { releaseLock = resolve })
+  let lockRequests = 0
+  const locking = sessionWith(workingPort(), 1000, {
+    connectionPersistence: persistence,
+    environment: { secureContext: true, serial: { getPorts: async () => [workingPort()] } },
+    locks: {
+      async request(_name, _options, callback) {
+        lockRequests++
+        if (lockRequests === 1) {
+          await lockStarted
+          return callback(null)
+        }
+        return callback(null)
+      },
+    },
+  })
+  const lockingRestore = locking.restore()
+  await waitFor(() => locking.getSnapshot().phase === 'opening')
+  const cancel = locking.disconnect()
+  await waitFor(() => locking.getSnapshot().phase === 'closing')
+  assert.deepEqual(saved, target)
+  assert.equal(clears, 0)
+  releaseLock()
+  await Promise.all([lockingRestore, cancel])
+  assert.equal(locking.getSnapshot().phase, 'idle')
+  assert.deepEqual(saved, target)
+  assert.equal(clears, 0)
+})
+
+test('cancelling refresh restore clears its saved target when session ownership is available', async () => {
+  let saved = {
+    version: 1, transport: 'usb', publicKey: 'ab'.repeat(32), vendorId: 1, productId: 2,
+  }
+  let clears = 0
+  let releaseEnumeration
+  const session = sessionWith(workingPort(), 1000, {
+    connectionPersistence: {
+      load: () => saved,
+      save: (target) => { saved = target },
+      clear: () => { clears++; saved = null },
+    },
+    locks: fixtureLocks(),
+    environment: {
+      secureContext: true,
+      serial: {
+        getPorts: () => new Promise((resolve) => { releaseEnumeration = () => resolve([workingPort()]) }),
+      },
+    },
+  })
+  const restore = session.restore()
+  await waitFor(() => typeof releaseEnumeration === 'function')
+  await session.disconnect()
+  assert.equal(saved, null)
+  assert.equal(clears, 1)
+  releaseEnumeration()
+  await restore
+  assert.equal(session.getSnapshot().phase, 'idle')
+})
