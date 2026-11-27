@@ -32,14 +32,19 @@ test('Fit points shows antimeridian and worldwide node sets on the offline map',
 
   async function assertPointsFit(nodes) {
     await fit.click()
-    const frame = await map.boundingBox()
-    for (const [name] of nodes) {
-      await map.getByTitle(name, { exact: true }).waitFor()
-      const pin = await map.getByTitle(name, { exact: true }).boundingBox()
-      const details = `${name} at (${pin.x}, ${pin.y}) inside ${JSON.stringify(frame)}`
-      assert.ok(pin.x >= frame.x && pin.x + pin.width <= frame.x + frame.width, `Horizontal fit for ${details}`)
-      assert.ok(pin.y >= frame.y && pin.y + pin.height <= frame.y + frame.height, `Vertical fit for ${details}`)
-    }
+    await page.waitForFunction((names) => {
+      const map = document.querySelector('[aria-label="Node and terrain map"]')
+      if (!map) return false
+      const frame = map.getBoundingClientRect()
+      return names.every((name) => {
+        const pin = Array.from(map.querySelectorAll('[title]')).find((element) => element.getAttribute('title') === name)
+        if (!pin) return false
+        const bounds = pin.getBoundingClientRect()
+        return bounds.width > 0 && bounds.height > 0
+          && bounds.left >= frame.left && bounds.right <= frame.right
+          && bounds.top >= frame.top && bounds.bottom <= frame.bottom
+      })
+    }, nodes.map(([name]) => name))
   }
 
   await page.getByText('Node data and public map', { exact: true }).click()

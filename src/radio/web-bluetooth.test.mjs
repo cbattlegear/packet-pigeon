@@ -33,11 +33,12 @@ function fixture({
   notificationLimit = Infinity, queueWrite, activeDiscovery = false,
 } = {}) {
   const device = new EventTarget()
+  device.id = 'fixture-radio'
   const notifications = new EventTarget()
   const writes = []
   const queue = [...queuedMessages]
   const state = {
-    chooses: 0, connects: 0, closes: 0, subscriptions: 0, connected: false,
+    chooses: 0, enumerations: 0, connects: 0, closes: 0, subscriptions: 0, connected: false,
     identity: 0xab, missingService: false, rejectSubscription: false, rejectClose: false, rejectConnects: 0,
     dequeued: 0, pathLength: 0, pathBytes: [], protocolVersion: 14,
     noiseReply: [24, 1, 0x85, 0xff, ...new Uint8Array(10)],
@@ -155,6 +156,10 @@ function fixture({
         assert.deepEqual(options, { filters: [{ services: [meshCoreBluetooth.service] }] })
         state.chooses++
         return device
+      },
+      async getDevices() {
+        state.enumerations++
+        return [device]
       },
     },
   }
@@ -324,6 +329,55 @@ test('uses write without response when required and reconnects to the authorized
   await setTimeout(8)
   assert.equal(session.getSnapshot().phase, 'idle')
   assert.equal(radio.state.connects, 3)
+})
+
+test('refresh restoration reuses an enumerated Bluetooth permission without opening the chooser', async () => {
+  const radio = fixture()
+  let saved = null
+  const persistence = {
+    load: () => saved,
+    save: (target) => { saved = target },
+    clear: () => { saved = null },
+  }
+  const original = new CompanionSession({
+    bluetoothEnvironment: radio.environment,
+    locks: ownership(),
+    connectionPersistence: persistence,
+  })
+  await original.connectBluetooth()
+  assert.deepEqual(saved, {
+    version: 1,
+    transport: 'bluetooth',
+    publicKey: 'ab'.repeat(32),
+    deviceId: 'fixture-radio',
+  })
+  const target = saved
+  await original.disconnect()
+  saved = target
+
+  const refreshed = new CompanionSession({
+    bluetoothEnvironment: radio.environment,
+    locks: ownership(),
+    connectionPersistence: persistence,
+  })
+  await refreshed.restore()
+  assert.equal(refreshed.getSnapshot().phase, 'ready')
+  assert.equal(radio.state.chooses, 1)
+  assert.equal(radio.state.enumerations, 1)
+  assert.equal(radio.state.connects, 2)
+  await refreshed.disconnect()
+  saved = target
+
+  radio.state.identity = 0xcd
+  const different = new CompanionSession({
+    bluetoothEnvironment: radio.environment,
+    locks: ownership(),
+    connectionPersistence: persistence,
+  })
+  await different.restore()
+  assert.equal(different.getSnapshot().error.code, 'identity')
+  assert.equal(radio.state.chooses, 1)
+  assert.equal(radio.state.connected, false)
 })
 
 test('checks the radio identity before syncing after Bluetooth recovery', async () => {

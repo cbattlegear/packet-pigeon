@@ -16,6 +16,17 @@ test('Inbox navigation, radio menu and dark appearance work across workspaces', 
 
   const navigation = page.getByRole('navigation', { name: 'Main navigation' })
   assert.equal(await navigation.getByRole('link', { name: 'Chats', exact: true }).getAttribute('aria-current'), 'page')
+  const brand = page.getByRole('link', { name: 'Packet Pigeon', exact: true })
+  const lightMark = await brand.evaluate((element) => {
+    const mark = getComputedStyle(element, '::before')
+    return { mask: mark.maskImage, color: mark.backgroundColor }
+  })
+  assert.notEqual(lightMark.mask, 'none')
+  const favicon = await page.locator('link[rel="icon"]').getAttribute('href')
+  assert.equal(await page.locator('link[rel="apple-touch-icon"]').getAttribute('href'), favicon)
+  const icon = await page.request.get(new URL(favicon, page.url()).href)
+  assert.equal(icon.status(), 200)
+  assert.match(icon.headers()['content-type'], /^image\/png/)
   const radio = page.getByLabel('Radio connection', { exact: true })
   await radio.focus()
   await page.keyboard.press('Enter')
@@ -36,6 +47,7 @@ test('Inbox navigation, radio menu and dark appearance work across workspaces', 
   assert.equal(dark.scheme, 'dark')
   assert.notEqual(dark.background, light.background)
   assert.notEqual(dark.color, light.color)
+  assert.notEqual(await brand.evaluate((element) => getComputedStyle(element, '::before').backgroundColor), lightMark.color)
   await page.reload()
   await appearance.waitFor()
   assert.equal(await appearance.inputValue(), 'dark')
@@ -53,5 +65,15 @@ test('Inbox navigation, radio menu and dark appearance work across workspaces', 
   assert.notEqual(await map.evaluate((element) => getComputedStyle(element).backgroundColor), mapBackground)
   await page.emulateMedia({ colorScheme: 'dark' })
   assert.equal(await map.evaluate((element) => getComputedStyle(element).backgroundColor), mapBackground)
+  await page.setViewportSize({ width: 320, height: 800 })
+  await radio.locator('.radio-summary').evaluate((element) => {
+    element.textContent = 'Field test companion radio with a long name · Bluetooth'
+  })
+  const brandBounds = await brand.boundingBox()
+  const radioBounds = await radio.boundingBox()
+  assert.ok(brandBounds.x + brandBounds.width <= radioBounds.x)
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+  await brand.click()
+  await page.getByRole('heading', { name: 'Chats', exact: true }).waitFor()
+  assert.equal(await navigation.getByRole('link', { name: 'Chats', exact: true }).getAttribute('aria-current'), 'page')
 })

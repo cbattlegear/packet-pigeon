@@ -26,12 +26,14 @@ interface BluetoothGatt {
 
 export interface CompanionBluetoothDevice extends EventTarget {
   readonly gatt?: BluetoothGatt
+  readonly id?: string
 }
 
 export interface WebBluetoothEnvironment {
   readonly secureContext: boolean
   readonly bluetooth?: {
     requestDevice(options: { filters: { services: string[] }[] }): Promise<CompanionBluetoothDevice>
+    getDevices?(): Promise<CompanionBluetoothDevice[]>
   }
 }
 

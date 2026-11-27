@@ -31,7 +31,10 @@ test('joins rooms with explicit roles, posts, shows sensor alerts, and gates nod
       return [16, 16, 0, 0, ...key.subarray(0, 6), 0, type, 1, 0, 0, 0,
         ...(type === 2 ? memberKey.subarray(0, 4) : []), ...encoder.encode(text)]
     }
-    const messages = [received(roomKey, 2, 'A saved room post'), received(sensorKey, 0, 'High water at the creek')]
+    const messages = []
+    window.queueInitialRoomMessages = () => messages.push(
+      received(roomKey, 2, 'A saved room post'), received(sensorKey, 0, 'High water at the creek'),
+    )
     const roomAcl = new Map([[0xab, 0], [0xef, 0]])
     window.fixtureRadioByte = 0xab
     window.roomReadOnlyEnabled = false
@@ -158,6 +161,8 @@ test('joins rooms with explicit roles, posts, shows sensor alerts, and gates nod
   assert.equal(await post.isDisabled(), true)
   assert.equal(await page.evaluate(() => window.nodeCommands.some(({ code }) => code === 2)), false)
 
+  // Establish the selected room before receipt arrival so alert suppression cannot race startup sync.
+  await page.evaluate(() => window.queueInitialRoomMessages())
   await page.getByRole('button', { name: 'Sync messages' }).click()
   await roomChat.getByText('A saved room post', { exact: true }).waitFor()
   await roomChat.getByText('North member', { exact: true }).waitFor()
