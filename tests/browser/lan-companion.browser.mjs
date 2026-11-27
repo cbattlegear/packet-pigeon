@@ -23,6 +23,9 @@ test('uses the local bridge for a TCP companion session, durable message sync an
   let connections = 0
   let bridge
   let browser
+  let holdEmpty = false
+  let finishEmpty
+  const queueEvents = new EventTarget()
   const receipt = [17, 16, 0, 0, 0, 0, 0, 1, 0, 0, 0, ...Buffer.from('North: Hello over the network')]
   const queued = [receipt]
   const radio = createServer((socket) => {
@@ -54,8 +57,18 @@ test('uses the local bridge for a TCP companion session, durable message sync an
           channel.set(Buffer.from('Public'), 2)
           channel.set(new Uint8Array(16).fill(0x11), 34)
           socket.write(frame(channel))
-        } else if (code === 10) socket.write(frame(queued.shift() ?? [10]))
-        else assert.fail(`Unexpected companion command ${code}`)
+        } else if (code === 10) {
+          const next = queued.shift()
+          if (next) {
+            if (Buffer.from(next).includes(Buffer.from('North: Prompt reply'))) {
+              setTimeout(() => { if (!socket.destroyed) socket.write(frame(next)) }, 100)
+            } else socket.write(frame(next))
+          } else if (holdEmpty) {
+            holdEmpty = false
+            finishEmpty = () => socket.write(frame([10]))
+            queueEvents.dispatchEvent(new Event('empty'))
+          } else socket.write(frame([10]))
+        } else assert.fail(`Unexpected companion command ${code}`)
       }
     })
   })
@@ -112,9 +125,15 @@ test('uses the local bridge for a TCP companion session, durable message sync an
   await target.getByRole('group', { name: 'Message reactions' }).getByText('👍 1', { exact: true }).waitFor()
   await target.getByRole('group', { name: 'Message reactions' }).getByText('👍 1', { exact: true }).click()
   await target.getByText('Bob', { exact: true }).waitFor()
+  await page.getByRole('button', { name: 'Sync messages', exact: true }).waitFor()
+  holdEmpty = true
+  const empty = once(queueEvents, 'empty', { signal: AbortSignal.timeout(15_000) })
   queued.push([...receipt.slice(0, 11), ...Buffer.from('North: Prompt reply')])
   for (const socket of connected) socket.write(Buffer.concat(Array.from({ length: 10 }, () => frame([0x83]))))
-  await conversation.getByText('Prompt reply', { exact: true }).waitFor()
+  await empty
+  await conversation.getByText('Prompt reply', { exact: true }).waitFor({ timeout: 1500 })
+  finishEmpty()
+  await page.getByRole('button', { name: 'Sync messages', exact: true }).waitFor()
   queued.push([...receipt.slice(0, 11), ...Buffer.from('North: Queued during reconnect')])
   const reconnected = once(radio, 'connection')
   for (const socket of connected) socket.destroy()

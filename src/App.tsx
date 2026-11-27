@@ -191,6 +191,10 @@ function App() {
   useEffect(() => messageSync.startAutomaticSync(cache.subscribe), [])
   useEffect(() => { void session.restore() }, [])
 
+  useEffect(() => messageSync.subscribeToSavedReceipts((key) => {
+    if (directMessages.getSnapshot().key === key) void directMessages.load(key)
+  }), [])
+
   useEffect(() => {
     if (!import.meta.env.PROD) return
     const probe = new AbortController()

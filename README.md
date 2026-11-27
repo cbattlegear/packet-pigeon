@@ -186,6 +186,8 @@ its message-waiting notification, over USB, Bluetooth, and the local network.
 Queue reads wait for contact/channel cache writes and other radio commands to
 finish. Notifications during a drain are coalesced, including a recheck if one
 arrives while the radio is reporting an empty queue. No periodic polling is used.
+Chats refreshes after each durably saved receipt, without waiting for the queue
+to finish draining or another outgoing message. This also refreshes reactions.
 **Sync messages** in Chats remains available for an explicit recheck or retry.
 Each receipt,
 including an unsupported or malformed response's raw bytes, is saved before
