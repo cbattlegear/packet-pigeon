@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import type { CompanionSession, CompanionSnapshot } from '../radio/index.ts'
 import type { SessionCache } from '../integration/session-cache.ts'
 import { makeChannelSecret, secretHex } from '../radio/channel-commands.ts'
@@ -47,8 +47,63 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState('slot')
   const [kind, setKind] = useState<'private' | 'join' | 'public' | 'hashtag'>('private')
+  const [menu, setMenu] = useState<number | null>(null)
+  const [editor, setEditor] = useState<{
+    key: string; channel?: StoredChannel; mode: 'settings' | 'rename' | 'senders' | 'blocked' | 'create'
+    returnFocus: HTMLElement | null
+  } | null>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const actionTrigger = useRef<HTMLButtonElement | null>(null)
   const key = liveKey ?? choice
+  const [previousKey, setPreviousKey] = useState(key)
   if (share && share.key !== liveKey) setShare(null)
+  if (previousKey !== key) {
+    setPreviousKey(key)
+    setMenu(null)
+    setEditor(null)
+    setSecret('')
+    setStatus('')
+  }
+
+  function closeMenu(restore = true) {
+    setMenu(null)
+    if (restore) actionTrigger.current?.focus()
+  }
+
+  function openEditor(mode: NonNullable<typeof editor>['mode'], channel?: StoredChannel) {
+    setMenu(null)
+    setError(''); setStatus('')
+    setEditor({ key, channel, mode,
+      returnFocus: channel ? actionTrigger.current : document.activeElement as HTMLElement | null })
+  }
+
+  useEffect(() => {
+    if (menu === null) return
+    const element = menuRef.current
+    const positionMenu = () => {
+      const anchor = actionTrigger.current?.getBoundingClientRect()
+      if (!element || !anchor) return
+      const bounds = element.getBoundingClientRect()
+      element.style.position = 'fixed'
+      element.style.right = 'auto'
+      element.style.left = `${Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8))}px`
+      element.style.top = `${Math.max(8, Math.min(anchor.bottom + 4, window.innerHeight - bounds.height - 8))}px`
+    }
+    positionMenu()
+    element?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
+    const dismiss = (event: PointerEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setMenu(null)
+    }
+    const dismissOnMove = () => setMenu(null)
+    document.addEventListener('pointerdown', dismiss)
+    window.addEventListener('resize', dismissOnMove)
+    document.addEventListener('scroll', positionMenu, true)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      window.removeEventListener('resize', dismissOnMove)
+      document.removeEventListener('scroll', positionMenu, true)
+    }
+  }, [menu])
 
   useEffect(() => {
     if (!radioNavigation) return
@@ -80,6 +135,8 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
   const cacheLoaded = Boolean(key) && cached?.key === key
   const cachedData = cacheLoaded ? cached.data : null
   const channels = live ? snapshot.channels : cachedData?.channels ?? []
+  const currentEditor = editor?.key === key && (!editor.channel || channels.some((channel) =>
+    channel.index === editor.channel?.index && channel.name === editor.channel.name)) ? editor : null
   const validRetention = cachedData?.channelRetention === undefined
     || validChannelRetentionSettings(cachedData.channelRetention)
   const retentionSettings = validRetention ? cachedData?.channelRetention ?? [] : []
@@ -113,7 +170,7 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
 
   async function change(channel: StoredChannel, nextName: string | null) {
     if (!liveKey || busy) return
-    if (nextName === null && !window.confirm(`Delete "${channel.name}" from the radio? Existing cached messages are not deleted and may still be associated with this slot.`)) return
+    if (nextName === null && !window.confirm(`Delete "${channel.name}" from the radio? Cached messages remain in this slot.`)) return
     setBusy(true); setError(''); setStatus(''); setSecret('')
     try {
       let retentionError: unknown
@@ -139,7 +196,8 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
         setError(`The channel was renamed on the radio, but its local retention setting could not be updated: ${retentionError instanceof Error ? retentionError.message : 'Storage error.'}`)
         return
       }
-      setStatus(nextName === null ? 'Channel deleted from the radio.' : 'Channel renamed on the radio.')
+      setEditor(null)
+      setStatus(nextName === null ? 'Channel deleted.' : 'Channel renamed.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not change the channel.')
     } finally { setBusy(false) }
@@ -218,7 +276,7 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
         const data = await storage.read(radioKey)
         setCached((current) => current?.key === radioKey ? { key: radioKey, data } : current)
       } finally { storage.close() }
-      setStatus('Notification mode saved for this browser and radio.')
+      setStatus('Alerts saved.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save notification mode.')
     } finally { setBusy(false) }
@@ -257,7 +315,7 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
         setCached((current) => current?.key === radioKey ? { key: radioKey, data } : current)
         onBlockedSendersChanged(radioKey)
       } finally { storage.close() }
-      setStatus('Sending scope saved for this browser and radio. No radio settings were changed.')
+      setStatus('Sending scope saved locally.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save the sending scope.')
     } finally { setBusy(false) }
@@ -265,42 +323,40 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
 
   return <div className="channel-workspace">
     {share && liveKey === share.key && <ShareCode link={share.link} privateChannel close={() => setShare(null)} />}
-    {onImport && <div><button type="button" onClick={onImport}>Import link or QR code</button></div>}
-    {live ? <p>{live.name || 'Connected radio'} · {channels.length} of {live.capabilities.maxChannels} channel slots used</p>
+    <div className="channel-toolbar">
+    {live ? <p className="channel-meta">{live.name || 'Connected radio'} · {channels.length}/{live.capabilities.maxChannels} slots</p>
       : <label>Cached radio <select value={choice} onChange={(event) => {
         setChoice(event.currentTarget.value); setSecret(''); setStatus('')
       }}><option value="">Select a saved radio</option>
         {keys.map((entry) => <option value={entry} key={entry}>{entry}</option>)}
       </select></label>}
-    <p>Public and hashtag keys are discoverable and are not private. Private channel access depends on keeping its secret safe.</p>
-    {!live && <p>Connect a radio and wait for sync to change channels.</p>}
-    {error && <p role="alert">{error}</p>}
-    {status && <p role="status">{status}</p>}
-    {secret && <div className="channel-secret">
-      <p>Save this private secret securely now, even if the save reports an error: the radio may have accepted it. It is not stored by Packet Pigeon and disappears when dismissed or you leave this page.</p>
+    <div className="channel-toolbar-actions">
+      {key && <button type="button" onClick={() => openEditor('blocked')}>Blocked names{blocked.size ? ` (${blocked.size})` : ''}</button>}
+      {onImport && <button type="button" onClick={onImport}>Import link or QR code</button>}
+      <button className="channel-primary" type="button" disabled={!live || busy} onClick={() => openEditor('create')}>Add channel</button>
+    </div>
+    </div>
+    {!live && key && <p className="channel-meta">Offline · Radio actions unavailable</p>}
+    {!currentEditor && error && <p role="alert">{error}</p>}
+    {!currentEditor && status && <p role="status">{status}</p>}
+    {secret && currentEditor?.mode !== 'create' && <div className="channel-secret">
+      <p>Save this secret securely, even if saving failed. It disappears when dismissed or you leave.</p>
       <output aria-label="New private channel secret">{secret}</output>
       <button type="button" onClick={() => setSecret('')}>Dismiss secret</button>
     </div>}
     {key && <>
       <div className="channel-filters">
-        <label>Search channels <input value={search} onChange={(event) => setSearch(event.currentTarget.value)} /></label>
+        <label className="channel-search">Search channels <input type="search" placeholder="Find a channel" value={search} onChange={(event) => setSearch(event.currentTarget.value)} /></label>
         <label>Sort <select value={sort} onChange={(event) => setSort(event.currentTarget.value)}>
           <option value="slot">Slot</option><option value="name">Name</option>
         </select></label>
       </div>
-      <p className="channel-retention-help">Retention is browser-local. At startup, dated cached channel messages older than the selected period are
-        permanently deleted using the sender&apos;s clock, which can be wrong or manipulated. Undated and zero-timestamp
-        messages are kept. A changed slot name pauses cleanup until you choose a setting. A replacement with the same
-        slot and name cannot be distinguished.</p>
       {!validRetention && <div role="alert">
-        <p>Saved retention settings for this radio are invalid. Reset them to Forever, then reload to retry cleanup.</p>
+        <p>Invalid retention settings. Reset, then reload.</p>
         <button type="button" disabled={busy} onClick={() => void resetRetention()}>Reset invalid retention settings</button>
       </div>}
-      <p>Sending scopes are browser-local, per channel and radio. Radio default uses the radio&apos;s configured default region.
-        Unscoped can travel beyond a region. Public hashtag region names are routing filters, not privacy or delivery guarantees.
-        An observed slot-name change pauses its saved scope until you choose again.</p>
       {!validScopes && <div role="alert">
-        <p>Saved sending scopes are invalid. Reset them to Radio default before sending.</p>
+        <p>Invalid sending scopes. Reset before sending.</p>
         <button type="button" disabled={busy} onClick={() => void saveScope(null, { mode: 'default' })}>Reset invalid sending scopes</button>
       </div>}
       <ul className="channel-list">{visible.map((channel) => {
@@ -308,22 +364,72 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
         const retention = retentionSettings.find((entry) => entry.index === channel.index)
         const scope = scopeSettings.find((entry) => entry.index === channel.index)
         const paused = retention && (retention.paused || retention.channelName !== channel.name)
-        const retentionValue = paused ? 'paused' : retention ? String(retention.days) : 'forever'
+        const retentionValue = paused ? 'paused' : retention?.days != null ? String(retention.days) : 'forever'
         const channelCached = cachedData?.channels.some((entry) => entry.index === channel.index && entry.name === channel.name)
         const notification = cachedData?.channelNotifications?.find((entry) => entry.index === channel.index)
         const notificationPaused = notification && (notification.paused || notification.channelName !== channel.name)
-        return <li key={channel.index}>
-          <div><strong>{channel.name}</strong> <span>Slot {channel.index}</span></div>
-          <form onSubmit={(event) => {
+        const editing = currentEditor?.channel?.index === channel.index
+        const openMenu = () => {
+          actionTrigger.current = document.getElementById(`channel-actions-${channel.index}`) as HTMLButtonElement
+          setMenu(channel.index)
+        }
+        const scopePaused = scope && (scope.paused || scope.channelName !== channel.name)
+        return <li className="channel-row" key={channel.index} onContextMenu={(event) => {
+          if (currentEditor) return
+          event.preventDefault(); openMenu()
+        }}>
+          <span className="channel-slot" aria-label={`Slot ${channel.index}`}>{channel.index}</span>
+          <div className="channel-identity"><strong>{channel.name}</strong>
+            <span className="channel-meta">{!cacheLoaded ? 'Loading settings…'
+              : paused || scopePaused || notificationPaused ? 'Settings paused'
+              : `${notification?.mode === 'muted' ? 'Muted' : notification?.mode === 'mentions' ? 'Mentions only' : 'All alerts'} · ${!validScopes ? 'Scope unavailable' : scope?.scope.mode === 'region' ? scope.scope.name : scope?.scope.mode === 'unscoped' ? 'Unscoped' : 'Radio default'}`}
+            </span>
+          </div>
+          <span className="channel-row-retention channel-meta">{!cacheLoaded ? 'Loading settings…' : !validRetention ? 'Retention unavailable'
+            : paused ? 'Retention paused' : `${retentionChoices.find((option) => option.value === retentionValue)?.label ?? 'Forever'} retention`}</span>
+          <button id={`channel-actions-${channel.index}`} className="channel-actions-button" type="button"
+            aria-label={`Actions for ${channel.name}`} aria-haspopup="menu" aria-expanded={menu === channel.index}
+            onClick={() => menu === channel.index ? closeMenu() : openMenu()}
+            onKeyDown={(event) => {
+              if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10') || event.key === 'ArrowDown') {
+                event.preventDefault(); openMenu()
+              }
+            }}>...</button>
+          {menu === channel.index && <div className="channel-menu" role="menu" aria-label={`Actions for ${channel.name}`} ref={menuRef}
+            onKeyDown={(event) => {
+              const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+              const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+              if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+                event.preventDefault()
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1
+                  : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+                buttons[next]?.focus()
+              } else if (event.key === 'Escape') { event.preventDefault(); closeMenu() }
+              else if (event.key === 'Tab') closeMenu(false)
+            }}>
+            <button type="button" role="menuitem" onClick={() => openEditor('settings', channel)}>Settings</button>
+            <button type="button" role="menuitem" disabled={!live || busy || channel.name.startsWith('#')}
+              onClick={() => openEditor('rename', channel)}>Rename</button>
+            <button type="button" role="menuitem" disabled={!live || busy} onClick={() => {
+              closeMenu(); void shareChannel(channel)
+            }}>Share link or QR code</button>
+            <button type="button" role="menuitem" onClick={() => openEditor('senders', channel)}>Sender names</button>
+            <button className="channel-danger" type="button" role="menuitem" disabled={!live || busy}
+              onClick={() => { closeMenu(); void change(channel, null) }}>Delete channel</button>
+          </div>}
+          {editing && <ChannelDialog title={`${channel.name} · ${currentEditor.mode === 'rename' ? 'Rename' : currentEditor.mode === 'senders' ? 'Sender names' : 'Settings'}`}
+            returnFocus={currentEditor.returnFocus} close={() => setEditor(null)}>
+          {error && <p role="alert">{error}</p>}
+          {status && <p role="status">{status}</p>}
+          {currentEditor.mode === 'rename' && <form onSubmit={(event) => {
             event.preventDefault()
             void change(channel, String(new FormData(event.currentTarget).get('name') ?? ''))
           }}>
             <label>Rename <input name="name" defaultValue={channel.name} key={channel.name} disabled={!live || busy || channel.name.startsWith('#')} /></label>
             <button type="submit" disabled={!live || busy || channel.name.startsWith('#')}>Save name</button>
-            <button type="button" disabled={!live || busy} onClick={() => void change(channel, null)}>Delete</button>
-            <button type="button" disabled={!live || busy}
-              onClick={() => void shareChannel(channel)}>Share link or QR code</button>
-          </form>
+          </form>}
+          {currentEditor.mode === 'settings' && <>
+          <span className="channel-meta">Saved in this browser</span>
           <label className="channel-retention">Message retention
             <select aria-label={`Message retention for ${channel.name}`} value={retentionValue}
               disabled={!channelCached || !validRetention || busy} onChange={(event) => void setRetention(channel, event.currentTarget.value)}>
@@ -340,15 +446,15 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
               <option value="muted">Muted</option>
             </select>
           </label>
-          {paused && <p>Retention is paused because this slot changed names. Choose a setting for this channel.</p>}
+          {paused && <p role="alert">Slot changed. Choose retention again.</p>}
           <ScopeEditor key={`${key}:${channel.name}:${scope?.scope.mode}:${scope?.scope.mode === 'region' ? scope.scope.name : ''}:${scope?.paused}`}
             channel={channel} setting={scope} regions={cachedData?.regionTransportKeys ?? []}
             disabled={!channelCached || !validScopes || busy}
             version={live?.capabilities.firmwareProtocolVersion}
             save={(scope) => void saveScope(channel, scope)} />
-          <details>
-            <summary>Observed sender names</summary>
-            <p>Names come from recognizable &quot;name: message&quot; text in this slot, not a membership list. They are unverified and can be spoofed.</p>
+          </>}
+          {currentEditor.mode === 'senders' && <>
+            <p className="channel-meta">Unverified names · Not channel members</p>
             {!cacheLoaded ? <p>Loading cached messages…</p> : senders.length
               ? <ul className="channel-senders">{senders.map(({ name, count }) => <li key={name}>
                 <span>{name} ({count} receipt{count === 1 ? '' : 's'})</span>
@@ -356,15 +462,18 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
                   aria-label={`${blocked.has(name) ? 'Unblock' : 'Block'} sender name ${name}`}>
                   {blocked.has(name) ? 'Unblock' : 'Block name'}
                 </button>
-              </li>)}</ul> : <p>No sender names observed in cached channel text.</p>}
-          </details>
+              </li>)}</ul> : <p>No sender names yet.</p>}
+          </>}
+          </ChannelDialog>}
         </li>
       })}</ul>
-      {!visible.length && <p>No channels match.</p>}
-      <section className="channel-blocked" aria-labelledby="blocked-senders-heading">
-        <h2 id="blocked-senders-heading">Blocked sender names</h2>
-        <p>Blocks apply to all channels on this radio and match recognizable sender names exactly. Names can be impersonated or changed.
-          Matching messages are hidden locally, not deleted or prevented from reaching the radio.</p>
+      {!visible.length && <div className="channel-empty">{search ? <>
+        <p>No matching channels.</p><button type="button" onClick={() => setSearch('')}>Clear search</button>
+      </> : <p>{live ? 'No channels. Add one to get started.' : cacheLoaded ? 'No cached channels.' : 'Loading channels…'}</p>}</div>}
+      {currentEditor?.mode === 'blocked' && <ChannelDialog title="Blocked sender names" close={() => setEditor(null)}>
+        {error && <p role="alert">{error}</p>}
+        {status && <p role="status">{status}</p>}
+        <p className="channel-meta">Exact names · Hidden locally across this radio&apos;s channels</p>
         <form onSubmit={(event) => {
           event.preventDefault()
           const form = event.currentTarget
@@ -380,24 +489,48 @@ export function ChannelsPanel({ snapshot, session, cache, cacheSaving, messageSy
             <button type="button" disabled={busy} onClick={() => void setBlocked(name, false)}
               aria-label={`Unblock sender name ${name}`}>Unblock</button>
           </li>)}</ul>}
-      </section>
+        {!blocked.size && <p>No blocked names.</p>}
+      </ChannelDialog>}
     </>}
+    {!key && <div className="channel-empty">Select a saved radio or connect one.</div>}
+    {currentEditor?.mode === 'create' && <ChannelDialog title="Add channel" close={() => setEditor(null)}>
+    {error && <p role="alert">{error}</p>}
+    {status && <p role="status">{status}</p>}
+    {secret && <div className="channel-secret">
+      <p>Save this secret securely, even if saving failed.</p>
+      <output aria-label="New private channel secret">{secret}</output>
+      <button type="button" onClick={() => setSecret('')}>Dismiss secret</button>
+    </div>}
     <form className="channel-create" onSubmit={(event) => void create(event)}>
-      <h2>Add channel</h2>
       <label>Type <select value={kind} onChange={(event) => setKind(event.currentTarget.value as typeof kind)} disabled={!live || busy}>
         <option value="private">Create private</option><option value="join">Join private</option>
         <option value="public">Public</option><option value="hashtag">Hashtag</option>
       </select></label>
+      {(kind === 'public' || kind === 'hashtag') && <p className="channel-meta">Discoverable key · Not private</p>}
       <label>Channel name <input name="name" required disabled={!live || busy} placeholder={kind === 'hashtag' ? '#topic' : undefined} /></label>
       {kind === 'join' && <label>Private secret (32 hexadecimal characters)
         <input name="secret" type="password" autoComplete="off" required disabled={!live || busy} />
       </label>}
       <button type="submit" disabled={!live || busy}>Save channel</button>
     </form>
-    <p>Renaming keeps the existing key; hashtag channels cannot be renamed. Reusing a slot can associate its old cached messages with the new channel.</p>
-    <p>Browser alert modes apply to manually synced messages while this app is open. Mentions match the radio name without regard to case; names are unverified. A removed slot or changed slot name pauses alerts until a mode is chosen. A replacement with the same name without an observed removal cannot be distinguished.</p>
-    <p>Sending scopes do not change the radio&apos;s saved default region.</p>
+    </ChannelDialog>}
   </div>
+}
+
+function ChannelDialog({ title, close, children, returnFocus }: {
+  title: string; close: () => void; children: ReactNode; returnFocus?: HTMLElement | null
+}) {
+  const ref = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const previous = returnFocus ?? document.activeElement as HTMLElement | null
+    const dialog = ref.current
+    dialog?.showModal()
+    return () => { dialog?.close(); previous?.focus() }
+  }, [returnFocus])
+  return <dialog ref={ref} className="channel-dialog" aria-label={title} onCancel={close}>
+    <div className="channel-dialog-heading"><h2>{title}</h2><button type="button" aria-label="Close" onClick={close}>Close</button></div>
+    {children}
+  </dialog>
 }
 
 function ScopeEditor({ channel, setting, regions, disabled, version, save }: {
@@ -429,8 +562,8 @@ function ScopeEditor({ channel, setting, regions, disabled, version, save }: {
           if (value === 'default' || value === 'region' || value === 'unscoped') setMode(value)
         }}>
         <option value="default">Radio default</option>
-        <option value="region">Named region (protocol v8+)</option>
-        <option value="unscoped">Explicitly unscoped (protocol v12+)</option>
+        <option value="region">Named region</option>
+        <option value="unscoped">Unscoped</option>
       </select>
     </label>
     {mode === 'region' && <label>Region name
@@ -439,9 +572,10 @@ function ScopeEditor({ channel, setting, regions, disabled, version, save }: {
       {regions.length > 0 && <datalist id={regionList}>{regions.map(({ name }) => <option key={name} value={name} />)}</datalist>}
     </label>}
     <button type="submit" disabled={disabled}>Save sending scope</button>
-    {paused && <p role="alert">Sending scope is paused because this slot changed names. Save a scope before sending.</p>}
+    {mode !== 'default' && <p className="channel-meta">{mode === 'unscoped' ? 'Can travel beyond a region.' : 'Routing filter, not a privacy boundary.'}</p>}
+    {paused && <p role="alert">Slot changed. Save a scope before sending.</p>}
     {version !== undefined && ((mode === 'region' && version < 8) || (mode === 'unscoped' && version < 12)) && (
-      <p role="alert">This radio&apos;s firmware cannot send using the selected scope. Choose Radio default or update the firmware.</p>
+      <p role="alert">Unsupported scope. Choose Radio default or update firmware.</p>
     )}
   </form>
 }

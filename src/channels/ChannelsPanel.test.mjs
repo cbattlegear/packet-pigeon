@@ -5,7 +5,7 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
-test('channel actions require a ready radio and disclose local settings', async () => {
+test('channel browsing is compact and radio actions require a ready radio', async () => {
   const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' })
   try {
     const { ChannelsPanel } = await vite.ssrLoadModule(fileURLToPath(new URL('ChannelsPanel.tsx', import.meta.url)))
@@ -15,15 +15,11 @@ test('channel actions require a ready radio and disclose local settings', async 
       session: {}, cacheSaving: false, messageSyncing: false, onBlockedSendersChanged() {},
     }))
     const ready = render('ready')
-    assert.match(ready, /Public and hashtag keys are discoverable/)
-    assert.match(ready, /Sending scopes are browser-local, per channel and radio/)
-    assert.match(ready, /Browser alert modes apply to manually synced messages while this app is open/)
-    assert.match(ready, /Message retention/)
-    assert.match(ready, /permanently deleted using the sender/)
-    assert.match(ready, /Observed sender names/)
-    assert.match(ready, /not a membership list/)
-    assert.match(ready, /Names can be impersonated or changed/)
-    assert.match(ready, /<button type="submit">Save channel<\/button>/)
-    assert.match(render('idle'), /<button type="submit" disabled="">Save channel<\/button>/)
+    assert.match(ready, /aria-label="Actions for Public" aria-haspopup="menu"/)
+    assert.match(ready, /0\/8 slots|1\/8 slots/)
+    assert.doesNotMatch(ready, /<form|<dialog|Public and hashtag keys|sender&apos;s clock|Sending scopes are/)
+    assert.match(ready, /class="channel-primary" type="button">Add channel<\/button>/)
+    assert.match(render('idle'), /class="channel-primary" type="button" disabled="">Add channel<\/button>/)
+    assert.match(render('idle'), /Select a saved radio or connect one/)
   } finally { await vite.close() }
 })
